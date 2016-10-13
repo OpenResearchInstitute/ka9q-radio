@@ -1,3 +1,4 @@
+// $Id$
 #include "command.h"
 
 struct modetab Modes[] = {
