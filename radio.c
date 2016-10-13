@@ -1,3 +1,5 @@
+// $Id$
+// Lower part of radio program - control LOs, set frequency/mode, etc
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
