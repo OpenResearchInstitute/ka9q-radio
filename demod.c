@@ -1,6 +1,6 @@
-// New, common demod thread for all modes
-// Takes commands from a pipe
-// Rewritten 9/17/2016
+// $Id$
+// Common demod thread for all modes
+// Takes commands from UDP packets on a socket
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
