@@ -1,3 +1,9 @@
+// $Id$
+// General purpose filter package using fast convolution (overlap-save)
+// and the FFTW3 FFT package
+// Generates transfer functions using Kaiser window
+// Optional output decimation by integer factor
+// Complex input and transfer functions, complex or real output
 #include <complex.h>
 #include <math.h>
 #include <fftw3.h>
