@@ -1,3 +1,7 @@
+// $Id$
+// Read complex float samples from stdin (e.g., from funcube.c)
+// downconvert, filter and demodulate
+// Take commands from UDP socket
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
