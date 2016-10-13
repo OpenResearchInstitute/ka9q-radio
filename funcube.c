@@ -1,3 +1,8 @@
+// $Id$
+// Read from AMSAT UK Funcube Pro and Pro+ dongles
+// Correct for DC offset, I/Q gain and phase imbalance
+// Emit complex float sample stream on stdout
+// Accept control commands from UDP socket
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
