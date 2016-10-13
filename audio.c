@@ -1,3 +1,5 @@
+// $Id$
+// Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <limits.h>
 #include <string.h>
