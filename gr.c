@@ -1,7 +1,8 @@
-#include <assert.h>
-#include "dsp.h"
+// $Id$
 // Mirics default gain reduction tables
 // Mirics SDR API specification, section 5
+#include <assert.h>
+#include "dsp.h"
 int mirics_gain(double f,int gr,int *bb, int *lna,int *mix){
   *bb = *lna = *mix = 0;
   if(gr < 0)
