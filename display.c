@@ -1,3 +1,5 @@
+// $Id$
+// Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
