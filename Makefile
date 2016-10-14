@@ -1,4 +1,4 @@
-# $Id$
+# $Id: Makefile,v 1.2 2016/10/14 00:00:10 karn Exp karn $
 INCLUDES=-I ../fcd -I /opt/local/include
 COPTS=-g -std=gnu11 -pthread -Wall -D_GNU_SOURCE=1 -D_REENTRANT=1  -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -17,15 +17,16 @@ control: control.o modes.o
 radio: main.o radio.o demod.o fm.o filter.o display.o modes.o audio.o misc.o
 	$(CC) -g -o $@ $^ -lasound  -lfftw3f_threads -lfftw3f -lpthread -lm
 
-main.o: main.c sdr.h radio.h audio.h
-demod.o: demod.c dsp.h radio.h fm.h audio.h
-filter.o: filter.c dsp.h
-radio.o: radio.c sdr.h radio.h audio.h
-display.o: display.c sdr.h radio.h audio.h
-audio.o: audio.c sdr.h radio.h dsp.h audio.h
-fm.o: fm.c dsp.h radio.h  fm.h
+main.o: main.c radio.h filter.h dsp.h audio.h command.h
+demod.o: demod.c dsp.h filter.h radio.h fm.h audio.h command.h
+filter.o: filter.c dsp.h filter.h
+radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
+display.o: display.c radio.h audio.h sdr.h dsp.h
+audio.o: audio.c dsp.h audio.h
+fm.o: fm.c dsp.h radio.h fm.h audio.h
 misc.o: misc.c
-funcube.o: funcube.c
+funcube.o: funcube.c fcd.h sdr.h command.h dsp.h
+
 
 
 
