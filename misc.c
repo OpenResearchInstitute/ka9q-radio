@@ -1,6 +1,8 @@
-// $Id$
+// $Id: misc.c,v 1.2 2016/10/13 23:55:46 karn Exp karn $
 // Miscellaneous low-level DSP routines
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
+#endif
 #include <complex.h>
 #include <math.h>
 #include <assert.h>
