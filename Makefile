@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.3 2016/10/14 00:17:18 karn Exp karn $
+# $Id: Makefile,v 1.4 2016/10/14 00:25:31 karn Exp karn $
 INCLUDES=-I ../fcd -I /opt/local/include
 COPTS=-g -std=gnu11 -pthread -Wall -D_GNU_SOURCE=1 -D_REENTRANT=1  -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -8,8 +8,8 @@ all: radio control funcube
 clean:
 	rm -f *.o radio control funcube
 
-funcube: funcube.o gr.o ../libfcd.a
-	$(CC) -g -o $@ $^ ../libfcd.a -lasound -lusb-1.0 -lpthread -lm
+funcube: funcube.o gr.o libfcd.a
+	$(CC) -g -o $@ $^ libfcd.a -lasound -lusb-1.0 -lpthread -lm
 
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
