@@ -1,4 +1,4 @@
-// $Id$
+// $Id: filter.c,v 1.2 2016/10/13 23:33:36 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -23,7 +23,7 @@
 // NB: Input and response are still both full-size complex
 
 // response[] must be SIMD-aligned (e.g., with fftw_alloc) and will be freed by delete_filter()
-struct filter *create_filter(int L,int M, complex float *response,int decimate,enum type type){
+struct filter *create_filter(int L,int M, complex float *response,int decimate,enum filtertype type){
   struct filter *f;
   const int N = L + M - 1;
   const int N_dec = N / decimate;
