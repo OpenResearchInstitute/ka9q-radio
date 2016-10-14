@@ -1,4 +1,4 @@
-// $Id$
+// $Id: main.c,v 1.2 2016/10/13 23:36:46 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -154,7 +154,7 @@ int main(int argc,char *argv[]){
 	  Demod.samprate,Audio.samprate,Demod.decimate);
   fprintf(stderr,"block size: %'d complex samples (%'.1f ms @ %'u S/s)\n",
 	  Demod.L,1000.*Demod.L/Demod.samprate,Demod.samprate);
-  fprintf(stderr,"filter impulse responses: %'d complex samples (%'.1f ms @ %'u S/s) bin size %.1f Hz\n",
+  fprintf(stderr,"Kaiser beta %.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %.1f Hz\n",
 	  Demod.M,1000.*Demod.M/Demod.samprate,Demod.samprate,(float)Demod.samprate/N);
 
   if(!Quiet)
