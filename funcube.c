@@ -1,8 +1,9 @@
-// $Id: funcube.c,v 1.2 2016/10/13 23:35:43 karn Exp karn $
+// $Id: funcube.c,v 1.3 2016/10/14 00:53:34 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Correct for DC offset, I/Q gain and phase imbalance
 // Emit complex float sample stream on stdout
 // Accept control commands from UDP socket
+#define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
@@ -21,8 +22,6 @@
 #include "sdr.h"
 #include "command.h"
 #include "dsp.h"
-
-extern int mirics_gain(double f,int gr,int *bb, int *lna,int *mix);
 
 void *display(void *arg);
 pthread_t Display_thread;
