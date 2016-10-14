@@ -1,4 +1,4 @@
-// $Id$
+// $Id: funcube.c,v 1.2 2016/10/13 23:35:43 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Correct for DC offset, I/Q gain and phase imbalance
 // Emit complex float sample stream on stdout
@@ -106,6 +106,9 @@ int main(int argc,char *argv[]){
       break;
     }
   }
+  if(Verbose)
+    fprintf(stderr,"funcube dongle %d: min gain reduction %d dB, blocksize %d, UDP command port %d\n",
+	    dongle,Gain,blocksize,ctl_port);
   setlocale(LC_ALL,locale);
   signal(SIGPIPE,SIG_IGN);
   signal(SIGINT,closedown);
