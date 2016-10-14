@@ -1,4 +1,4 @@
-// $Id$
+// $Id: hid-libusb.c,v 1.1 2016/10/14 00:24:30 karn Exp karn $
 // Modified by KA9Q?
 /*******************************************************
  HIDAPI - Multi-Platform library for
@@ -46,7 +46,7 @@
 #include <wchar.h>
 
 /* GNU / LibUSB */
-#include "libusb.h"
+#include <libusb-1.0/libusb.h>
 #include "iconv.h"
 
 #include "hidapi.h"
