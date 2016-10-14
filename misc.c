@@ -4,6 +4,7 @@
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
 #endif
 #include <complex.h>
+#undef I
 #include <math.h>
 #include <assert.h>
 
