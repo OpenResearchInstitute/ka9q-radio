@@ -1,6 +1,6 @@
-# $Id: Makefile,v 1.6 2016/10/14 00:37:14 karn Exp karn $
-INCLUDES=-I ../fcd -I /opt/local/include
-COPTS=-g -std=gnu11 -pthread -Wall -D_GNU_SOURCE=1 -D_REENTRANT=1  -funsafe-math-optimizations 
+# $Id: Makefile,v 1.7 2016/10/14 00:47:19 karn Exp karn $
+INCLUDES=-I /opt/local/include
+COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
 all: radio control funcube
