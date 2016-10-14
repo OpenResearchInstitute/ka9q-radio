@@ -1,8 +1,9 @@
-// $Id$
+// $Id: radio.h,v 1.2 2016/10/13 23:58:06 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
 #include <complex.h>
+#undef I
 #include "command.h"
 
 
