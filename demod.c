@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.2 2016/10/13 23:30:50 karn Exp karn $
+// $Id: demod.c,v 1.3 2016/10/14 04:36:13 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -34,18 +34,22 @@ int process_wfm();
 
 int Front_end_ctl;
 extern char *Tuner_host;
+extern int Ctl_port;
+
+#define MAXPKT 1500
 
 void *demod_loop(void *arg){
   int ctl,r;
-  char pktbuf[1500];
+  char pktbuf[MAXPKT];
   struct sockaddr_in6 address;
   struct addrinfo *results,*rp,hints;
   char *destination = NULL;
   struct command *command = arg;
+  char portnumber[20];
   
   // Set up incoming control socket
   address.sin6_family = AF_INET6;
-  address.sin6_port = htons(4159);
+  address.sin6_port = htons(Ctl_port);
   address.sin6_flowinfo = 0;
   address.sin6_addr = in6addr_any;
   address.sin6_scope_id = 0;
@@ -67,7 +71,8 @@ void *demod_loop(void *arg){
   hints.ai_socktype = SOCK_DGRAM;
   hints.ai_protocol = 0;
   
-  if((r = getaddrinfo(Tuner_host,"6767",&hints,&results)) != 0){
+  snprintf(portnumber,sizeof(portnumber),"%d",Ctl_port+1);
+  if((r = getaddrinfo(Tuner_host,portnumber,&hints,&results)) != 0){
     fprintf(stderr,"%s: %s\n",destination,gai_strerror(r));
     exit(1);
   }
