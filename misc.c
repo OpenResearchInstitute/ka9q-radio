@@ -1,7 +1,7 @@
-// $Id: misc.c,v 1.2 2016/10/13 23:55:46 karn Exp karn $
+// $Id: misc.c,v 1.3 2016/10/14 00:35:26 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE 1 // Needed to get sincos/sincosf
 #endif
 #include <complex.h>
 #include <math.h>
@@ -34,7 +34,8 @@ const double cnrm(complex double x){
   return creal(x)*creal(x) + cimag(x) * cimag(x);
 }
 
-float amplitude(const float *data,int len){
+// Root-mean-square of an array of floats
+const float amplitude(const float *data,int len){
   float sum = 0;  
   int n;
   
@@ -44,7 +45,9 @@ float amplitude(const float *data,int len){
     sum += data[n] * data[n];
   return sqrtf(sum/len);
 }
-float camplitude(const complex float *data, int len){
+
+// Root-mean-square of the magnitudes of an array of complex floats
+const float camplitude(const complex float *data, int len){
   float amplitude = 0;
   int n;
 
