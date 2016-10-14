@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.2 2016/10/13 23:28:09 karn Exp karn $
+// $Id: control.c,v 1.3 2016/10/14 06:06:38 karn Exp karn $
 // Send remote commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,7 +94,7 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-  command.first_LO = freq + command.second_LO;
+  command.first_LO = freq + command.second_LO - Modes[i].dial;
 
   memset(&hints,0,sizeof(hints));
   hints.ai_flags |= (AI_V4MAPPED|AI_ADDRCONFIG);
