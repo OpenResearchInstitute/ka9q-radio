@@ -1,9 +1,8 @@
-// $Id$
+// $Id: dsp.h,v 1.2 2016/10/13 23:29:23 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
 #include <complex.h>
-
 #undef I
 
 const complex float csincosf(float x);
