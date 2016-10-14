@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.2 2016/10/13 23:28:54 karn Exp karn $
+// $Id: display.c,v 1.3 2016/10/14 04:34:06 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -15,10 +15,10 @@
 #include "dsp.h"
 
 void *display(void *arg){
-  fprintf(stderr,"Mode        Frequency         First LO     First IF  Offset   IF1   IF2  AFgain  FM SNR  D/A Under\n");
-  fprintf(stderr,"                   Hz               Hz           Hz      Hz    dB    dB      dB      dB\n");
+  fprintf(stderr,"Mode        Frequency         First LO     First IF  Offset    IF1    IF2  AFgain  FM SNR  D/A Under\n");
+  fprintf(stderr,"                   Hz               Hz           Hz      Hz     dB     dB      dB      dB\n");
   for(;;){
-    fprintf(stderr,"%-5s%'16.2f%'17.2f%'13.2f%'8.2f%6.1f%6.1f%8.1f%8.2f%11d\r",
+    fprintf(stderr,"%-5s%'16.2f%'17.2f%'13.2f%'8.2f%7.1f%7.1f%8.1f%8.2f%11d\r",
 	    Modes[Demod.mode].name,
 	    Demod.first_LO - Demod.second_LO + Modes[Demod.mode].dial,
 	    Demod.first_LO,
