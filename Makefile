@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.2 2016/10/14 00:00:10 karn Exp karn $
+# $Id: Makefile,v 1.3 2016/10/14 00:17:18 karn Exp karn $
 INCLUDES=-I ../fcd -I /opt/local/include
 COPTS=-g -std=gnu11 -pthread -Wall -D_GNU_SOURCE=1 -D_REENTRANT=1  -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -17,6 +17,10 @@ control: control.o modes.o
 radio: main.o radio.o demod.o fm.o filter.o display.o modes.o audio.o misc.o
 	$(CC) -g -o $@ $^ -lasound  -lfftw3f_threads -lfftw3f -lpthread -lm
 
+libfcd.a: fcd.o hid-libusb.o
+	ar rv $@ $^
+	ranlib $@
+
 main.o: main.c radio.h filter.h dsp.h audio.h command.h
 demod.o: demod.c dsp.h filter.h radio.h fm.h audio.h command.h
 filter.o: filter.c dsp.h filter.h
@@ -26,6 +30,8 @@ audio.o: audio.c dsp.h audio.h
 fm.o: fm.c dsp.h radio.h fm.h audio.h
 misc.o: misc.c
 funcube.o: funcube.c fcd.h sdr.h command.h dsp.h
+fcd.o: fcd.c hidapi.h fcd.h fcdhidcmd.h
+hid-libusb.o: hid-libusb.c hidapi.h
 
 
 
