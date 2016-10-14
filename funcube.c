@@ -23,6 +23,8 @@
 #include "command.h"
 #include "dsp.h"
 
+#define MAXPKT 1500
+
 void *display(void *arg);
 pthread_t Display_thread;
 
@@ -74,7 +76,7 @@ int main(int argc,char *argv[]){
   struct sockaddr_in6 address;
   char *locale;
   int c,ctl;
-  int ctl_port = 6767;
+  int ctl_port = 4160;
   int blocksize = 4096;
   double f = 147435000;
   int dongle = 0;
@@ -106,7 +108,7 @@ int main(int argc,char *argv[]){
     }
   }
   if(Verbose)
-    fprintf(stderr,"funcube dongle %d: min gain reduction %d dB, blocksize %d, UDP command port %d\n",
+    fprintf(stderr,"funcube dongle %d: min gain reduction %d dB, blocksize %d, UDP control port %d\n",
 	    dongle,Gain,blocksize,ctl_port);
   setlocale(LC_ALL,locale);
   signal(SIGPIPE,SIG_IGN);
@@ -146,7 +148,7 @@ int main(int argc,char *argv[]){
   while(1){
     complex float sampbuf[blocksize];
     socklen_t addrlen;
-    char pktbuf[1500];
+    char pktbuf[MAXPKT];
     int rdlen;
     
     while(addrlen = sizeof(address), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&address,&addrlen)) > 0){
