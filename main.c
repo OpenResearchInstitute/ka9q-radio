@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.3 2016/10/14 01:22:42 karn Exp karn $
+// $Id: main.c,v 1.4 2016/10/14 01:49:10 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -31,6 +31,7 @@ char *Tuner_host = "localhost";
 
 int Quiet;
 
+int Ctl_port = 4159;
 
 int main(int argc,char *argv[]){
   int c,N;
@@ -60,10 +61,13 @@ int main(int argc,char *argv[]){
   command.mode = FM;
   
   // Defaults
-  while((c = getopt(argc,argv,"qb:m:l:f:d:S:L:M:x:h:r:t:c:eT:")) != EOF){
+  while((c = getopt(argc,argv,"qb:m:l:f:d:S:L:M:x:h:r:t:c:eT:p:")) != EOF){
     int i;
 
     switch(c){
+    case 'p':
+      Ctl_port = atoi(optarg);
+      break;
     case 'q':
       Quiet++; // Suppress display
       break;
@@ -127,7 +131,7 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,locale);
 
 
-  Demod.samprate = 192000; // clean this up
+  Demod.samprate = ADC_samprate;
   Audio.samprate = DAC_samprate;
   // Verify decimation ratio
   if((Demod.samprate % Audio.samprate) != 0)
@@ -145,16 +149,15 @@ int main(int argc,char *argv[]){
   // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
   fftwf_import_system_wisdom();
 
-  if(Demod.max_IF == 0)
+  if(Demod.max_IF == 0 || Demod.max_IF > Demod.samprate/2)
     Demod.max_IF = Demod.samprate/2;
-  if(Demod.max_IF > (double)Demod.samprate/2)
-    Demod.max_IF = (double)Demod.samprate/2;
   
-  fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d\n",
-	  Demod.samprate,Audio.samprate,Demod.decimate);
+  fprintf(stderr,"UDP control port %d\n",Ctl_port);
+  fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d, max IF +/-%'.1lf Hz\n",
+	  Demod.samprate,Audio.samprate,Demod.decimate,Demod.max_IF);
   fprintf(stderr,"block size: %'d complex samples (%'.1f ms @ %'u S/s)\n",
 	  Demod.L,1000.*Demod.L/Demod.samprate,Demod.samprate);
-  fprintf(stderr,"Kaiser beta %.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %.1f Hz\n",
+  fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
 	  Kaiser_beta,Demod.M,1000.*Demod.M/Demod.samprate,Demod.samprate,(float)Demod.samprate/N);
 
   if(!Quiet)
