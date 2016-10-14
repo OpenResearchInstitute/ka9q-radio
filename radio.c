@@ -1,4 +1,4 @@
-// $Id$
+// $Id: radio.c,v 1.2 2016/10/13 23:57:15 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #include <assert.h>
 #include <limits.h>
@@ -6,7 +6,6 @@
 #include <string.h>
 #include <math.h>
 #include <complex.h>
-#include <fftw3.h>
 #undef I
 
 #include "command.h"
@@ -108,7 +107,8 @@ int set_mode(enum mode mode){
   }
   
   // Set up pre-demodulation filter
-  Demod.response = fftwf_alloc_complex(N);
+  //  Could say 'Demod.response = fftwf_alloc_complex(N);' if we include fftw3.h
+  posix_memalign((void **)&Demod.response,16,N*sizeof(complex float));
   memset(Demod.response,0,N*sizeof(*Demod.response));
   for(n=Demod.low; n <= Demod.high; n++)
     Demod.response[(n+N)%N] = 1;
