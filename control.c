@@ -1,5 +1,6 @@
-// $Id: control.c,v 1.3 2016/10/14 06:06:38 karn Exp karn $
+// $Id: control.c,v 1.4 2016/10/14 06:25:56 karn Exp karn $
 // Send remote commands
+#define _GNU_SOURCE 1 // Get NAN macro
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -23,6 +24,7 @@
 
 double Tune_step = 1000;
 int Ctl_port = 4159;
+int Samprate = 192000; // Sample rate of SDR front end
 
 enum dialmode {
   TUNE,
@@ -43,6 +45,7 @@ int main(int argc,char *argv[]){
   char *destination = NULL;
   struct command command;
   double freq;
+  double first_if;
   char portnumber[20];
 #if linux
   struct command ocommand;
@@ -58,19 +61,22 @@ int main(int argc,char *argv[]){
   // Scan arguments past options and process
   memset(&command,0,sizeof(command));
   command.cmd = SETSTATE;
-  command.second_LO = -48000;
-  command.first_LO = 147435000 + command.second_LO;
   command.second_LO_rate = 0;
   command.calibrate = 0;
   command.mode = FM; // Invalid
 
-  while((r = getopt(argc,argv,"c:d:f:m:s:i:p:")) != EOF){
+  freq = 147435000;
+  first_if = NAN; // Default
+  while((r = getopt(argc,argv,"r:c:d:f:m:s:i:p:")) != EOF){
     switch(r){
+    case 'r':
+      Samprate = atoi(optarg);
+      break;
     case 'p':
       Ctl_port = atoi(optarg);
       break;
     case 'i':
-      command.second_LO = -atof(optarg);
+      first_if = atof(optarg);
       break;
     case 's':
       command.second_LO_rate = -atof(optarg);
@@ -94,6 +100,11 @@ int main(int argc,char *argv[]){
       break;
     }
   }
+  if(!isnan(first_if))
+    command.second_LO = -first_if;
+  else
+    command.second_LO = -Samprate/4 + (Modes[i].high + Modes[i].low)/2;    
+
   command.first_LO = freq + command.second_LO - Modes[i].dial;
 
   memset(&hints,0,sizeof(hints));
@@ -166,9 +177,9 @@ int main(int argc,char *argv[]){
 	  adjust = 0;
 	  command.second_LO -= event.value * Tune_step;
 	  if(-command.second_LO + Modes[command.mode].high >= 96000){
-	    adjust = 192000 - (Modes[command.mode].high - Modes[command.mode].low);
+	    adjust = Samprate - (Modes[command.mode].high - Modes[command.mode].low);
 	  } else if(-command.second_LO + Modes[command.mode].low <= -96000){
-	    adjust = -192000 + (Modes[command.mode].high - Modes[command.mode].low);
+	    adjust = -Samprate + (Modes[command.mode].high - Modes[command.mode].low);
 	  }
 	  command.second_LO += adjust;
 	  command.first_LO += adjust;
