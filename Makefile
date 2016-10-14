@@ -9,7 +9,7 @@ clean:
 	rm -f *.o radio control funcube libfcd.a
 
 funcube: funcube.o gr.o libfcd.a
-	$(CC) -g -o $@ $^ libfcd.a -lasound -lusb-1.0 -lpthread -lm
+	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lm
 
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
@@ -21,19 +21,19 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
-control.o: control.c command.h
-main.o: main.c radio.h filter.h dsp.h audio.h command.h
-demod.o: demod.c dsp.h filter.h radio.h fm.h audio.h command.h
-filter.o: filter.c dsp.h filter.h
-radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
-display.o: display.c radio.h audio.h sdr.h dsp.h
 audio.o: audio.c dsp.h audio.h
-fm.o: fm.c dsp.h radio.h fm.h audio.h
-misc.o: misc.c
-funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h command.h dsp.h
+control.o: control.c command.h
+demod.o: demod.c dsp.h filter.h radio.h fm.h audio.h command.h
+display.o: display.c radio.h audio.h sdr.h dsp.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
+filter.o: filter.c dsp.h filter.h
+fm.o: fm.c dsp.h radio.h fm.h audio.h
+funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h command.h dsp.h
 hid-libusb.o: hid-libusb.c hidapi.h
-
+main.o: main.c radio.h filter.h dsp.h audio.h command.h
+misc.o: misc.c
+modes.o: modes.c command.h
+radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
 
 
 
