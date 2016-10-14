@@ -1,4 +1,4 @@
-// $Id$
+// $Id: display.c,v 1.2 2016/10/13 23:28:54 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -12,7 +12,6 @@
 
 #include "radio.h"
 #include "audio.h"
-#include "sdr.h"
 #include "dsp.h"
 
 void *display(void *arg){
