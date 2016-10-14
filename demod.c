@@ -1,6 +1,7 @@
-// $Id$
+// $Id: demod.c,v 1.2 2016/10/13 23:30:50 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
+#define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
@@ -106,7 +107,7 @@ void *demod_loop(void *arg){
       usleep(500000);
       continue;
     }
-    if(read(0,Demod.filter->input,Demod.filter->blocksize_in * sizeof(complex float)) <= 0)
+    if(read(0,Demod.filter->input,Demod.filter->blocksize_in * sizeof(*Demod.filter->input)) <= 0)
       break;
     energy = 0;
     for(n=0; n < Demod.filter->blocksize_in; n++){
@@ -148,9 +149,9 @@ void *demod_loop(void *arg){
 }
 
 int process_command(char *cmdbuf,int len){
-  if(len >= sizeof(struct command)){
-    struct command command;
+  struct command command;
 
+  if(len >= sizeof(command)){
     memcpy(&command,cmdbuf,sizeof(command));
     switch(command.cmd){
     case SENDSTAT:
