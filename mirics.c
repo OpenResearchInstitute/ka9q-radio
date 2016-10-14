@@ -1,3 +1,6 @@
+// $Id$
+// Counterpart to funcube.c for SDRPlay with Mirics chipset
+// Very incomplete
 #include <stdio.h>
 #include <stdlib.h>
 #include "sdr.h"
