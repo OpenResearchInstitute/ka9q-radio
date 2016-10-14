@@ -1,19 +1,18 @@
-// $Id$
+// $Id: control.c,v 1.2 2016/10/13 23:28:09 karn Exp karn $
 // Send remote commands
-#include <complex.h>
-#include <errno.h>
-#include <ctype.h>
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 #include <fcntl.h>
-#include <math.h>
 #include <locale.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <complex.h>
+#include <math.h>
 #if linux
 #include <linux/input.h>
 #endif
@@ -23,6 +22,7 @@
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
 
 double Tune_step = 1000;
+int Ctl_port = 4159;
 
 enum dialmode {
   TUNE,
@@ -41,9 +41,11 @@ int main(int argc,char *argv[]){
   char *locale;
   struct addrinfo *results,*rp,hints;
   char *destination = NULL;
-  struct command command,ocommand;
+  struct command command;
   double freq;
+  char portnumber[20];
 #if linux
+  struct command ocommand;
   int dial_fd;
   int button;
   struct timeval button_timeval;
@@ -62,8 +64,11 @@ int main(int argc,char *argv[]){
   command.calibrate = 0;
   command.mode = FM; // Invalid
 
-  while((r = getopt(argc,argv,"c:d:f:m:s:i:")) != EOF){
+  while((r = getopt(argc,argv,"c:d:f:m:s:i:p:")) != EOF){
     switch(r){
+    case 'p':
+      Ctl_port = atoi(optarg);
+      break;
     case 'i':
       command.second_LO = -atof(optarg);
       break;
@@ -97,7 +102,8 @@ int main(int argc,char *argv[]){
   hints.ai_socktype = SOCK_DGRAM;
   hints.ai_protocol = 0;
   
-  if((r = getaddrinfo(destination,"4159",&hints,&results)) != 0){
+  snprintf(portnumber,sizeof(portnumber),"%d",Ctl_port);
+  if((r = getaddrinfo(destination,portnumber,&hints,&results)) != 0){
     fprintf(stderr,"%s: %s\n",destination,gai_strerror(r));
     exit(1);
   }
@@ -118,7 +124,7 @@ int main(int argc,char *argv[]){
 
   write(ctl,&command,sizeof(command));
 
-#if linux
+#if linux // No support yet for input devices on OSX
   ocommand = command;
   // If a dial is attached, go into a loop handling it. Otherwise exit.
   if((dial_fd = open(DIAL,O_RDONLY)) < 0){
@@ -209,10 +215,10 @@ int main(int argc,char *argv[]){
 #if 1
       fprintf(stderr,"mode %d 1stLO %'.02lf 2ndLO %'.02lf 2ndLOrate %'.02lf cal %'lg\n",
 	      (int)command.mode,command.first_LO,command.second_LO,command.second_LO_rate,command.calibrate);
-#endif
-
-      write(ctl,&command,sizeof(command));    
       ocommand = command;
+#endif
+      write(ctl,&command,sizeof(command));    
+
     }
   } // read(dial)
   fprintf(stderr,"Dial read error %s\n",strerror(errno));
