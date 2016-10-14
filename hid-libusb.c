@@ -1,4 +1,4 @@
-// $Id: hid-libusb.c,v 1.1 2016/10/14 00:24:30 karn Exp karn $
+// $Id: hid-libusb.c,v 1.2 2016/10/14 00:31:43 karn Exp karn $
 // Modified by KA9Q?
 /*******************************************************
  HIDAPI - Multi-Platform library for
@@ -25,7 +25,9 @@
         http://github.com/signal11/hidapi .
 ********************************************************/
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
+#endif
 
 /* C */
 #include <stdio.h>
