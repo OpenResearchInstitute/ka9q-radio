@@ -1,3 +1,4 @@
+# $Id$
 INCLUDES=-I ../fcd -I /opt/local/include
 COPTS=-g -std=gnu11 -pthread -Wall -D_GNU_SOURCE=1 -D_REENTRANT=1  -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
