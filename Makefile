@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.5 2016/10/14 00:27:40 karn Exp karn $
+# $Id: Makefile,v 1.6 2016/10/14 00:37:14 karn Exp karn $
 INCLUDES=-I ../fcd -I /opt/local/include
 COPTS=-g -std=gnu11 -pthread -Wall -D_GNU_SOURCE=1 -D_REENTRANT=1  -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -21,6 +21,7 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
+control.o: control.c command.h
 main.o: main.c radio.h filter.h dsp.h audio.h command.h
 demod.o: demod.c dsp.h filter.h radio.h fm.h audio.h command.h
 filter.o: filter.c dsp.h filter.h
