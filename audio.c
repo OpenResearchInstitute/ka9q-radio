@@ -1,4 +1,4 @@
-// $Id$
+// $Id: audio.c,v 1.2 2016/10/13 23:26:43 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <limits.h>
@@ -67,7 +67,7 @@ int audio_change_parms(unsigned samprate,int channels,int L){
     struct wavhdr wavhdr;
 
     strcpy(wavhdr.riff,"RIFF");
-    wavhdr.chunksize1 = 0x7fffffff;
+    wavhdr.chunksize1 = 0x7fffffff; // infinity (nonstandard?)
     strcpy(wavhdr.wave,"WAVE");
     strcpy(wavhdr.fmt,"fmt ");
     wavhdr.chunksize2 = 16;
@@ -78,7 +78,7 @@ int audio_change_parms(unsigned samprate,int channels,int L){
     wavhdr.blocksize = sizeof(short) * channels;
     wavhdr.bits = 16;
     strcpy(wavhdr.data,"data");
-    wavhdr.datalen = 0x7fffffff;
+    wavhdr.datalen = 0x7fffffff;  // infinity (nonstandard?)
     write(1,&wavhdr,sizeof(wavhdr));
   }
   if(snd_pcm_open(&Audio.handle,Audio.name,SND_PCM_STREAM_PLAYBACK,0) < 0){
