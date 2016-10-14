@@ -1,12 +1,12 @@
-// $Id: audio.c,v 1.2 2016/10/13 23:26:43 karn Exp karn $
+// $Id: audio.c,v 1.3 2016/10/14 04:33:53 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
+#include <stdio.h>
+#include <alsa/asoundlib.h>
 #include <limits.h>
 #include <string.h>
 #include <complex.h>
-#include <stdio.h>
-#include <alsa/asoundlib.h>
-
+#undef I
 
 #include "dsp.h"
 #include "audio.h"
