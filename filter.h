@@ -1,11 +1,13 @@
 #ifndef _FILTER_H
 #define _FILTER_H 1
 
+#include <complex.h>
 #include <fftw3.h>
+#undef I
 
 extern double Kaiser_beta;
 
-enum type {
+enum filtertype {
   NONE,
   COMPLEX,
   CROSS_CONJ,
@@ -13,7 +15,7 @@ enum type {
 };
 
 struct filter {
-  enum type type;
+  enum filtertype type;
   int blocksize_in;
   int impulse_length;
   complex float *response;           // Filter response in frequency domain
@@ -38,7 +40,7 @@ struct filter {
 int window_filter(int L,int M,complex float *response,double beta);
 int window_rfilter(int L,int M,complex float *response,double beta);
 
-struct filter *create_filter(int,int,complex float *,int,enum type);
+struct filter *create_filter(int,int,complex float *,int,enum filtertype);
 int execute_filter(struct filter *);
 int delete_filter(struct filter *);
 #endif
