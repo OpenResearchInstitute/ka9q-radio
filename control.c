@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.4 2016/10/14 06:25:56 karn Exp karn $
+// $Id: control.c,v 1.5 2016/10/14 07:36:12 karn Exp karn $
 // Send remote commands
 #define _GNU_SOURCE 1 // Get NAN macro
 #include <stdio.h>
@@ -103,9 +103,9 @@ int main(int argc,char *argv[]){
   if(!isnan(first_if))
     command.second_LO = -first_if;
   else
-    command.second_LO = -Samprate/4 + (Modes[i].high + Modes[i].low)/2;    
+    command.second_LO = -Samprate/4 + (Modes[command.mode].high + Modes[command.mode].low)/2;    
 
-  command.first_LO = freq + command.second_LO - Modes[i].dial;
+  command.first_LO = freq + command.second_LO - Modes[command.mode].dial;
 
   memset(&hints,0,sizeof(hints));
   hints.ai_flags |= (AI_V4MAPPED|AI_ADDRCONFIG);
