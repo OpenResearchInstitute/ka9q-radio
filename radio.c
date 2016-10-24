@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.3 2016/10/14 06:02:48 karn Exp karn $
+// $Id: radio.c,v 1.4 2016/10/17 01:01:43 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #include <assert.h>
 #include <limits.h>
@@ -84,6 +84,7 @@ double set_second_LO_rate(double second_LO_rate,int force){
 int set_mode(enum mode mode){
   const int N = Demod.L + Demod.M - 1;
   int n;
+  double gain;
 
   if(mode == Demod.mode)
     return 0;
@@ -107,12 +108,29 @@ int set_mode(enum mode mode){
     Demod.filter = NULL;
   }
   
+  // Adjust for unity gain
+  // The filters for the first 5 modes add conjugate frequencies,
+  // which would otherwise make the gain +3 dB
+  switch(mode){
+  case LSB:
+  case USB:
+  case CWL:
+  case CWU:
+  case ISB:
+    gain = M_SQRT1_2;
+    break;
+  default:
+    gain = 1.0;
+    break;
+  }
+    
+
   // Set up pre-demodulation filter
   Demod.response = fftwf_alloc_complex(N);
   // posix_memalign((void **)&Demod.response,16,N*sizeof(complex float));
   memset(Demod.response,0,N*sizeof(*Demod.response));
   for(n=Demod.low; n <= Demod.high; n++)
-    Demod.response[(n+N)%N] = 1;
+    Demod.response[(n+N)%N] = gain;
   
   window_filter(Demod.L,Demod.M,Demod.response,Kaiser_beta);
   Demod.decimate = Demod.samprate / Audio.samprate;
