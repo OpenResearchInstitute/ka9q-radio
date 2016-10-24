@@ -67,6 +67,8 @@ pthread_t FCD_control_thread;
 const int ADC_samprate = 192000;
 int Verbose;
 int Gain = 0;
+int No_hold_open; // if set, close control between commands
+int Dongle;
 
 void *fcd_command(void *arg);
 int process_fc_command(char *,int);
@@ -79,16 +81,19 @@ int main(int argc,char *argv[]){
   int ctl_port = 4160;
   int blocksize = 4096;
   double f = 147435000;
-  int dongle = 0;
+  int Dongle = 0;
   
   locale = getenv("LANG");
-  while((c = getopt(argc,argv,"g:d:vf:p:l:b:")) != EOF){
+  while((c = getopt(argc,argv,"g:d:vf:p:l:b:o")) != EOF){
     switch(c){
+    case 'o':
+      No_hold_open++; // Close USB control port between commands so fcdpp can be used
+      break;
     case 'g':
       Gain = atoi(optarg);
       break;
     case 'd':
-      dongle = atoi(optarg);
+      Dongle = atoi(optarg);
       break;
     case 'v':
       Verbose++;
@@ -107,9 +112,14 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-  if(Verbose)
-    fprintf(stderr,"funcube dongle %d: min gain reduction %d dB, blocksize %d, UDP control port %d\n",
-	    dongle,Gain,blocksize,ctl_port);
+  if(Verbose){
+    if(Gain == -1)
+      fprintf(stderr,"funcube dongle %d: AGC off, blocksize %d, UDP control port %d\n",
+	    Dongle,blocksize,ctl_port);
+    else
+      fprintf(stderr,"funcube dongle %d: min gain reduction %d dB, blocksize %d, UDP control port %d\n",
+	      Dongle,Gain,blocksize,ctl_port);
+  }
   setlocale(LC_ALL,locale);
   signal(SIGPIPE,SIG_IGN);
   signal(SIGINT,closedown);
@@ -132,7 +142,7 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   fcntl(ctl,F_SETFL,O_NONBLOCK);
-  front_end_init(dongle,ADC_samprate,blocksize);
+  front_end_init(Dongle,ADC_samprate,blocksize);
   usleep(100000);
   set_fc_LO(f); // Must be done after init
 
@@ -321,7 +331,7 @@ float get_adc(complex float *buffer,int L){
     FCD.sinphi = 0.95 * FCD.sinphi + 0.05 * sinphi; // keep smoothed value
     energy_db = power2dB(crealf(energy) + cimagf(energy));
     gr = FCD.lna_gr + FCD.mixer_gr + FCD.if_gr; // current gain reduction
-    if(energy_db > FCD.sig_high || (gr > Gain && energy_db < FCD.sig_low)){
+    if(Gain != -1 && (energy_db > FCD.sig_high || (gr > Gain && energy_db < FCD.sig_low))){
       // Adjust analog gains
       int adjust = energy_db - (FCD.sig_high + FCD.sig_low)/2;
       if(gr + adjust <= Gain)
@@ -430,6 +440,10 @@ void *fcd_command(void *arg){
     int set_lna,set_mixer,set_gain,set_freq;
 
     set_lna = set_mixer = set_gain = set_freq = 0;
+    if(No_hold_open){
+      fcdClose(FCD.phd);
+      FCD.phd = NULL;
+    }
     pthread_mutex_lock(&FCD.mutex);
     while(!FCD.pending)
       pthread_cond_wait(&FCD.cond,&FCD.mutex);
@@ -453,6 +467,13 @@ void *fcd_command(void *arg){
       set_freq++;
     }
     pthread_mutex_unlock(&FCD.mutex);
+
+    if(FCD.phd == NULL){
+      if((FCD.phd = fcdOpen(FCD.sdr_name,sizeof(FCD.sdr_name),Dongle)) == NULL){
+	fprintf(stderr,"funcube: can't re-open control port, aborting\n");
+	abort();
+      }
+    }      
 
     if(set_lna){
       val = lna_gr != 0 ? 0 : 1;
