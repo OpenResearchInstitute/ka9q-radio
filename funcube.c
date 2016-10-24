@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.3 2016/10/14 00:53:34 karn Exp karn $
+// $Id: funcube.c,v 1.5 2016/10/14 06:07:54 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Correct for DC offset, I/Q gain and phase imbalance
 // Emit complex float sample stream on stdout
@@ -403,12 +403,15 @@ void *fcd_command(void *arg){
   FCD.first_LO = FCD.intfreq / (1 + FCD.calibrate); // store true frequency
 
   fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_LNA_GAIN,&val,sizeof(val));
-  if(val == 0 && intfreq < 1e9)
-    lna_gr = 24;
-  else if(val == 0)
-    lna_gr = 7;
-  else
-    lna_gr = 0;
+  // Note: this should match gr() function
+  lna_gr = 0;
+  if(val == 0){
+    if(intfreq < 420000000){
+      lna_gr = 24;
+    } else {
+      lna_gr = 7;
+    }
+  }
 
   fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_MIXER_GAIN,&val,sizeof(val));
   if(val == 0)
