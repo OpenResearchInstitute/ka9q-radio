@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.3 2016/10/14 04:36:13 karn Exp karn $
+// $Id: demod.c,v 1.4 2016/10/14 06:07:03 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -107,13 +107,14 @@ void *demod_loop(void *arg){
     while(addrlen = sizeof(address), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&address,&addrlen)) > 0)
       process_command(pktbuf,rdlen);
 
-    if(Demod.filter == NULL || Demod.filter->input == NULL){
-      // We're not initialized yet
-      usleep(500000);
+    if(Demod.filter == NULL
+       || Demod.filter->input == NULL
+       || read(0,Demod.filter->input,Demod.filter->blocksize_in * sizeof(*Demod.filter->input)) <= 0){
+      // We're not initialized yet, or the input read failed for some reason
+      usleep(50000);
       continue;
     }
-    if(read(0,Demod.filter->input,Demod.filter->blocksize_in * sizeof(*Demod.filter->input)) <= 0)
-      break;
+
     energy = 0;
     for(n=0; n < Demod.filter->blocksize_in; n++){
       energy += crealf(Demod.filter->input[n]) * crealf(Demod.filter->input[n]) +
@@ -121,6 +122,25 @@ void *demod_loop(void *arg){
     }
     Demod.energy = energy /= Demod.filter->blocksize_in;
     spindown(Demod.filter->input,Demod.filter->blocksize_in); // 2nd LO
+
+    if(cimag(Demod.second_LO_phase_accel) != 0){
+      // We're sweeping, so ensure we won't run the passband past the edges of the first IF bandwidth
+      double first_if = -get_second_LO(Demod.filter->blocksize_in);  // first IF at end of *next* sample block
+      double new_first_if = first_if;
+      if(first_if + max(Modes[Demod.mode].high,0) >= Demod.samprate/2){
+	// Will hit upper end
+	new_first_if = -Demod.samprate/2 - min(Modes[Demod.mode].low,0);
+      } else if(first_if - min(Modes[Demod.mode].low,0) <= -Demod.samprate/2){
+	// Will hit lower end
+	new_first_if = Demod.samprate/2 - max(Modes[Demod.mode].high,0);
+      }
+      if(new_first_if != first_if){
+	// Make the changes
+	set_first_LO(Demod.first_LO - (new_first_if - first_if),1);
+	set_second_LO(-new_first_if,1);
+      }
+    }
+
     execute_filter(Demod.filter);
     switch(Demod.mode){
     case AM:
