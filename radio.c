@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.4 2016/10/17 01:01:43 karn Exp karn $
+// $Id: radio.c,v 1.5 2016/10/24 13:24:55 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #include <assert.h>
 #include <limits.h>
@@ -21,18 +21,20 @@ extern int Front_end_ctl;
 double get_exact_samprate();
 
 
-// Return current frequency of carrier frequency at current first IF, including sweep
-double get_second_LO(){
-  if(Demod.second_LO_phase_accel != 0){
+// Return current frequency of carrier frequency at current first IF
+// If sweeping, return second LO freq at "offset" samples ahead of current sample
+double get_second_LO(int offset){
+  if(cimag(Demod.second_LO_phase_accel) != 0){
     // sweeping, get instantaneous frequency
-    Demod.second_LO = get_exact_samprate() * carg(Demod.second_LO_phase_step) / (2*M_PI);
+    Demod.second_LO = get_exact_samprate()
+      * (offset * carg(Demod.second_LO_phase_accel) + carg(Demod.second_LO_phase_step)) / (2*M_PI);
   }
   return Demod.second_LO;
 }
 
 // Return current carrier frequency, including effects of any sweep
 double get_freq(){
-  return Demod.first_LO - get_second_LO();
+  return Demod.first_LO - get_second_LO(0);
 }
 
 // Set either or both LOs as needed to tune the specified radio frequency to zero audio frequency
