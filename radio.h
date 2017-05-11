@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.2 2016/10/13 23:58:06 karn Exp karn $
+// $Id: radio.h,v 1.3 2016/10/14 04:36:54 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -42,7 +42,7 @@ extern struct demod Demod;
 
 double set_first_LO(double first_LO,int);
 double set_second_LO(double second_LO,int);
-double get_second_LO(void);
+double get_second_LO(int);
 double set_second_LO_rate(double second_LO_rate,int);
 
 int set_mode(enum mode mode);

@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.3 2016/10/14 04:34:06 karn Exp karn $
+// $Id: display.c,v 1.4 2016/10/14 07:37:13 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -22,7 +22,7 @@ void *display(void *arg){
 	    Modes[Demod.mode].name,
 	    Demod.first_LO - Demod.second_LO + Modes[Demod.mode].dial,
 	    Demod.first_LO,
-	    -get_second_LO(),
+	    -get_second_LO(0),
 	    Modes[Demod.mode].dial,
 	    power2dB(Demod.energy),
 	    voltage2dB(Demod.amplitude),
