@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.5 2016/10/14 07:36:12 karn Exp karn $
+// $Id: control.c,v 1.6 2016/10/23 06:15:59 karn Exp karn $
 // Send remote commands
 #define _GNU_SOURCE 1 // Get NAN macro
 #include <stdio.h>
@@ -19,12 +19,14 @@
 #endif
 
 #include "command.h"
+#include "dsp.h"
 
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
 
 double Tune_step = 1000;
 int Ctl_port = 4159;
 int Samprate = 192000; // Sample rate of SDR front end
+int Verbose;
 
 enum dialmode {
   TUNE,
@@ -67,8 +69,11 @@ int main(int argc,char *argv[]){
 
   freq = 147435000;
   first_if = NAN; // Default
-  while((r = getopt(argc,argv,"r:c:d:f:m:s:i:p:")) != EOF){
+  while((r = getopt(argc,argv,"r:c:d:f:m:s:i:p:v")) != EOF){
     switch(r){
+    case 'v':
+      Verbose++;
+      break;
     case 'r':
       Samprate = atoi(optarg);
       break;
@@ -79,7 +84,7 @@ int main(int argc,char *argv[]){
       first_if = atof(optarg);
       break;
     case 's':
-      command.second_LO_rate = -atof(optarg);
+      command.second_LO_rate = atof(optarg);
       break;
     case 'm':
       for(i=1;i<=Nmodes;i++){
@@ -100,12 +105,44 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-  if(!isnan(first_if))
-    command.second_LO = -first_if;
-  else
-    command.second_LO = -Samprate/4 + (Modes[command.mode].high + Modes[command.mode].low)/2;    
+  if(!isnan(first_if)){
+    // If a first IF is specified, it takes precedence even if we're sweeping
+    command.second_LO = first_if;
+  } else if(command.second_LO_rate > 0){
+    // sweeping up; start at bottom of IF
+    command.second_LO = -Samprate/2;
+    // negative frequencies require adjustment
+    double adj;
+    
+    adj = min(Modes[command.mode].high,Modes[command.mode].low);
+    if(adj < 0)
+      command.second_LO -= adj;
+  } else if(command.second_LO_rate < 0){
+    // sweeping down; start at top of IF
+    command.second_LO = Samprate/2;
+    double adj;
 
+    adj = max(Modes[command.mode].high,Modes[command.mode].low);
+    if(adj > 0)
+      command.second_LO -= adj;
+  } else {
+    // Not sweeping, and first IF not manually specified. Center passband at Samprrate/4 = +48 kHz
+    command.second_LO = Samprate/4 - (Modes[command.mode].high + Modes[command.mode].low)/2;    
+  }
+
+  // Local oscillator frequency and rate are inverses of the first IF
+  command.second_LO_rate = -command.second_LO_rate;
+  command.second_LO = -command.second_LO;
   command.first_LO = freq + command.second_LO - Modes[command.mode].dial;
+
+  if(Verbose){
+    fprintf(stderr,"first LO %.2lf second_LO %.2lf second_LO_rate %.2lf cal %.2lf mode %s\n",
+	    command.first_LO,
+	    command.second_LO,
+	    command.second_LO_rate,
+	    command.calibrate,
+	    Modes[command.mode].name);
+  }
 
   memset(&hints,0,sizeof(hints));
   hints.ai_flags |= (AI_V4MAPPED|AI_ADDRCONFIG);
