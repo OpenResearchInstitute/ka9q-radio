@@ -1,33 +1,34 @@
-// $Id: gr.c,v 1.3 2016/10/14 01:17:27 karn Exp karn $
-// Mirics default gain reduction tables
+// $Id: gr.c,v 1.4 2016/10/14 04:34:35 karn Exp karn $
+// Mirics default gain tables
 // Mirics SDR API specification, section 5
-int mirics_gain(double f,int gr,int *bb, int *lna,int *mix){
-  if(gr < 0)
-    gr = 0;
+// Return actual gain, which can be different from parameter if out of range
+int mirics_gain(double f,int g,char *bb, char *lna,char *mix){
+  if(g < 0)
+    g = 0;
 
-  *bb = *lna = *mix = 0;
-  if(f < 120e6){ // Also for < 60 MHz in original reference
-    if(gr >= 35)
-      *lna = 24;
-  } else if(f < 250e6){
-    if(gr >= 29)
-      *lna = 24;
-  } else if(f < 420e6){
-    if(gr >= 35)
-      *lna = 24;
-  } else if(f < 1e9){
-    if(gr >= 12)
-      *lna = 7;
-  } else { // 1-2 GHz
-    if(gr >= 10)
-      *lna = 7;
+  if(g < 20){
+    // At low gain, use the IF amplifier for all bands
+    *lna = 0;
+    *mix = 0;
+    *bb = g;
+  } else if((f < 60e6 && g < 68)|| (f < 250e6 && g < 74) || (f < 420e6 && g < 68) || (f < 1e9 && g < 74) || (g < 76)){
+    // Turn on 19 dB mixer, do rest with IF
+    *lna = 0;
+    *mix = 1;
+    *bb = g - 19;
+  } else {
+    //Turn on everything
+    *mix = 1;
+    *lna = 1;
+    *bb = g - 19;
+    if(f < 420e6)
+      *bb -= 24;
+    else
+      *bb -= 7;
   }
-  // If the IF can't handle the rest, turn off the mixer too
-  gr -= *lna;
-  if(gr > 59){
-    *mix = 19;
-    gr -= 19;
+  if(*bb > 59){ // Limit to legal range
+    g -= *bb - 59;
+    *bb = 59;
   }
-  *bb = gr > 59 ? 59 : gr;
-  return *bb + *mix + *lna;
+  return g;
 }
