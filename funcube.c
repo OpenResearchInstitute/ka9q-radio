@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.5 2016/10/14 06:07:54 karn Exp karn $
+// $Id: funcube.c,v 1.7 2016/10/24 13:26:19 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Correct for DC offset, I/Q gain and phase imbalance
 // Emit complex float sample stream on stdout
@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <signal.h>
 #include <locale.h>
 
@@ -22,6 +23,7 @@
 #include "sdr.h"
 #include "command.h"
 #include "dsp.h"
+#include "rtp.h"
 
 #define MAXPKT 1500
 
@@ -36,23 +38,12 @@ struct sdrstate {
   pthread_cond_t cond;
   int pending;               // set to ask task to update dongle
 
+  struct status status;     // Frequency and gain settings
   // Analog gain settings
-  int max_gain;
-  int lna_gr,mixer_gr,if_gr; // Current analog gain settings inside device
   int agc_holdoff;
   int agc_holdoff_count;
 
-  // First (analog) LO synthesizer
-  int intfreq;               // Apparent first LO frequency, integer Hz, without correction; protect with mutex
-  double calibrate;          // Multiply desired frequency by (1 + calibrate) before setting
-  double first_LO;           // true hardware LO frequency, Hz - note hardware works in integers
-
-  // Digital signal statistics
-  complex float DC_offset;
-  complex float energy;
-
-  double sinphi;              // smoothed sine of phase error ~ phase error in radians for small error
-  float sig_high,sig_low;     // energy set points for adjusting analog AGC
+  float power;              // Running estimate of signal power
 
   // ALSA parameters
   snd_pcm_t *sdr_handle;     // ALSA handle
@@ -66,7 +57,6 @@ struct sdrstate FCD;
 pthread_t FCD_control_thread;
 const int ADC_samprate = 192000;
 int Verbose;
-int Gain = 0;
 int No_hold_open; // if set, close control between commands
 int Dongle;
 
@@ -75,22 +65,34 @@ int process_fc_command(char *,int);
 double set_fc_LO(double);
 
 int main(int argc,char *argv[]){
-  struct sockaddr_in6 address;
+  struct sockaddr_in6 address6;
+  struct sockaddr_in address4;  
   char *locale;
   int c,ctl;
   int ctl_port = 4160;
-  int blocksize = 4096;
+  int blocksize = 350;
   double f = 147435000;
   int Dongle = 0;
-  
+  struct rtp_header rtp;
+  int rtp_sock;
+  char *dest = NULL;
+  int dest_port = -1;
+  int seq = 0;
+  int timestamp = 0;
+  long ssrc;
+ 
   locale = getenv("LANG");
-  while((c = getopt(argc,argv,"g:d:vf:p:l:b:o")) != EOF){
+
+  while((c = getopt(argc,argv,"d:vf:p:l:b:oR:P:")) != EOF){
     switch(c){
+    case 'R':
+      dest = optarg;
+      break;
+    case 'P':
+      dest_port = atoi(optarg);
+      break;
     case 'o':
       No_hold_open++; // Close USB control port between commands so fcdpp can be used
-      break;
-    case 'g':
-      Gain = atoi(optarg);
       break;
     case 'd':
       Dongle = atoi(optarg);
@@ -113,12 +115,8 @@ int main(int argc,char *argv[]){
     }
   }
   if(Verbose){
-    if(Gain == -1)
-      fprintf(stderr,"funcube dongle %d: AGC off, blocksize %d, UDP control port %d\n",
+    fprintf(stderr,"funcube dongle %d: blocksize %d, UDP control port %d\n",
 	    Dongle,blocksize,ctl_port);
-    else
-      fprintf(stderr,"funcube dongle %d: min gain reduction %d dB, blocksize %d, UDP control port %d\n",
-	      Dongle,Gain,blocksize,ctl_port);
   }
   setlocale(LC_ALL,locale);
   signal(SIGPIPE,SIG_IGN);
@@ -127,27 +125,93 @@ int main(int argc,char *argv[]){
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);        
   
-  address.sin6_family = AF_INET6;
-  address.sin6_port = htons(ctl_port);
-  address.sin6_flowinfo = 0;
-  address.sin6_addr = in6addr_any;
-  address.sin6_scope_id = 0;
-  
+  // Set up RTP output socket
+  if(inet_pton(AF_INET,dest,&address4.sin_addr) == 1){
+    // Destination is IPv4
+    address4.sin_family = AF_INET;
+    address4.sin_port = htons(dest_port);
+    if((rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
+      fprintf(stderr,"funcube: can't create IPv4 output socket\n");
+      exit(1);
+    }
+    if(connect(rtp_sock,&address4,sizeof(address4)) != 0){
+      perror("connect to IPv4 output address failed");
+      exit(1);
+    }
+    if(IN_MULTICAST(&address4)){
+      // Destination is multicast; join it
+      struct group_req group_req;
+      group_req.gr_interface = 0;
+      memcpy(&group_req.gr_group,&address4,sizeof(address4));
+      if(setsockopt(rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+	perror("setsockopt ipv4 multicast join group failed");
+      }
+    }
+  } else if(inet_pton(AF_INET6,dest,&address6.sin6_addr) == 1){
+    // Destination is IPv6
+    address6.sin6_family = AF_INET6;
+    address6.sin6_flowinfo = 0;  
+    address6.sin6_port = htons(dest_port);
+    address6.sin6_scope_id = 0;
+    if((rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
+      fprintf(stderr,"funcube: can't create IPv6 output socket\n");
+      exit(1);
+    }
+    if(connect(rtp_sock,&address6,sizeof(address6)) != 0){
+      perror("connect to IPv6 address failed");
+      exit(1);
+    }
+    if(IN6_IS_ADDR_MULTICAST(&address6)){
+      // Destination is multicast; join it
+      struct group_req group_req;
+      group_req.gr_interface = 0;
+      memcpy(&group_req.gr_group,&address6,sizeof(address6));
+      if(setsockopt(rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+	perror("setsockopt ipv6 multicast join group failed");
+      }
+    }
+  } else {
+    fprintf(stderr,"Can't parse destination %s\n",dest);
+    exit(1);
+  }
+  // Apparently works for both IPv4 and IPv6
+  u_char loop = 1;
+  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
+    perror("setsockopt multicast loop failed");
+  }
+  u_char ttl = 1;
+  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
+    perror("setsockopt multicast ttl failed");
+  }
+      
+  // Set up control input socket
+  // Will accept either IPv4 or IPv6
   if((ctl = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
     fprintf(stderr,"funcube: can't open control socket\n");
     exit(1);
   }
-  if(bind(ctl,&address,sizeof(address)) != 0){
-    fprintf(stderr,"funcube: bind failed\n");
+  address6.sin6_family = AF_INET6;
+  address6.sin6_port = htons(ctl_port);
+  address6.sin6_flowinfo = 0;
+  address6.sin6_addr = in6addr_any;
+  address6.sin6_scope_id = 0;
+  if(bind(ctl,&address6,sizeof(address6)) != 0){
+    fprintf(stderr,"funcube: control port bind failed\n");
     exit(1);
   }
   fcntl(ctl,F_SETFL,O_NONBLOCK);
+
+
   front_end_init(Dongle,ADC_samprate,blocksize);
   usleep(100000);
   set_fc_LO(f); // Must be done after init
 
   pthread_mutex_lock(&FCD.mutex);
-  mirics_gain(FCD.first_LO,90,&FCD.if_gr,&FCD.lna_gr,&FCD.mixer_gr); // start low
+  mirics_gain(FCD.status.frequency,
+	      20,
+	      &FCD.status.if_gain,
+	      &FCD.status.lna_gain,
+	      &FCD.status.mixer_gain); // start low
   FCD.pending = 1;
   pthread_cond_broadcast(&FCD.cond);
   pthread_mutex_unlock(&FCD.mutex);    
@@ -155,20 +219,62 @@ int main(int argc,char *argv[]){
   if(Verbose > 1)
     pthread_create(&Display_thread,NULL,display,NULL);
 
+  time_t tt;
+  time(&tt);
+  ssrc = tt & 0xffffffff; // low 32 bits of clock time
+
+  rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+  rtp.mpt = 10;         // L16, stereo, but implies 44100 Hz and big-endian byte order?
+  rtp.ssrc = htonl(ssrc);
+
+  short sampbuf[2*blocksize];
+  struct iovec iovec[3];
+  iovec[0].iov_base = &rtp;
+  iovec[0].iov_len = sizeof(rtp);
+  iovec[1].iov_base = &FCD.status;
+  iovec[1].iov_len = sizeof(FCD.status);
+  iovec[2].iov_base = sampbuf;
+  iovec[2].iov_len = sizeof(sampbuf);
+
+  struct msghdr message;
+  message.msg_name = NULL;
+  message.msg_namelen = 0;
+  message.msg_iov = &iovec[0];
+  message.msg_iovlen = 3;
+  message.msg_control = NULL;
+  message.msg_controllen = 0;
+  message.msg_flags = 0;
+
   while(1){
-    complex float sampbuf[blocksize];
+
     socklen_t addrlen;
     char pktbuf[MAXPKT];
-    int rdlen;
+    int rdlen,i;
     
-    while(addrlen = sizeof(address), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&address,&addrlen)) > 0){
+    while(addrlen = sizeof(address6), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&address6,&addrlen)) > 0){
       // Commands have priority - is this right?
       process_fc_command(pktbuf,rdlen);
     }
     get_adc(sampbuf,blocksize);
-    // We've ignored SIGPIPE, so if the reader has gone away this write will fail with EPIPE. Just keep going.
-    write(1,sampbuf,blocksize*sizeof(*sampbuf));
+    if(Verbose > 1){
+      // Only used by display, so don't calculate if the display isn't running
+      // average energy (I+Q) in each sample, current block, **including DC offset**
+      // At low levels, will disagree with demod's IF1 figure, which has the DC removed
+      float sumsq = 0;
+      for(i=0;i<2*blocksize;i++){
+	sumsq += (float)sampbuf[i] * sampbuf[i];
+      }
+      FCD.power = sumsq/blocksize;
+    }
+
+    rtp.seq = htons(seq++);
+    rtp.timestamp = htonl(timestamp);
+    timestamp += blocksize;
+
+
+    sendmsg(rtp_sock,&message,0);
   }
+  close(rtp_sock);
   close(ctl);
   exit(0);
 }
@@ -180,8 +286,6 @@ int front_end_init(int dongle, int samprate,int L){
   snd_pcm_uframes_t buffer_size;
 
   FCD.samprate = samprate;
-  FCD.sig_high = -15;
-  FCD.sig_low = -35;
   FCD.agc_holdoff = 0.5 * FCD.samprate / L; // Block AGC changes for 1.0 sec after each change - samprate might not be set yet?
   FCD.agc_holdoff_count = 0;
 
@@ -266,14 +370,10 @@ int front_end_init(int dongle, int samprate,int L){
   return 0;
 }
 
-// Read buffer of samples from front end, correct for DC offsets and I/Q gain
-float get_adc(complex float *buffer,int L){
-  short samps[2*L];
-  int r,n;
-  float i_gain,gain;
-  complex float residual_DC,energy,dot;
-  double alpha,sinphi,cosphi,crosstalk,boost;
-  float energy_db;
+// Read buffer of samples from front end
+// L is number of stero samples, so buffer must have 2*L elements
+int get_adc(short *buffer,int L){
+  int r;
 
   // Read block of I/Q samples from A/D converter
   do {
@@ -283,74 +383,11 @@ float get_adc(complex float *buffer,int L){
       FCD.overrun++;
       snd_pcm_prepare(FCD.sdr_handle);
     }
-    if((r = snd_pcm_readi(FCD.sdr_handle,samps,L)) < 0){
+    if((r = snd_pcm_readi(FCD.sdr_handle,buffer,L)) < 0){
       fprintf(stderr,"funcube read error %s\n",snd_strerror(r));
       usleep(500000); // Just to keep from locking things up
     }
   } while(r != L);
-
-
-  gain = dB2voltage(FCD.lna_gr + FCD.mixer_gr + FCD.if_gr - FCD.max_gain);
-  // Adjust current block with smoothed values
-  alpha = sqrt(crealf(FCD.energy)/cimagf(FCD.energy));
-  i_gain = 1/alpha;
-  sinphi = FCD.sinphi;
-  cosphi = sqrt(1 - sinphi*sinphi);
-  crosstalk = -sinphi/(alpha*cosphi);
-  boost = 1/cosphi;
-
-  // Compute DC component, I/Q energies and I/Q dot products for
-  // DC removal, I/Q gain balancing and I/Q phase balancing
-  residual_DC = 0;
-  energy = 0;
-  dot = 0;
-
-  for(n=0;n<L;n++){
-    buffer[n] = CMPLXF(samps[2*n],samps[2*n+1]) - FCD.DC_offset;
-    residual_DC += buffer[n];
-    buffer[n] *= (1./SHRT_MAX);
-    energy += CMPLXF(crealf(buffer[n])*crealf(buffer[n]), cimagf(buffer[n])*cimagf(buffer[n]));
-    dot += crealf(buffer[n]) * cimagf(buffer[n]);
-    buffer[n] = gain * CMPLXF(i_gain * crealf(buffer[n]),
-			      crosstalk * crealf(buffer[n]) + boost * cimagf(buffer[n]));
-  }
-  // Update stats except after a gain change
-  residual_DC /= L;
-  energy /= L;
-  dot /= L;
-  if(FCD.agc_holdoff_count != 0)
-    FCD.agc_holdoff_count--;
-  if(FCD.agc_holdoff_count == 0){  // Clamp estimates after an AGC adjustment
-    int gr;
-
-    FCD.DC_offset += 0.05 * residual_DC;
-    FCD.energy = 0.95 * FCD.energy + 0.05 * energy; // this will give us a smoothed imbalance
-    alpha = sqrt(crealf(energy)/cimagf(energy)); // I/Q gain imbalance
-    i_gain = 1/alpha;
-    sinphi = i_gain * dot/cimagf(energy); // sin(phase error) Can this ever be < -1 or > +1?
-    FCD.sinphi = 0.95 * FCD.sinphi + 0.05 * sinphi; // keep smoothed value
-    energy_db = power2dB(crealf(energy) + cimagf(energy));
-    gr = FCD.lna_gr + FCD.mixer_gr + FCD.if_gr; // current gain reduction
-    if(Gain != -1 && (energy_db > FCD.sig_high || (gr > Gain && energy_db < FCD.sig_low))){
-      // Adjust analog gains
-      int adjust = energy_db - (FCD.sig_high + FCD.sig_low)/2;
-      if(gr + adjust <= Gain)
-	gr = Gain; // minimum gain reduction
-      else
-	gr += adjust;
-
-      pthread_mutex_lock(&FCD.mutex);
-      mirics_gain(FCD.first_LO,gr,&FCD.if_gr,&FCD.lna_gr,&FCD.mixer_gr);
-      FCD.pending = 1;
-      pthread_cond_broadcast(&FCD.cond);
-      pthread_mutex_unlock(&FCD.mutex);    
-      FCD.agc_holdoff_count = FCD.agc_holdoff; // Start holdoff timer
-#if 0
-      fprintf(stderr,"funcube energy %.1f dB gain reduction %d db: if %d lna %d mixer %d\n",
-	      energy_db,gr,FCD.if_gr,FCD.lna_gr,FCD.mixer_gr);
-#endif
-    }
-  }
   return 0;
 }
 
@@ -372,74 +409,34 @@ int process_fc_command(char *cmdbuf,int len){
 }
 
 
-// Tune hardware in integer steps as close to f as possible, return actual frequency
-// Accounts for calibration offset, so result will probably have a fractional hertz
-// This fraction can be allowed for in the second LO (the one in software)
 double set_fc_LO(double f){
-  if(f < 60e6){  // AM/LW/MW/SW
-    FCD.max_gain = 96;
-  } else if(f < 120e6){ // VHF band II
-    FCD.max_gain = 106;
-  } else if(f < 250e6){ // VHF band III
-    FCD.max_gain = 107;
-  } else if(f < 420e6){ // ?
-    FCD.max_gain = 107; // Does it even cover this range?
-  } else if(f < 1e9){   // Band IV/V
-    FCD.max_gain = 95.8;
-  } else {
-    FCD.max_gain = 106;
-  }
-
-
   pthread_mutex_lock(&FCD.mutex);
   FCD.pending = 1;
-  FCD.intfreq = (int)f;
+  FCD.status.frequency = round(f);
   pthread_cond_broadcast(&FCD.cond);
   pthread_mutex_unlock(&FCD.mutex);    
 
-  FCD.first_LO = f;
-  return FCD.first_LO;
+  return FCD.status.frequency;
 }
 
 void *fcd_command(void *arg){
-  unsigned char lna_gr,mixer_gr,if_gr;
+  unsigned char lna_gain,mixer_gain,if_gain;
   int intfreq;
-  unsigned char val;
+  double frequency;
 
   // Load current tuner state
   pthread_mutex_lock(&FCD.mutex);
-  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_FREQ_HZ,(unsigned char *)&FCD.intfreq,sizeof(FCD.intfreq));
-  intfreq = FCD.intfreq;
-  FCD.first_LO = FCD.intfreq / (1 + FCD.calibrate); // store true frequency
+  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_FREQ_HZ,(unsigned char *)&intfreq,sizeof(intfreq));
+  frequency = intfreq;
 
-  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_LNA_GAIN,&val,sizeof(val));
-  // Note: this should match gr() function
-  lna_gr = 0;
-  if(val == 0){
-    if(intfreq < 420000000){
-      lna_gr = 24;
-    } else {
-      lna_gr = 7;
-    }
-  }
-
-  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_MIXER_GAIN,&val,sizeof(val));
-  if(val == 0)
-    mixer_gr = 19;
-  else
-    mixer_gr = 0;
-
-  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_IF_GAIN1,&val,sizeof(val));
-  if_gr = 59 - val;
+  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_LNA_GAIN,&lna_gain,sizeof(lna_gain));
+  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_MIXER_GAIN,&mixer_gain,sizeof(mixer_gain));
+  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_IF_GAIN1,&if_gain,sizeof(if_gain));
 
   pthread_mutex_unlock(&FCD.mutex);
 
-  // For each changed parameter, first just set a flag so we can release the mutex quickly
-  // The fcdApp calls can stall, and we don't want to delay our client unnecessarily
   while(1){
-    int set_lna,set_mixer,set_gain,set_freq;
 
-    set_lna = set_mixer = set_gain = set_freq = 0;
     if(No_hold_open){
       fcdClose(FCD.phd);
       FCD.phd = NULL;
@@ -449,24 +446,7 @@ void *fcd_command(void *arg){
       pthread_cond_wait(&FCD.cond,&FCD.mutex);
     FCD.pending = 0;
 
-    // See what has changed
-    if(FCD.lna_gr != lna_gr){
-      lna_gr = FCD.lna_gr;
-      set_lna++;
-    }
-    if(FCD.mixer_gr != mixer_gr){
-      mixer_gr = FCD.mixer_gr;
-      set_mixer++;
-    }
-    if(FCD.if_gr != if_gr){
-      if_gr = FCD.if_gr;
-      set_gain++;
-    }
-    if(FCD.intfreq != intfreq){
-      intfreq = FCD.intfreq;
-      set_freq++;
-    }
-    pthread_mutex_unlock(&FCD.mutex);
+    pthread_mutex_unlock(&FCD.mutex); // Too early!!
 
     if(FCD.phd == NULL){
       if((FCD.phd = fcdOpen(FCD.sdr_name,sizeof(FCD.sdr_name),Dongle)) == NULL){
@@ -475,29 +455,39 @@ void *fcd_command(void *arg){
       }
     }      
 
-    if(set_lna){
-      val = lna_gr != 0 ? 0 : 1;
+    // See what has changed
+    if(FCD.status.lna_gain != lna_gain){
+      lna_gain = FCD.status.lna_gain;
 #if 0
-      fprintf(stderr,"lna %s\n",val ? "ON" : "OFF");
+      fprintf(stderr,"lna %s\n",lna_gain ? "ON" : "OFF");
 #endif
-      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&val,sizeof(val));
+      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&lna_gain,sizeof(lna_gain));
     }
-    if(set_mixer){
-      val = mixer_gr != 0 ? 0 : 1;
+    if(FCD.status.mixer_gain != mixer_gain){
+      mixer_gain = FCD.status.mixer_gain;
 #if 0
-      fprintf(stderr,"mixer %s\n",val ? "ON" : "OFF");
+      fprintf(stderr,"mixer %s\n",mixer_gain ? "ON" : "OFF");
 #endif
-      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&val,sizeof(val));
+      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&mixer_gain,sizeof(mixer_gain));
     }
-    if(set_gain){
-      val = 59 - if_gr;
+    if(FCD.status.if_gain != if_gain){
+      if_gain = FCD.status.if_gain;
 #if 0
-      fprintf(stderr,"IF gain %d db\n",val);
+      fprintf(stderr,"IF gain %d db\n",if_gain);
 #endif
-      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_IF_GAIN1,&val,sizeof(val));
+      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_IF_GAIN1,&if_gain,sizeof(if_gain));
     }
-    if(set_freq)
+    if(FCD.status.frequency != frequency){
+      intfreq = frequency = FCD.status.frequency;
       fcdAppSetFreq(FCD.phd,intfreq);
+    }
+#if 0
+    // TEST
+    fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_LNA_GAIN,&lna_gain,sizeof(lna_gain));
+    fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_MIXER_GAIN,&mixer_gain,sizeof(mixer_gain));
+    fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_IF_GAIN1,&if_gain,sizeof(if_gain));
+    fprintf(stderr,"fcd readback: lna_gain %d mixer_gain %d if_gain %d\n",lna_gain,mixer_gain,if_gain);
+#endif
   }
 }
 
@@ -505,22 +495,19 @@ void *fcd_command(void *arg){
 void *display(void *arg){
   float powerdB;
 
-  fprintf(stderr,"Frequency                     DC Offset       I/Q imbal   LNA  Mix    IF  Gain  A/D  Signal\n");
-  fprintf(stderr,"Hz                            I       Q       rad    dB    dB   dB    dB  dB   dBFS      dB\n");
+  fprintf(stderr,"Frequency      LNA  Mix   IF   A/D\n");
+  fprintf(stderr,"Hz                        dB  dBFS\n");
 
   while(1){
-    powerdB = power2dB(crealf(FCD.energy) + cimagf(FCD.energy));
+    // This is +3dB for both channels carrying a maximum amplitude square wave
+    powerdB = 10*log10f(FCD.power) - 90.309; // voltage ratio of 32768 -> +90.309 dB
 
-    fprintf(stderr,"%'-15.0lf%'16.2f%'8.2f%'10.5f%'6.1f   %3d  %3d%'6d%'4d %'6.1f%'8.1f\r",
-	    FCD.first_LO,
-	    crealf(FCD.DC_offset),cimagf(FCD.DC_offset),
-	    FCD.sinphi,
-	    power2dB(crealf(FCD.energy)/cimagf(FCD.energy)),
-	    -FCD.lna_gr,-FCD.mixer_gr,
-	    -FCD.if_gr,
-	    FCD.max_gain - (FCD.lna_gr+FCD.mixer_gr+FCD.if_gr),
-	    powerdB,
-	    powerdB + FCD.lna_gr + FCD.mixer_gr + FCD.if_gr - FCD.max_gain);
+    fprintf(stderr,"%'-15.0lf%3d%5d%5d%'6.1f\r",
+	    FCD.status.frequency,
+	    FCD.status.lna_gain,
+	    FCD.status.mixer_gain,
+	    FCD.status.if_gain,
+	    powerdB);
     usleep(100000); // 10 Hz
   }
   return NULL;
