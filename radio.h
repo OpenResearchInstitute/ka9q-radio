@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.3 2016/10/14 04:36:54 karn Exp karn $
+// $Id: radio.h,v 1.4 2017/05/11 10:32:15 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -16,15 +16,20 @@ struct demod {
   double max_IF;
   double min_IF;
   double calibrate; // Local cop of tuner calibration; - -> frequency low, + -> frequency high
-  double first_LO;  // Local copy of frequency sent to front end tuner
-  double first_LO_err; // Fraction of hz LO is different from desired
+  double first_LO;  // Local copy of frequency sent to front end tuner, uncorrected
   double second_LO; // Same as second_LO_phase step except when sweeping
                     // Provided because round trip through csincos/carg is less accurate
   double second_LO_rate;
+  complex float DC_offset; // Estimate of DC offset in front end, ideally zero
+  complex float power;     // smoothed estimate of signal power, I & Q
+  float dot;
+  float igain;       // Gain to be applied to I channel to equalize I & Q, ideally 1
+  float sinphi;      // Sine of I/Q phase error, ideally zero
+
+
   complex double second_LO_phase;
   complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
   complex double second_LO_phase_accel; // for frequency sweeping
-  float energy;    // Input energy, current frame
   int low;          // Lower limit of passband in bins, modulo N (may be negative)
   int high;         // Upper limit of passband in bins, modulo N (may be negative)
   int decimate;     // Decimation ratio in frequency domain when filtering
@@ -40,7 +45,10 @@ struct demod {
 };
 extern struct demod Demod;
 
+extern const float Headroom; // Audio headroom ratio
+
 double set_first_LO(double first_LO,int);
+double get_first_LO(void);
 double set_second_LO(double second_LO,int);
 double get_second_LO(int);
 double set_second_LO_rate(double second_LO_rate,int);
@@ -56,6 +64,6 @@ void *fcd_command(void *);
 void *dial(void *);     // Read tuning dial, set frequency
 void *contour(void *);
 void *display(void *);
-void *demod_loop(void *);
+void demod(complex float *);
 
 #endif
