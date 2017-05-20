@@ -1,7 +1,8 @@
-// $Id: main.c,v 1.4 2016/10/14 01:49:10 karn Exp karn $
+// $Id: main.c,v 1.5 2016/10/14 06:05:41 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
+#define _GNU_SOURCE 1
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
@@ -13,31 +14,51 @@
 #include <stdlib.h>
 #include <locale.h>
 #include <signal.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "radio.h"
 #include "filter.h"
 #include "dsp.h"
 #include "audio.h"
 #include "command.h"
+#include "rtp.h"
+
+#define MAXPKT 1500
 
 void closedown(int a);
 
+void *input_loop(void *arg);
+int process_command(char *cmdbuf,int len);
 pthread_t Display_thread;
 
 int Nthreads = 1;
 int ADC_samprate = 192000;
 int DAC_samprate = 48000;
-char *Tuner_host = "localhost";
+
+const float SCALE = 1./32768.;
 
 int Quiet;
-
 int Ctl_port = 4159;
+struct sockaddr_in6 ctl_address;
+struct sockaddr_in6 FE_address;
+
+int rtp_sock;
+struct sockaddr_in6 rtp_address;
+socklen_t rtp_addrlen = sizeof(rtp_address);
+
+
+int ctl;
+
 
 int main(int argc,char *argv[]){
   int c,N;
   char *locale;
   double rf = 162400000;
   struct command command;
+  char *source = NULL;
+  int source_port = -1;
 
   Quiet = 0;
   memset(&command,0,sizeof(command));
@@ -61,10 +82,16 @@ int main(int argc,char *argv[]){
   command.mode = FM;
   
   // Defaults
-  while((c = getopt(argc,argv,"qb:m:l:f:d:S:L:M:x:h:r:t:c:eT:p:")) != EOF){
+  while((c = getopt(argc,argv,"qb:m:l:f:d:S:L:M:x:h:r:t:c:eT:p:R:P:")) != EOF){
     int i;
 
     switch(c){
+    case 'R':
+      source = optarg;
+      break;
+    case 'P':
+      source_port = atoi(optarg);
+      break;
     case 'p':
       Ctl_port = atoi(optarg);
       break;
@@ -111,9 +138,6 @@ int main(int argc,char *argv[]){
       break;
     case 'S':
       Audio.name = optarg;
-      break;
-    case 'T':
-      Tuner_host = optarg;
       break;
     case 't':
       Nthreads = atoi(optarg);
@@ -170,9 +194,97 @@ int main(int argc,char *argv[]){
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);        
 
-  demod_loop(&command);
-  if(!Quiet)
-    fprintf(stderr,"radio: EOF on input\n");
+  // Set up input socket for multicast data stream from front end
+  struct sockaddr_in6 address6;
+  struct sockaddr_in address4;  
+
+  if(inet_pton(AF_INET,source,&address4.sin_addr) == 1){
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_port = htons(source_port);
+    address.sin_addr.s_addr = INADDR_ANY;
+    if((rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
+      perror("can't create IPv4 input socket");
+      exit(1);
+    }
+    if(bind(rtp_sock,&address,sizeof(address)) != 0){
+      perror("ipv4 bind on input socket failed");
+      exit(1);
+    }
+
+    struct group_req group_req;
+    group_req.gr_interface = 0;
+    address4.sin_family = AF_INET;
+    address4.sin_port = 0;
+    memcpy(&group_req.gr_group,&address4,sizeof(address4));
+    if(setsockopt(rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+      perror("setsockopt ipv6/v4 multicast join group failed");
+      exit(1);
+    }
+  } else if(inet_pton(AF_INET6,source,&address6.sin6_addr) == 1){
+    struct sockaddr_in6 address;
+    address.sin6_family = AF_INET6;
+    address.sin6_flowinfo = 0;  
+    address.sin6_port = htons(source_port);
+    address.sin6_scope_id = 0;
+    address.sin6_addr = in6addr_any;
+    if((rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
+      fprintf(stderr,"funcube: can't create IPv6 output socket\n");
+      exit(1);
+    }
+    if(bind(rtp_sock,&address,sizeof(address)) != 0){
+      perror("bind to IPv6 multicast address failed");
+      exit(1);
+    }
+    struct group_req group_req;
+    group_req.gr_interface = 0;
+    address6.sin6_family = AF_INET6;
+    address6.sin6_port = htons(source_port);
+    memcpy(&group_req.gr_group,&address6,sizeof(address6));
+    if(setsockopt(rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+      perror("setsockopt ipv6 multicast join group failed");
+      exit(1);
+    }
+  } else {
+    fprintf(stderr,"Can't parse RTP source address %s\n",source);
+    exit(1);
+  }
+  u_char loop,ttl;
+  loop = 0;
+  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
+    perror("setsockopt multicast loop failed");
+  }
+  ttl = 1;
+  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
+    perror("setsockopt multicast ttl failed");
+  }
+
+  // Set up control port
+
+  ctl_address.sin6_family = AF_INET6;
+  ctl_address.sin6_port = htons(Ctl_port);
+  ctl_address.sin6_flowinfo = 0;
+  ctl_address.sin6_addr = in6addr_any;
+  ctl_address.sin6_scope_id = 0;
+
+  if((ctl = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
+    fprintf(stderr,"can't open control socket\n");
+    exit(1);
+  }
+  if(bind(ctl,&ctl_address,sizeof(ctl_address)) != 0){
+    fprintf(stderr,"bind failed\n");
+    exit(1);
+  }
+  fcntl(ctl,F_SETFL,O_NONBLOCK);
+
+  // Set up to send a message to ourselves
+  ctl_address.sin6_addr = in6addr_loopback;
+
+  // Send ourselves the command
+  sendto(ctl,&command,sizeof(command),0,&ctl_address,sizeof(ctl_address)); // to ourselves
+
+  input_loop(NULL);
+
   exit(0);
 }
 
@@ -181,3 +293,117 @@ void closedown(int a){
     fprintf(stderr,"radio: caught signal %d: %s\n",a,strsignal(a));
   exit(1);
 }
+
+// Read from RTP network socket, assemble blocks of samples with corrections done
+
+
+float alpha = 0.000001; // high pass filter coefficient for offset and I/Q imbalance estimates
+float power_alpha = 0.001; // high pass filter coefficient for power estimates
+
+complex float *Input_data;
+int Input_cnt;
+
+void *input_loop(void *arg){
+  int cnt;
+  short samples[MAXPKT];
+  struct rtp_header rtp_header;
+  struct status status;
+  struct iovec iovec[3];
+
+  iovec[0].iov_base = &rtp_header;
+  iovec[0].iov_len = sizeof(rtp_header);
+  iovec[1].iov_base = &status;
+  iovec[1].iov_len = sizeof(status);
+  iovec[2].iov_base = samples;
+  iovec[2].iov_len = sizeof(samples);
+  
+  struct msghdr message;
+  message.msg_name = &rtp_address;
+  message.msg_namelen = sizeof(rtp_address);
+  message.msg_iov = &iovec[0];
+  message.msg_iovlen = 3;
+  message.msg_control = NULL;
+  message.msg_controllen = 0;
+  message.msg_flags = 0;
+
+  Input_data = malloc(sizeof(complex float)*Demod.L);
+  Input_cnt = 0;
+
+  while(1){
+    // See if we have any commands
+    socklen_t addrlen;
+    int rdlen;
+
+    char pktbuf[MAXPKT];
+    short *sp;
+
+    while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
+      process_command(pktbuf,rdlen);
+
+
+    cnt = recvmsg(rtp_sock,&message,0);
+    if(cnt <= 0){    // ??
+      perror("recvfrom");
+      usleep(50000);
+      continue;
+    }
+    if(cnt < sizeof(rtp_header) + sizeof(status))
+      continue; // Too small, ignore
+
+    // Look at the RTP header at some point
+    Demod.first_LO = status.frequency;
+    cnt -= sizeof(rtp_header) + sizeof(status);
+    sp = samples;
+    cnt /= 4; // count 4-byte stereo samples
+    while(cnt-- != 0){
+      complex float samp;
+      
+      samp = CMPLXF(sp[0],sp[1]) - Demod.DC_offset;
+      Demod.DC_offset += samp * alpha; 
+      samp *= SCALE; // Scale to unity peak ampitude
+      Demod.power += power_alpha * (CMPLXF(crealf(samp)*crealf(samp),cimagf(samp)*cimagf(samp)) - Demod.power);
+      Demod.dot += alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
+      Input_data[Input_cnt++] = samp;
+      sp += 2;
+      if(Input_cnt == Demod.L){
+	// Full input block
+	demod(Input_data);
+	Input_cnt = 0;
+      }
+    }
+  }
+}
+int process_command(char *cmdbuf,int len){
+  struct command command;
+
+  if(len >= sizeof(command)){
+    memcpy(&command,cmdbuf,sizeof(command));
+    switch(command.cmd){
+    case SENDSTAT:
+      break; // do this later
+    case SETSTATE: // first LO freq, second LO freq, second_LO freq rate, mode
+#if 0
+      fprintf(stderr,"setstate(%d,%.2lf,%.2lf,%.2lf,%.2lf)\n",
+	      command.mode,
+	      command.first_LO,
+	      command.second_LO,command.second_LO_rate,command.calibrate);
+#endif
+      // Ignore out-of-range values
+      if(command.first_LO > 0 && command.first_LO < 2e9)
+	set_first_LO(command.first_LO,0);
+      if(command.second_LO >= -Demod.samprate/2 && command.second_LO <= +Demod.samprate/2)
+	set_second_LO(command.second_LO,0);
+      if(fabs(command.second_LO_rate) < 1e9)
+	set_second_LO_rate(command.second_LO_rate,0);
+      if(command.mode > 0 && command.mode <= Nmodes)
+	set_mode(command.mode);
+      if(fabs(command.calibrate) < 1)
+	set_cal(command.calibrate);
+      break;
+    default:
+      break; // Ignore
+    } // switch
+  }
+  return 0;
+}
+ 
