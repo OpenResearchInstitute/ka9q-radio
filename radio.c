@@ -1,5 +1,6 @@
-// $Id: radio.c,v 1.5 2016/10/24 13:24:55 karn Exp karn $
+// $Id: radio.c,v 1.6 2017/05/11 10:32:24 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
+#define _GNU_SOURCE 1
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
@@ -8,6 +9,9 @@
 #include <complex.h>
 #include <fftw3.h>
 #undef I
+#include <sys/socket.h>
+#include <netinet/in.h>
+
 
 #include "command.h"
 #include "radio.h"
@@ -16,9 +20,17 @@
 #include "audio.h"
 
 
+extern int ctl;
 struct demod Demod;
-extern int Front_end_ctl;
 double get_exact_samprate();
+
+const float Headroom = .316227766; // sqrt(0.10) = -10 dB
+
+
+// Get true first LO frequency
+double get_first_LO(){
+  return Demod.first_LO * (1 + Demod.calibrate);  // True frequency, as adjusted
+}
 
 
 // Return current frequency of carrier frequency at current first IF
@@ -34,7 +46,7 @@ double get_second_LO(int offset){
 
 // Return current carrier frequency, including effects of any sweep
 double get_freq(){
-  return Demod.first_LO - get_second_LO(0);
+  return get_first_LO() - get_second_LO(0);
 }
 
 // Set either or both LOs as needed to tune the specified radio frequency to zero audio frequency
@@ -42,24 +54,27 @@ double get_freq(){
 // Note: single precision floating point is not accurate enough at VHF and above
 double set_first_LO(double first_LO,int force){
   struct command command;
+  struct sockaddr_in6 FE_address;
 
-  if(!force && first_LO == Demod.first_LO)
+  if(!force && first_LO == get_first_LO())
     return first_LO;
 
   memset(&command,0,sizeof(command));
   command.cmd = SETSTATE;
-  command.first_LO = round(first_LO / (1 + Demod.calibrate)); // What we send to the tuner
-  Demod.first_LO = command.first_LO * (1 + Demod.calibrate);  // True frequency, as adjusted
-  Demod.first_LO_err = Demod.first_LO - first_LO; // fractional Hz between actual and desired
-  write(Front_end_ctl,&command,sizeof(command));
-  return Demod.first_LO;
+  Demod.first_LO = command.first_LO = round(first_LO / (1 + Demod.calibrate)); // What we send to the tuner
+  // Send commands to source address of last RTP packet from front end
+  FE_address = rtp_address;
+  FE_address.sin6_port = htons(4160); // make this better!
+  if(sendto(ctl,&command,sizeof(command),0,&FE_address,sizeof(FE_address)) == -1)
+      perror("sendto control socket");
+  return get_first_LO();
 }
 double set_second_LO(double second_LO,int force){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
-  if(!force && second_LO + Demod.first_LO_err == Demod.second_LO)
+  if(!force && second_LO == Demod.second_LO)
     return second_LO;
   
-  Demod.second_LO = second_LO + Demod.first_LO_err;
+  Demod.second_LO = second_LO;
   Demod.second_LO_phase_step = csincos(2*M_PI*Demod.second_LO/get_exact_samprate());
   if(Demod.second_LO_phase == 0) // In case it wasn't already set
     Demod.second_LO_phase = 1;
@@ -151,20 +166,17 @@ int set_mode(enum mode mode){
     Demod.filter = create_filter(Demod.L,Demod.M,Demod.response,Demod.decimate,COMPLEX);
     break;
   }
-  // Used by FM only; automatically adjusted by AGC in linear modes
+  // Constant gain used by FM only; automatically adjusted by AGC in linear modes
   if(mode == FM)
-    Demod.gain = N / (Demod.decimate * abs(Demod.low - Demod.high));
+    Demod.gain = (Headroom * N / M_PI) / (Demod.decimate * abs(Demod.low - Demod.high));
   else
-    Demod.gain = dB2voltage(70.); // 70 dB
+    Demod.gain = dB2voltage(70.); // 70 dB starting point, will adjust with ssb_agc
   //  audio_change_parms(Demod.samprate/Demod.decimate,Modes[mode].channels,Demod.L);
   audio_change_parms(Demod.samprate/Demod.decimate,2,Demod.L);  
   return 0;
 }      
 int set_cal(double cal){
   Demod.calibrate = cal;
-  set_first_LO(Demod.first_LO,1);
-  set_second_LO(Demod.second_LO,1);
-  set_second_LO_rate(Demod.second_LO_rate,1);
   return 0;
 }
 
@@ -192,10 +204,9 @@ int spindown(complex float *data,int len){
 
 
 int ssb_agc(){
-  if(Demod.gain * Demod.amplitude > 0.3){ // Target to -10 dBFS
+  if(Demod.gain * Demod.amplitude > Headroom){ // Target to about -10 dBFS
     // New signal peak: decrease gain and inhibit re-increase for a while
-    Demod.gain = 0.3 / Demod.amplitude;
-    Demod.gain = max(Demod.gain,1.0); // 0 dB floor in case of a big peak
+    Demod.gain = Headroom / Demod.amplitude;
     Demod.hangtime = Demod.hangmax;
   } else {
     if(Demod.hangtime !=0){
