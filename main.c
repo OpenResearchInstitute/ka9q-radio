@@ -37,7 +37,7 @@ int Nthreads = 1;
 int ADC_samprate = 192000;
 int DAC_samprate = 48000;
 
-const float SCALE = 1./32768.;
+
 
 int Quiet;
 int Ctl_port = 4159;
@@ -55,13 +55,12 @@ int ctl;
 int main(int argc,char *argv[]){
   int c,N;
   char *locale;
-  double rf = 162400000;
-  struct command command;
-  char *source = NULL;
-  int source_port = -1;
+  char *source = "239.1.2.3"; // Default for testing
+  int source_port = 5555;     // Default for testing
+  enum mode mode;
+  double second_IF;
 
-  Quiet = 0;
-  memset(&command,0,sizeof(command));
+
   locale = getenv("LANG");
   setlocale(LC_ALL,locale);
 
@@ -71,18 +70,16 @@ int main(int argc,char *argv[]){
 
   locale = getenv("LANG");
 
+  // Defaults
+  Quiet = 0;
   Audio.name = "sysdefault";
   Demod.L = 4096;      // Number of samples in buffer
   Demod.M = (4096+1);  // Length of filter impulse response
+  mode = FM;
+  second_IF = 48000;
 
-  command.cmd = SETSTATE;
-  command.second_LO = -48000;
-  command.first_LO = rf + command.second_LO;
-  command.second_LO_rate = 0;
-  command.mode = FM;
-  
-  // Defaults
-  while((c = getopt(argc,argv,"qb:m:l:f:d:S:L:M:x:h:r:t:c:eT:p:R:P:")) != EOF){
+
+  while((c = getopt(argc,argv,"qb:m:l:d:S:L:M:x:h:r:t:c:eT:p:R:P:i:")) != EOF){
     int i;
 
     switch(c){
@@ -104,9 +101,6 @@ int main(int argc,char *argv[]){
     case 'e':
       Audio.echo = 1; // Echo sound to standard output
       break;
-    case 'c':
-      command.calibrate = atof(optarg)*1e-6;
-      break;
     case 'h':
       Demod.min_IF = atof(optarg);
       break;
@@ -122,13 +116,10 @@ int main(int argc,char *argv[]){
     case 'r':
       DAC_samprate = atof(optarg);
       break;
-    case 'f':
-      rf = atof(optarg);
-      break;
     case 'm':
       for(i = 1; i < Nmodes;i++){
 	if(strcasecmp(optarg,Modes[i].name) == 0){
-	  command.mode = Modes[i].mode;
+	  mode = Modes[i].mode;
 	  break;
 	}
       }
@@ -145,12 +136,20 @@ int main(int argc,char *argv[]){
       fftwf_plan_with_nthreads(Nthreads);
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
+    case 'i':
+      second_IF = atof(optarg);
+      break;
     default:
-      fprintf(stderr,"Usage: %s [-r DAC sample rate] [-f freq] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-x maxIF]\n",argv[0]);
-      fprintf(stderr,"Default: %s -r %u -f %.1lf -m %s -l %s -S %s -L %d -M %d -h %.1f -x %.1f\n",
-	      argv[0],DAC_samprate,rf,Modes[command.mode].name,locale,Audio.name,Demod.L,Demod.M,Demod.max_IF,Demod.min_IF);
+      fprintf(stderr,"Usage: %s [-r DAC sample rate] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-x maxIF] [-t threads] [-R multicast_address] [-P port]\n",argv[0]);
+      fprintf(stderr,"Default: %s -r %u -m %s -l %s -S %s -L %d -M %d -h %.1f -x %.1f -R %s -P %d\n",
+	      argv[0],DAC_samprate,Modes[mode].name,locale,Audio.name,Demod.L,Demod.M,Demod.max_IF,Demod.min_IF,
+	      source,source_port);
       break;
     }
+  }
+  if(source == NULL || source_port == -1){
+    fprintf(stderr,"Specify -R source_address -P port\n");
+    exit(1);
   }
   setlocale(LC_ALL,locale);
 
@@ -187,7 +186,6 @@ int main(int argc,char *argv[]){
   if(!Quiet)
     pthread_create(&Display_thread,NULL,display,NULL);
 
-  command.first_LO = rf + command.second_LO;
   signal(SIGPIPE,closedown);
   signal(SIGINT,closedown);
   signal(SIGKILL,closedown);
@@ -260,7 +258,6 @@ int main(int argc,char *argv[]){
   }
 
   // Set up control port
-
   ctl_address.sin6_family = AF_INET6;
   ctl_address.sin6_port = htons(Ctl_port);
   ctl_address.sin6_flowinfo = 0;
@@ -276,12 +273,9 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   fcntl(ctl,F_SETFL,O_NONBLOCK);
+  set_mode(mode);
+  set_second_LO(-second_IF,1);
 
-  // Set up to send a message to ourselves
-  ctl_address.sin6_addr = in6addr_loopback;
-
-  // Send ourselves the command
-  sendto(ctl,&command,sizeof(command),0,&ctl_address,sizeof(ctl_address)); // to ourselves
 
   input_loop(NULL);
 
@@ -295,13 +289,6 @@ void closedown(int a){
 }
 
 // Read from RTP network socket, assemble blocks of samples with corrections done
-
-
-float alpha = 0.000001; // high pass filter coefficient for offset and I/Q imbalance estimates
-float power_alpha = 0.001; // high pass filter coefficient for power estimates
-
-complex float *Input_data;
-int Input_cnt;
 
 void *input_loop(void *arg){
   int cnt;
@@ -326,9 +313,6 @@ void *input_loop(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
-  Input_data = malloc(sizeof(complex float)*Demod.L);
-  Input_cnt = 0;
-
   while(1){
     // See if we have any commands
     socklen_t addrlen;
@@ -339,7 +323,6 @@ void *input_loop(void *arg){
 
     while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
       process_command(pktbuf,rdlen);
-
 
     cnt = recvmsg(rtp_sock,&message,0);
     if(cnt <= 0){    // ??
@@ -356,20 +339,8 @@ void *input_loop(void *arg){
     sp = samples;
     cnt /= 4; // count 4-byte stereo samples
     while(cnt-- != 0){
-      complex float samp;
-      
-      samp = CMPLXF(sp[0],sp[1]) - Demod.DC_offset;
-      Demod.DC_offset += samp * alpha; 
-      samp *= SCALE; // Scale to unity peak ampitude
-      Demod.power += power_alpha * (CMPLXF(crealf(samp)*crealf(samp),cimagf(samp)*cimagf(samp)) - Demod.power);
-      Demod.dot += alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
-      Input_data[Input_cnt++] = samp;
+      proc_samples(sp[0],sp[1]);
       sp += 2;
-      if(Input_cnt == Demod.L){
-	// Full input block
-	demod(Input_data);
-	Input_cnt = 0;
-      }
     }
   }
 }
@@ -391,6 +362,7 @@ int process_command(char *cmdbuf,int len){
       // Ignore out-of-range values
       if(command.first_LO > 0 && command.first_LO < 2e9)
 	set_first_LO(command.first_LO,0);
+
       if(command.second_LO >= -Demod.samprate/2 && command.second_LO <= +Demod.samprate/2)
 	set_second_LO(command.second_LO,0);
       if(fabs(command.second_LO_rate) < 1e9)

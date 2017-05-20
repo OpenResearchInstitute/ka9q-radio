@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.5 2017/05/11 10:31:43 karn Exp karn $
+// $Id: demod.c,v 1.6 2017/05/20 01:21:01 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -33,13 +33,35 @@ int process_wfm();
 
 extern int Ctl_port;
 
-void demod(complex float *data){
+int In_count = 0;
+float alpha = 0.000001; // high pass filter coefficient for offset and I/Q imbalance estimates
+float power_alpha = 0.001; // high pass filter coefficient for power estimates
 
+void demod(void);
+
+const float SCALE = 1./32768.;
+
+void proc_samples(short i,short q){
+  complex float samp;
+      
   if(Demod.filter == NULL || Demod.filter->input == NULL){
     return; // We're not ready; drop
   }
 
-  memcpy(Demod.filter->input,data,sizeof(*data) * Demod.filter->blocksize_in);
+  samp = CMPLXF(i,q) - Demod.DC_offset;
+  Demod.DC_offset += samp * alpha; 
+  samp *= SCALE; // Scale to unity peak ampitude
+  Demod.power += power_alpha * (CMPLXF(crealf(samp)*crealf(samp),cimagf(samp)*cimagf(samp)) - Demod.power);
+  Demod.dot += alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
+  Demod.filter->input[In_count++] = samp;
+  if(In_count == Demod.filter->blocksize_in){
+    demod();
+    In_count = 0;
+  }
+}
+
+
+void demod(){
 
   spindown(Demod.filter->input,Demod.filter->blocksize_in); // 2nd LO
 
@@ -95,6 +117,10 @@ void demod(complex float *data){
 int process_ssb(){
   // Automatic gain control
   Demod.amplitude = amplitude(Demod.filter->output.r,Demod.filter->blocksize_out);
+  if(Demod.amplitude < Demod.noise)
+    Demod.noise = Demod.amplitude;
+  Demod.snr = Demod.amplitude / Demod.noise;
+  Demod.snr *= Demod.snr; // Turn into power ratio
   ssb_agc();
   
   put_mono_audio(Demod.filter->output.r,Demod.filter->blocksize_out,Demod.gain);
@@ -172,9 +198,9 @@ int process_iq(){
 int process_fm(){
   float audio[Demod.filter->blocksize_out];
 
-  // If squelch is closed, just let the output drain
-  Demod.snr = fm_snr(Demod.filter->output.c,Demod.filter->blocksize_out) - 1;
+  Demod.snr = fm_snr(Demod.filter->output.c,Demod.filter->blocksize_out);
 
+  // If squelch is closed, just let the output drain
   if(Demod.snr > 2){
     do_fm(audio,Demod.filter->output.c,Demod.filter->blocksize_out,&Demod.fmstate);
     put_mono_audio(audio,Demod.filter->blocksize_out,Demod.gain);

@@ -15,7 +15,7 @@ struct demod {
   int M;            // Samples in filter impulse response
   double max_IF;
   double min_IF;
-  double calibrate; // Local cop of tuner calibration; - -> frequency low, + -> frequency high
+  double calibrate; // Tuner calibration; - -> frequency low, + -> frequency high
   double first_LO;  // Local copy of frequency sent to front end tuner, uncorrected
   double second_LO; // Same as second_LO_phase step except when sweeping
                     // Provided because round trip through csincos/carg is less accurate
@@ -38,6 +38,7 @@ struct demod {
   complex float fmstate;    // FM demodulator state
   float snr;        // Estimated signal-to-noise ratio (FM only)
   float amplitude; // Amplitude (not power) of signal after filter
+  float noise;     // Minimum amplitude for SNR estimates (experimental)
   int hangmax;      // How long for AGC to hang (clamp) after signal increases
   int hangtime;     // block times until AGC can increase again
   float gain;       // Current audio gain (linear modes only)
@@ -47,7 +48,7 @@ extern struct demod Demod;
 
 extern const float Headroom; // Audio headroom ratio
 
-double set_first_LO(double first_LO,int);
+int set_first_LO(double first_LO,int);
 double get_first_LO(void);
 double set_second_LO(double second_LO,int);
 double get_second_LO(int);
@@ -64,6 +65,6 @@ void *fcd_command(void *);
 void *dial(void *);     // Read tuning dial, set frequency
 void *contour(void *);
 void *display(void *);
-void demod(complex float *);
+void proc_samples(short,short);
 
 #endif

@@ -1,6 +1,7 @@
 #ifndef _COMMAND_H
 #define _COMMAND_H 1
 
+#include <stdint.h>
 #include <sys/socket.h>
 enum cmd {
   SENDSTAT=1,
@@ -39,12 +40,15 @@ struct modetab {
   int channels;      // Number of audio channels
 };
 // Sent in each RTP packet right after header
+// NB! because we just copy this into the network stream, it's important that the compiler
+// not add any extra padding. To avoid this, the size must be a multiple of 8, the size of the double
 struct status {
   double frequency;
-  char lna_gain;
-  char mixer_gain;
-  char if_gain;
-  char unused; // pad to 12 bytes
+  uint32_t samprate;
+  uint8_t lna_gain;
+  uint8_t mixer_gain;
+  uint8_t if_gain;
+  uint8_t unused; // pad to 16 bytes
 };
 
 

@@ -52,22 +52,25 @@ double get_freq(){
 // Set either or both LOs as needed to tune the specified radio frequency to zero audio frequency
 // Actually it goes to the offset specified in the mode table; e.g. +/- 750 Hz for the CW modes
 // Note: single precision floating point is not accurate enough at VHF and above
-double set_first_LO(double first_LO,int force){
-  struct command command;
+int set_first_LO(double first_LO,int force){
+  struct status requested_status;
   struct sockaddr_in6 FE_address;
 
   if(!force && first_LO == get_first_LO())
-    return first_LO;
+    return 0;
 
-  memset(&command,0,sizeof(command));
-  command.cmd = SETSTATE;
-  Demod.first_LO = command.first_LO = round(first_LO / (1 + Demod.calibrate)); // What we send to the tuner
+  // Change only tuner frequency
+  requested_status.frequency = round(first_LO / (1 + Demod.calibrate)); // What we send to the tuner
+  requested_status.lna_gain = 0xff;
+  requested_status.mixer_gain = 0xff;
+  requested_status.if_gain = 0xff;    
+
   // Send commands to source address of last RTP packet from front end
   FE_address = rtp_address;
   FE_address.sin6_port = htons(4160); // make this better!
-  if(sendto(ctl,&command,sizeof(command),0,&FE_address,sizeof(FE_address)) == -1)
+  if(sendto(ctl,&requested_status,sizeof(requested_status),0,&FE_address,sizeof(FE_address)) == -1)
       perror("sendto control socket");
-  return get_first_LO();
+  return 0;
 }
 double set_second_LO(double second_LO,int force){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
@@ -103,6 +106,8 @@ int set_mode(enum mode mode){
   int n;
   double gain;
 
+  Demod.noise = INFINITY;
+  
   if(mode == Demod.mode)
     return 0;
   
@@ -119,6 +124,7 @@ int set_mode(enum mode mode){
   Demod.agcratio = dB2voltage(6 * ((float)Demod.L/Demod.samprate)); // 6 dB/sec
   Demod.hangtime = 0;
   Demod.fmstate = 0;
+
   if(Demod.filter != NULL){
     delete_filter(Demod.filter);
     Demod.response = NULL;
@@ -209,6 +215,7 @@ int ssb_agc(){
     Demod.gain = Headroom / Demod.amplitude;
     Demod.hangtime = Demod.hangmax;
   } else {
+    // Not a new peak, but the AGC is still hanging at the last peak
     if(Demod.hangtime !=0){
       Demod.hangtime--;
     } else {
