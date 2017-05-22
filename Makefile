@@ -15,7 +15,7 @@ control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
 
 radio: main.o radio.o demod.o fm.o filter.o display.o modes.o audio.o misc.o
-	$(CC) -g -o $@ $^ -lasound  -lfftw3f_threads -lfftw3f -lpthread -lm
+	$(CC) -g -o $@ $^ -lasound  -lfftw3f_threads -lfftw3f -lpthread -lncurses -lm
 
 libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
