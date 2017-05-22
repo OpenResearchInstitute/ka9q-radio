@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.5 2016/10/14 06:05:41 karn Exp karn $
+// $Id: main.c,v 1.7 2017/05/20 10:10:38 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -335,6 +335,9 @@ void *input_loop(void *arg){
 
     // Look at the RTP header at some point
     Demod.first_LO = status.frequency;
+    Demod.lna_gain = status.lna_gain;
+    Demod.mixer_gain = status.mixer_gain;
+    Demod.if_gain = status.if_gain;    
     cnt -= sizeof(rtp_header) + sizeof(status);
     sp = samples;
     cnt /= 4; // count 4-byte stereo samples
