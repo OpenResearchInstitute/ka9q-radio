@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.4 2017/05/11 10:32:15 karn Exp karn $
+// $Id: radio.h,v 1.6 2017/05/20 10:11:31 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -25,6 +25,9 @@ struct demod {
   float dot;
   float igain;       // Gain to be applied to I channel to equalize I & Q, ideally 1
   float sinphi;      // Sine of I/Q phase error, ideally zero
+  uint8_t lna_gain;
+  uint8_t mixer_gain;
+  uint8_t if_gain;
 
 
   complex double second_LO_phase;
