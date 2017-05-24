@@ -41,22 +41,25 @@ void demod(void);
 
 const float SCALE = 1./32768.;
 
-void proc_samples(short i,short q){
+void proc_samples(short *sp,int cnt){
   complex float samp;
       
   if(Demod.filter == NULL || Demod.filter->input == NULL){
     return; // We're not ready; drop
   }
 
-  samp = CMPLXF(i,q) - Demod.DC_offset;
-  Demod.DC_offset += samp * alpha; 
-  samp *= SCALE; // Scale to unity peak ampitude
-  Demod.power += power_alpha * (CMPLXF(crealf(samp)*crealf(samp),cimagf(samp)*cimagf(samp)) - Demod.power);
-  Demod.dot += alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
-  Demod.filter->input[In_count++] = samp;
-  if(In_count == Demod.filter->blocksize_in){
-    demod();
-    In_count = 0;
+  while(cnt-- != 0){
+    samp = CMPLXF(sp[0],sp[1]) - Demod.DC_offset;
+    sp += 2;
+    Demod.DC_offset += samp * alpha; 
+    samp *= SCALE; // Scale to unity peak ampitude
+    Demod.power += power_alpha * (CMPLXF(crealf(samp)*crealf(samp),cimagf(samp)*cimagf(samp)) - Demod.power);
+    Demod.dot += alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
+    Demod.filter->input[In_count++] = samp;
+    if(In_count == Demod.filter->blocksize_in){
+      demod();
+      In_count = 0;
+    }
   }
 }
 
@@ -117,10 +120,8 @@ void demod(){
 int process_ssb(){
   // Automatic gain control
   Demod.amplitude = amplitude(Demod.filter->output.r,Demod.filter->blocksize_out);
-  if(Demod.amplitude < Demod.noise)
-    Demod.noise = Demod.amplitude;
-  Demod.snr = Demod.amplitude / Demod.noise;
-  Demod.snr *= Demod.snr; // Turn into power ratio
+  float snn = Demod.amplitude / Demod.noise; // (S+N)/N amplitude ratio
+  Demod.snr = (snn*snn) -1; // S/N as power ratio
   ssb_agc();
   
   put_mono_audio(Demod.filter->output.r,Demod.filter->blocksize_out,Demod.gain);
