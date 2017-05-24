@@ -68,6 +68,6 @@ void *fcd_command(void *);
 void *dial(void *);     // Read tuning dial, set frequency
 void *contour(void *);
 void *display(void *);
-void proc_samples(short,short);
+void proc_samples(short *,int);
 
 #endif
