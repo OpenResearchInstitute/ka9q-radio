@@ -317,9 +317,7 @@ void *input_loop(void *arg){
     // See if we have any commands
     socklen_t addrlen;
     int rdlen;
-
     char pktbuf[MAXPKT];
-    short *sp;
 
     while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
       process_command(pktbuf,rdlen);
@@ -339,12 +337,8 @@ void *input_loop(void *arg){
     Demod.mixer_gain = status.mixer_gain;
     Demod.if_gain = status.if_gain;    
     cnt -= sizeof(rtp_header) + sizeof(status);
-    sp = samples;
     cnt /= 4; // count 4-byte stereo samples
-    while(cnt-- != 0){
-      proc_samples(sp[0],sp[1]);
-      sp += 2;
-    }
+    proc_samples(samples,cnt);
   }
 }
 int process_command(char *cmdbuf,int len){
