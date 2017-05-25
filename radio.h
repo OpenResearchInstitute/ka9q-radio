@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.6 2017/05/20 10:11:31 karn Exp karn $
+// $Id: radio.h,v 1.9 2017/05/25 05:12:06 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -20,11 +20,9 @@ struct demod {
   double second_LO; // Same as second_LO_phase step except when sweeping
                     // Provided because round trip through csincos/carg is less accurate
   double second_LO_rate;
-  complex float DC_offset; // Estimate of DC offset in front end, ideally zero
-  complex float power;     // smoothed estimate of signal power, I & Q
-  float dot;
-  float phi;
-  float igain;       // Gain to be applied to I channel to equalize I & Q, ideally 1
+  float DC_i,DC_q;  // Average DC offsets
+  float power_i,power_q; // Average channel powers
+  float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
   float sinphi;      // Sine of I/Q phase error, ideally zero
   uint8_t lna_gain;
   uint8_t mixer_gain;
