@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.6 2017/05/11 10:32:24 karn Exp karn $
+// $Id: radio.c,v 1.8 2017/05/20 10:11:47 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -204,6 +204,25 @@ int spindown(complex float *data,int len){
   Demod.second_LO_phase /= cabs(Demod.second_LO_phase);
   if(Demod.second_LO_phase_accel != 0)
     Demod.second_LO_phase_step /= cabs(Demod.second_LO_phase_step);
+
+  if(cimag(Demod.second_LO_phase_accel) != 0){
+    // We're sweeping, so ensure we won't run the passband past the edges of the first IF bandwidth
+    double first_if = -get_second_LO(Demod.filter->blocksize_in);  // first IF at end of *next* sample block
+    double new_first_if = first_if;
+    if(first_if + max(Modes[Demod.mode].high,0) >= Demod.samprate/2){
+      // Will hit upper end
+      new_first_if = -Demod.samprate/2 - min(Modes[Demod.mode].low,0);
+    } else if(first_if - min(Modes[Demod.mode].low,0) <= -Demod.samprate/2){
+      // Will hit lower end
+      new_first_if = Demod.samprate/2 - max(Modes[Demod.mode].high,0);
+    }
+    if(new_first_if != first_if){
+      // Make the changes
+      set_first_LO(get_first_LO() - (new_first_if - first_if),1);
+      set_second_LO(-new_first_if,1);
+    }
+  }
+
 
   return 0;
 }
