@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.5 2017/05/11 10:32:06 karn Exp karn $
+// $Id: display.c,v 1.9 2017/05/25 05:11:25 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -38,16 +38,16 @@ void *display(void *arg){
     wrefresh(fw);
 
     mvwprintw(sig,0,0,"Mode         %3s",Modes[Demod.mode].name);
-    mvwprintw(sig,1,0,"IF1     %7.1f dB",power2dB(crealf(Demod.power) + cimagf(Demod.power)));
+    mvwprintw(sig,1,0,"IF1     %7.1f dB",power2dB(Demod.power_i + Demod.power_q));
     mvwprintw(sig,2,0,"IF2     %7.1f dB",voltage2dB(Demod.amplitude));
     mvwprintw(sig,3,0,"AF Gain %7.1f dB",voltage2dB(Demod.gain));
     mvwprintw(sig,4,0,"SNR     %7.1f dB",power2dB(Demod.snr));
     wrefresh(sig);
     
-    mvwprintw(sdr,0,0,"I offset %7.1f",crealf(Demod.DC_offset));
-    mvwprintw(sdr,1,0,"Q offset %7.1f",cimagf(Demod.DC_offset));
-    mvwprintw(sdr,2,0,"I/Q imbal%7.1f dB",power2dB(crealf(Demod.power)/cimagf(Demod.power)));
-    mvwprintw(sdr,3,0,"I/Q phi  %7.1g",Demod.phi);
+    mvwprintw(sdr,0,0,"I offset %7.1f",Demod.DC_i);
+    mvwprintw(sdr,1,0,"Q offset %7.1f",Demod.DC_q);
+    mvwprintw(sdr,2,0,"I/Q imbal%7.1f dB",power2dB(Demod.power_i/Demod.power_q));
+    mvwprintw(sdr,3,0,"I/Q phi  %10.5f",Demod.sinphi);
     mvwprintw(sdr,4,0,"LNA      %7u",Demod.lna_gain);
     mvwprintw(sdr,5,0,"Mix gain %7u",Demod.mixer_gain);
     mvwprintw(sdr,6,0,"IF gain  %7u",Demod.if_gain);
@@ -68,7 +68,6 @@ void *display(void *arg){
       break;
     case 'n':   // Set noise reference to current amplitude; hit with no sig
       Demod.noise = Demod.amplitude;
-      Demod.dot = 0;
       break;
     case 'm':
       prompt = newwin(3,50,20,0);
@@ -80,7 +79,7 @@ void *display(void *arg){
       wgetnstr(prompt,str,sizeof(str));
       timeout(100);
       noecho();
-      for(i=0;i < Nmodes;i++){
+      for(i=1;i <= Nmodes;i++){
 	if(strcasecmp(str,Modes[i].name) == 0){
 	  set_mode(Modes[i].mode);
 	  break;
