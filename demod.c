@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.6 2017/05/20 01:21:01 karn Exp karn $
+// $Id: demod.c,v 1.9 2017/05/25 05:10:56 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -34,44 +34,50 @@ int process_wfm();
 extern int Ctl_port;
 
 int In_count = 0;
-float alpha = 0.000001; // high pass filter coefficient for offset and I/Q imbalance estimates
-float power_alpha = 0.001; // high pass filter coefficient for power estimates
+float dc_alpha = 0.00001; // high pass filter coefficient for offset and I/Q imbalance estimates
+float phi_alpha = 0.000001;
+float power_alpha = 0.0002; // high pass filter coefficient for power estimates
 
 void demod(void);
 
 const float SCALE = 1./32768.;
 
 void proc_samples(short *sp,int cnt){
-  complex float samp;
-  float imbalance,g,phi;
-      
   if(Demod.filter == NULL || Demod.filter->input == NULL){
     return; // We're not ready; drop
   }
 
-  if(crealf(Demod.power) == 0 || cimagf(Demod.power) == 0){
-    imbalance = g = 1;
-    phi = 0;
-  } else {
-    imbalance = sqrtf(crealf(Demod.power) / cimag(Demod.power)); // amp ratio
-    g = sqrtf((creal(Demod.power) + cimag(Demod.power)) // scale correction
-	    / (2*creal(Demod.power)));
-    phi = asin(2 * Demod.dot / (crealf(Demod.power) + cimagf(Demod.power)));
+  // Channel gain balance coefficients
+  float gain_i=1,gain_q=1,pscale = 0;
+  if(Demod.power_i != 0 && Demod.power_q != 0){
+    gain_q = sqrt((Demod.power_i + Demod.power_q)/(2*Demod.power_q));
+    gain_i = sqrt((Demod.power_i + Demod.power_q)/(2*Demod.power_i));
+    pscale = 1/(Demod.power_i + Demod.power_q);
   }
-  Demod.phi = phi;
+  float secphi,tanphi;
+  secphi = 1/sqrt(1 - Demod.sinphi * Demod.sinphi);
+  tanphi = Demod.sinphi * secphi;
 
 
-  while(cnt-- != 0){
-    samp = CMPLXF(sp[0],sp[1]) - Demod.DC_offset;
-    sp += 2;
-    Demod.DC_offset += samp * alpha; 
-    samp *= SCALE; // Scale to unity peak ampitude
-    Demod.power += power_alpha * (CMPLXF(crealf(samp)*crealf(samp),cimagf(samp)*cimagf(samp)) - Demod.power);
-    // Balance sample, keeping constant total energy
-    samp = g * CMPLXF(crealf(samp),imbalance*cimagf(samp));
-
-    Demod.dot += power_alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
-    Demod.filter->input[In_count++] = samp;
+  int i;
+  for(i=0;i<cnt;i++){
+    float samp_i,samp_q;
+    // Remove and update DC offsets
+    samp_i = sp[2*i] - Demod.DC_i;    samp_q = sp[2*i+1] - Demod.DC_q;
+    Demod.DC_i += dc_alpha * samp_i;     Demod.DC_q += dc_alpha * samp_q;
+    // Unity peak amplitude
+    samp_i *= SCALE;                  samp_q *= SCALE;
+    // Update channel power estimates
+    Demod.power_i += power_alpha * (samp_i * samp_i - Demod.power_i);
+    Demod.power_q += power_alpha * (samp_q * samp_q - Demod.power_q);    
+    // Balance gains, keeping constant total energy
+    samp_i *= gain_i;                       samp_q *= gain_q;
+    // Correct phase
+    samp_q = samp_q * secphi - tanphi*samp_i;
+    // Update residual phase error estimate
+    Demod.sinphi += phi_alpha * (samp_i * samp_q) * pscale;
+    // Pass corrected sample to demodulator filter, invoke when full
+    Demod.filter->input[In_count++] = CMPLXF(samp_i,samp_q);
     if(In_count == Demod.filter->blocksize_in){
       demod();
       In_count = 0;
@@ -83,24 +89,6 @@ void proc_samples(short *sp,int cnt){
 void demod(){
 
   spindown(Demod.filter->input,Demod.filter->blocksize_in); // 2nd LO
-
-  if(cimag(Demod.second_LO_phase_accel) != 0){
-    // We're sweeping, so ensure we won't run the passband past the edges of the first IF bandwidth
-    double first_if = -get_second_LO(Demod.filter->blocksize_in);  // first IF at end of *next* sample block
-    double new_first_if = first_if;
-    if(first_if + max(Modes[Demod.mode].high,0) >= Demod.samprate/2){
-      // Will hit upper end
-      new_first_if = -Demod.samprate/2 - min(Modes[Demod.mode].low,0);
-    } else if(first_if - min(Modes[Demod.mode].low,0) <= -Demod.samprate/2){
-      // Will hit lower end
-      new_first_if = Demod.samprate/2 - max(Modes[Demod.mode].high,0);
-    }
-    if(new_first_if != first_if){
-      // Make the changes
-      set_first_LO(get_first_LO() - (new_first_if - first_if),1);
-      set_second_LO(-new_first_if,1);
-    }
-  }
   
   int i;
   i = execute_filter(Demod.filter);
