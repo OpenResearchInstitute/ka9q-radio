@@ -23,6 +23,7 @@ struct demod {
   complex float DC_offset; // Estimate of DC offset in front end, ideally zero
   complex float power;     // smoothed estimate of signal power, I & Q
   float dot;
+  float phi;
   float igain;       // Gain to be applied to I channel to equalize I & Q, ideally 1
   float sinphi;      // Sine of I/Q phase error, ideally zero
   uint8_t lna_gain;
