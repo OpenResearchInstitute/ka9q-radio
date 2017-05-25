@@ -43,10 +43,23 @@ const float SCALE = 1./32768.;
 
 void proc_samples(short *sp,int cnt){
   complex float samp;
+  float imbalance,g,phi;
       
   if(Demod.filter == NULL || Demod.filter->input == NULL){
     return; // We're not ready; drop
   }
+
+  if(crealf(Demod.power) == 0 || cimagf(Demod.power) == 0){
+    imbalance = g = 1;
+    phi = 0;
+  } else {
+    imbalance = sqrtf(crealf(Demod.power) / cimag(Demod.power)); // amp ratio
+    g = sqrtf((creal(Demod.power) + cimag(Demod.power)) // scale correction
+	    / (2*creal(Demod.power)));
+    phi = asin(2 * Demod.dot / (crealf(Demod.power) + cimagf(Demod.power)));
+  }
+  Demod.phi = phi;
+
 
   while(cnt-- != 0){
     samp = CMPLXF(sp[0],sp[1]) - Demod.DC_offset;
@@ -54,7 +67,10 @@ void proc_samples(short *sp,int cnt){
     Demod.DC_offset += samp * alpha; 
     samp *= SCALE; // Scale to unity peak ampitude
     Demod.power += power_alpha * (CMPLXF(crealf(samp)*crealf(samp),cimagf(samp)*cimagf(samp)) - Demod.power);
-    Demod.dot += alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
+    // Balance sample, keeping constant total energy
+    samp = g * CMPLXF(crealf(samp),imbalance*cimagf(samp));
+
+    Demod.dot += power_alpha * (crealf(samp)*cimagf(samp) - Demod.dot);
     Demod.filter->input[In_count++] = samp;
     if(In_count == Demod.filter->blocksize_in){
       demod();
@@ -90,9 +106,9 @@ void demod(){
   i = execute_filter(Demod.filter);
   assert(i == 0);
   switch(Demod.mode){
-    case AM:
-      process_am();
-      break;
+   case AM:
+    process_am();
+    break;
   case CAM:
     process_cam();
     break;
