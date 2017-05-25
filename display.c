@@ -47,7 +47,7 @@ void *display(void *arg){
     mvwprintw(sdr,0,0,"I offset %7.1f",crealf(Demod.DC_offset));
     mvwprintw(sdr,1,0,"Q offset %7.1f",cimagf(Demod.DC_offset));
     mvwprintw(sdr,2,0,"I/Q imbal%7.1f dB",power2dB(crealf(Demod.power)/cimagf(Demod.power)));
-    mvwprintw(sdr,3,0,"I/Q dot  %7.1f dB",power2dB(Demod.dot));
+    mvwprintw(sdr,3,0,"I/Q phi  %7.1g",Demod.phi);
     mvwprintw(sdr,4,0,"LNA      %7u",Demod.lna_gain);
     mvwprintw(sdr,5,0,"Mix gain %7u",Demod.mixer_gain);
     mvwprintw(sdr,6,0,"IF gain  %7u",Demod.if_gain);
@@ -55,6 +55,8 @@ void *display(void *arg){
     
 
     double f;
+    char str[80];
+    int i;
     c = getch();
     switch(c){
     case ERR:   // no key; timed out. Do nothing.
@@ -66,15 +68,35 @@ void *display(void *arg){
       break;
     case 'n':   // Set noise reference to current amplitude; hit with no sig
       Demod.noise = Demod.amplitude;
+      Demod.dot = 0;
+      break;
+    case 'm':
+      prompt = newwin(3,50,20,0);
+      box(prompt,0,0);
+      mvwprintw(prompt,1,1,"Enter mode: ");
+      wrefresh(prompt);
+      echo();
+      timeout(0);
+      wgetnstr(prompt,str,sizeof(str));
+      timeout(100);
+      noecho();
+      for(i=0;i < Nmodes;i++){
+	if(strcasecmp(str,Modes[i].name) == 0){
+	  set_mode(Modes[i].mode);
+	  break;
+	}
+      }
+      werase(prompt);
+      wrefresh(prompt);
+      delwin(prompt);
       break;
     case 'f':   // Tune to new frequency
       prompt = newwin(3,50,20,0);
       box(prompt,0,0);
-      mvwprintw(prompt,1,1,"Enter frequency in Hz:");
+      mvwprintw(prompt,1,1,"Enter frequency in Hz: ");
       wrefresh(prompt);
       echo();
       timeout(0);
-      char str[80];
       wgetnstr(prompt,str,sizeof(str));
       timeout(100);
       noecho();
@@ -99,10 +121,10 @@ void *display(void *arg){
   werase(sdr);
   wrefresh(sdr);
 
-  endwin();
-  refresh();
   echo();
   nocbreak();
+
+  endwin();
 
   exit(0);
   pthread_exit(0);
