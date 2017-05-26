@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.8 2017/05/20 01:17:48 karn Exp karn $
+// $Id: funcube.c,v 1.9 2017/05/20 10:12:07 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Correct for DC offset, I/Q gain and phase imbalance
 // Emit complex float sample stream on stdout
@@ -135,7 +135,7 @@ int main(int argc,char *argv[]){
       perror("connect to IPv4 output address failed");
       exit(1);
     }
-    if(IN_MULTICAST(&address4)){
+    if(IN_MULTICAST(ntohl(address4.sin_addr.s_addr))){
       // Destination is multicast; join it
       struct group_req group_req;
       group_req.gr_interface = 0;
