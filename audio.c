@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.4 2016/10/14 06:03:15 karn Exp karn $
+// $Id: audio.c,v 1.5 2017/05/26 00:15:58 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <stdio.h>
@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <string.h>
 #include <complex.h>
+#include <stdint.h>
 #undef I
 
 #include "dsp.h"
@@ -19,18 +20,18 @@
 
 struct wavhdr {
   char riff[4];
-  int chunksize1;
+  int32_t chunksize1;
   char wave[4];
   char fmt[4];
-  int chunksize2;
-  short format;
-  short channels;
-  int samprate;
-  int datarate;
-  short blocksize;
-  short bits;
+  int32_t chunksize2;
+  int16_t format;
+  int16_t channels;
+  int32_t samprate;
+  int32_t datarate;
+  int16_t blocksize;
+  int16_t bits;
   char data[4];
-  int datalen;
+  int32_t datalen;
 };
 
 struct audio Audio;
@@ -169,17 +170,15 @@ int put_stereo_audio(complex float *buffer,int L,float gain){
     chunk = snd_pcm_avail(Audio.handle); // Don't send more than it can take!
     if(chunk == 0){
       // Wait for some room to open up 
-      usleep((int)(512e6 / Audio.samprate));
+      usleep((int)(128e6 / Audio.samprate));
       continue;
     }
     chunk = min(chunk,cnt);
     if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){
-      if(r == -EPIPE)
-	Audio.underrun++;
 #if 0
       fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
 #endif
-      snd_pcm_prepare(Audio.handle);
+      continue; // retry
     }
     cnt -= chunk;
     start += 2*chunk;
@@ -213,17 +212,15 @@ int put_mono_audio(float *buffer,int L,float gain){
     chunk = snd_pcm_avail(Audio.handle); // Don't send more than it can take!
     if(chunk == 0){
       // Wait for some room to open up 
-      usleep((int)(512e6 / Audio.samprate));
+      usleep((int)(128e6 / Audio.samprate));
       continue;
     }
     chunk = min(chunk,cnt);
     if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){
-      if(r == -EPIPE)
-	Audio.underrun++;
 #if 0
       fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
 #endif
-      snd_pcm_prepare(Audio.handle);
+      continue; // retry
     }
     cnt -= chunk;
     start += chunk;
