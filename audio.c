@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.3 2016/10/14 04:33:53 karn Exp karn $
+// $Id: audio.c,v 1.4 2016/10/14 06:03:15 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <stdio.h>
@@ -174,7 +174,11 @@ int put_stereo_audio(complex float *buffer,int L,float gain){
     }
     chunk = min(chunk,cnt);
     if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){
+      if(r == -EPIPE)
+	Audio.underrun++;
+#if 0
       fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
+#endif
       snd_pcm_prepare(Audio.handle);
     }
     cnt -= chunk;
@@ -214,7 +218,11 @@ int put_mono_audio(float *buffer,int L,float gain){
     }
     chunk = min(chunk,cnt);
     if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){
+      if(r == -EPIPE)
+	Audio.underrun++;
+#if 0
       fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
+#endif
       snd_pcm_prepare(Audio.handle);
     }
     cnt -= chunk;
