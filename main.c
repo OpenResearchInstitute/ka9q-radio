@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.7 2017/05/20 10:10:38 karn Exp karn $
+// $Id: main.c,v 1.9 2017/05/24 08:59:48 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -307,8 +307,8 @@ void *input_loop(void *arg){
   struct msghdr message;
   message.msg_name = &rtp_address;
   message.msg_namelen = sizeof(rtp_address);
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 3;
+  message.msg_iov = iovec;
+  message.msg_iovlen = sizeof(iovec) / sizeof(struct iovec);
   message.msg_control = NULL;
   message.msg_controllen = 0;
   message.msg_flags = 0;
