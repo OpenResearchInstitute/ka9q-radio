@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.11 2017/05/29 10:29:04 karn Exp karn $
+// $Id: main.c,v 1.12 2017/05/29 18:35:04 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -29,8 +29,8 @@
 
 void closedown(int a);
 
-void *input_loop(void *arg);
-int process_command(char *cmdbuf,int len);
+void *input_loop(struct demod *);
+int process_command(struct demod *,char *cmdbuf,int len);
 pthread_t Display_thread;
 
 int Nthreads = 1;
@@ -48,7 +48,7 @@ int rtp_sock;
 struct sockaddr_in6 rtp_address;
 socklen_t rtp_addrlen = sizeof(rtp_address);
 
-int ctl_sock;
+int Ctl_sock;
 
 int Skips;
 int Olds;
@@ -192,6 +192,7 @@ int main(int argc,char *argv[]){
   if(!Quiet)
     pthread_create(&Display_thread,NULL,display,NULL);
 
+  // Graceful signal catch
   signal(SIGPIPE,closedown);
   signal(SIGINT,closedown);
   signal(SIGKILL,closedown);
@@ -270,16 +271,16 @@ int main(int argc,char *argv[]){
   ctl_address.sin6_addr = in6addr_any;
   ctl_address.sin6_scope_id = 0;
 
-  if((ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
+  if((Ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
     fprintf(stderr,"can't open control socket\n");
     exit(1);
   }
-  if(bind(ctl_sock,&ctl_address,sizeof(ctl_address)) != 0){
+  if(bind(Ctl_sock,&ctl_address,sizeof(ctl_address)) != 0){
     fprintf(stderr,"bind failed\n");
     exit(1);
   }
-  fcntl(ctl_sock,F_SETFL,O_NONBLOCK);
-  set_mode(&Demod,mode);
+  fcntl(Ctl_sock,F_SETFL,O_NONBLOCK);
+  set_mode(demod,mode);
   set_second_LO(demod,-second_IF,1);
 
   int sv[2];
@@ -287,7 +288,7 @@ int main(int argc,char *argv[]){
   Demod_sock = sv[0];
   demod->data_sock = sv[1];
 
-  input_loop(NULL);
+  input_loop(demod);
 
   exit(0);
 }
@@ -300,13 +301,12 @@ void closedown(int a){
 
 // Read from RTP network socket, assemble blocks of samples with corrections done
 
-void *input_loop(void *arg){
+void *input_loop(struct demod *demod){
   int cnt;
   short samples[MAXPKT];
   struct rtp_header rtp_header;
   struct status status;
   struct iovec iovec[3];
-  struct demod *demod = &Demod;
 
   iovec[0].iov_base = &rtp_header;
   iovec[0].iov_len = sizeof(rtp_header);
@@ -332,8 +332,8 @@ void *input_loop(void *arg){
     int rdlen;
     char pktbuf[MAXPKT];
 
-    while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
-      process_command(pktbuf,rdlen);
+    while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
+      process_command(demod,pktbuf,rdlen);
 
     cnt = recvmsg(rtp_sock,&message,0);
     if(cnt <= 0){    // ??
@@ -362,9 +362,8 @@ void *input_loop(void *arg){
     proc_samples(demod,samples,cnt);
   }
 }
-int process_command(char *cmdbuf,int len){
+int process_command(struct demod *demod,char *cmdbuf,int len){
   struct command command;
-  struct demod *demod = &Demod;
 
   if(len >= sizeof(command)){
     memcpy(&command,cmdbuf,sizeof(command));

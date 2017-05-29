@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.11 2017/05/29 16:30:43 karn Exp karn $
+// $Id: radio.c,v 1.12 2017/05/29 18:35:06 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -19,7 +19,7 @@
 #include "dsp.h"
 
 
-extern int ctl_sock;
+extern int Ctl_sock;
 struct demod Demod;
 
 const float Headroom = .316227766; // sqrt(0.10) = -10 dB
@@ -66,7 +66,7 @@ int set_first_LO(struct demod *demod,double first_LO,int force){
   // Send commands to source address of last RTP packet from front end
   FE_address = rtp_address;
   FE_address.sin6_port = htons(4160); // make this better!
-  if(sendto(ctl_sock,&requested_status,sizeof(requested_status),0,&FE_address,sizeof(FE_address)) == -1)
+  if(sendto(Ctl_sock,&requested_status,sizeof(requested_status),0,&FE_address,sizeof(FE_address)) == -1)
       perror("sendto control socket");
   return 0;
 }
