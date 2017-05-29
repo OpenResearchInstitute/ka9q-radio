@@ -1,4 +1,4 @@
-// $Id$
+// $Id: audio.h,v 1.2 2016/10/13 23:27:44 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -10,6 +10,7 @@ struct audio {
   int samprate;
   int channels; // Number of channels in current buffer
   int underrun;
+  int overflow;
   int echo;     // If set, echo to standard output
 };
 

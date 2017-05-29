@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.9 2017/05/25 05:11:25 karn Exp karn $
+// $Id: display.c,v 1.10 2017/05/25 11:15:16 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -19,6 +19,7 @@ void *display(void *arg){
   WINDOW *fw,*prompt;
   WINDOW *sig;
   WINDOW *sdr;
+  WINDOW *net;
   int c;
 
   initscr();
@@ -27,8 +28,10 @@ void *display(void *arg){
   cbreak();
   noecho();
   fw = newwin(5,30,0,0);
-  sig = newwin(6,20,6,0);
-  sdr = newwin(7,30,6,25);
+  sig = newwin(6,20,5,0);
+  sdr = newwin(7,30,5,25);
+  net = newwin(6,35,12,0);
+  
 
   for(;;){
     mvwprintw(fw,0,0,"Frequency   %'17.2f",get_first_LO() - get_second_LO(0) + Modes[Demod.mode].dial);
@@ -53,6 +56,19 @@ void *display(void *arg){
     mvwprintw(sdr,6,0,"IF gain  %7u",Demod.if_gain);
     wrefresh(sdr);
     
+    extern int Olds,Skips;
+
+    mvwprintw(net,0,0,"Olds %d",Olds);
+    mvwprintw(net,1,0,"Skips %d",Skips);
+    mvwprintw(net,2,0,"audio underrun %d",Audio.underrun);
+    snd_pcm_sframes_t delayp;
+    if(Audio.handle != NULL){
+      snd_pcm_delay(Audio.handle,&delayp);
+      mvwprintw(net,3,0,"audio delay %d (%.1f ms)",(int)delayp,1000.*(float)delayp/Audio.samprate);
+      mvwprintw(net,4,0,"audio overflow %d",Audio.overflow);
+    }
+    wrefresh(net);
+
 
     double f;
     char str[80];
@@ -102,7 +118,7 @@ void *display(void *arg){
       f = atof(str);
       if(f > 0){
 	set_second_LO(-48000,0);
-	set_first_LO(f - 48000,1);
+	set_first_LO(f - 48000 - Modes[Demod.mode].dial,1);
       }
       werase(prompt);
       wrefresh(prompt);
@@ -120,6 +136,9 @@ void *display(void *arg){
   werase(sdr);
   wrefresh(sdr);
 
+  werase(net);
+  wrefresh(net);
+  
   echo();
   nocbreak();
 

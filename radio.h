@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.9 2017/05/25 05:12:06 karn Exp karn $
+// $Id: radio.h,v 1.10 2017/05/25 11:13:59 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -32,12 +32,9 @@ struct demod {
   complex double second_LO_phase;
   complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
   complex double second_LO_phase_accel; // for frequency sweeping
-  int low;          // Lower limit of passband in bins, modulo N (may be negative)
-  int high;         // Upper limit of passband in bins, modulo N (may be negative)
   int decimate;     // Decimation ratio in frequency domain when filtering
   complex float *response; // Frequency response of pre-demod filter, set up by set_mode()
   struct filter *filter; // Pre-demodulation filter, set up by demod task using response
-  complex float fmstate;    // FM demodulator state
   float snr;        // Estimated signal-to-noise ratio (FM only)
   float amplitude; // Amplitude (not power) of signal after filter
   float noise;     // Minimum amplitude for SNR estimates (experimental)
@@ -45,6 +42,8 @@ struct demod {
   int hangtime;     // block times until AGC can increase again
   float gain;       // Current audio gain (linear modes only)
   float agcratio;   // Gain increase per block when not clamped
+  pthread_t demod_thread;
+  int data_sock;
 };
 extern struct demod Demod;
 

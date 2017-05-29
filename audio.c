@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.5 2017/05/26 00:15:58 karn Exp karn $
+// $Id: audio.c,v 1.6 2017/05/26 11:44:55 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <stdio.h>
@@ -57,9 +57,11 @@ int audio_change_parms(unsigned samprate,int channels,int L){
   fprintf(stderr,"audio_change_parms(%s,rate=%u,blksize=%d,chans=%d)\n",Audio.name,samprate,L,channels);
 #endif
   if(Audio.handle != NULL){
+#if 0
     // See if it's already as we like it
     if(Audio.channels == channels && Audio.samprate == samprate)
       return 0;
+#endif
     snd_pcm_drop(Audio.handle);
     snd_pcm_close(Audio.handle);
     Audio.handle = NULL;
@@ -119,11 +121,18 @@ int audio_change_parms(unsigned samprate,int channels,int L){
     fprintf(stderr,"Error setting D/A periods on %s\n",Audio.name);
     return -1;
   }
-  buffer_size = 2*LL;
+  if(LL != L){
+    fprintf(stderr,"D/A periods: requested %d, got %d\n",(int)L,(int)LL);
+  }
+  buffer_size = 8*LL;
   if(snd_pcm_hw_params_set_buffer_size_near(Audio.handle,hw_params,&buffer_size)<0){
     fprintf(stderr,"Error setting D/A buffersize on %s\n",Audio.name);
     return -1;
   }
+  if(buffer_size != 8*LL){
+    fprintf(stderr,"D/A buffer: requested %d, got %d\n",(int)(8*LL),(int)buffer_size);
+  }
+
   if(snd_pcm_hw_params(Audio.handle,hw_params)<0){
     fprintf(stderr,"Error setting D/A HW params on %s\n",Audio.name);
     return -1;
@@ -133,10 +142,16 @@ int audio_change_parms(unsigned samprate,int channels,int L){
     fprintf(stderr,"Can not configure driver for %s\n",Audio.name);
     return -1;
   }
-  if(snd_pcm_sw_params_set_start_threshold(Audio.handle,sw_params,1) < 0){
+  if(snd_pcm_sw_params_set_start_threshold(Audio.handle,sw_params,1*LL) < 0){
     fprintf(stderr,"Can not configure start threshold for %s\n",Audio.name);
     return -1;
   }
+#if 0
+  if(snd_pcm_sw_params_set_stop_threshold(Audio.handle,sw_params,8*LL) < 0){
+    fprintf(stderr,"Can not configure stop threshold for %s\n",Audio.name);
+    return -1;
+  }
+#endif
   if(snd_pcm_sw_params(Audio.handle,sw_params) < 0){
     fprintf(stderr,"Can not set sw params %s\n",Audio.name);
   }
@@ -169,9 +184,19 @@ int put_stereo_audio(complex float *buffer,int L,float gain){
     }
     chunk = snd_pcm_avail(Audio.handle); // Don't send more than it can take!
     if(chunk == 0){
+      Audio.overflow++;
+#if 0
       // Wait for some room to open up 
-      usleep((int)(128e6 / Audio.samprate));
+      struct timespec req;
+      req.tv_sec = 0;
+      req.tv_nsec = (int)(128e9 / Audio.samprate); // wait for 128 samples to open up
+      nanosleep(&req,NULL);
       continue;
+#else
+      return 0; // Intentionally drop to avoid excessive delay
+#endif      
+      
+
     }
     chunk = min(chunk,cnt);
     if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){
@@ -211,9 +236,17 @@ int put_mono_audio(float *buffer,int L,float gain){
     }
     chunk = snd_pcm_avail(Audio.handle); // Don't send more than it can take!
     if(chunk == 0){
+      Audio.overflow++;
+#if 0
       // Wait for some room to open up 
-      usleep((int)(128e6 / Audio.samprate));
+      struct timespec req;
+      req.tv_sec = 0;
+      req.tv_nsec = (int)(128e9 / Audio.samprate); // wait for 128 samples to open up
+      nanosleep(&req,NULL);
       continue;
+#else
+      return 0; // Intentionally drop to avoid excessive delay
+#endif
     }
     chunk = min(chunk,cnt);
     if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){

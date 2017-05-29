@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.9 2017/05/24 08:59:48 karn Exp karn $
+// $Id: main.c,v 1.10 2017/05/26 00:16:27 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -48,8 +48,13 @@ int rtp_sock;
 struct sockaddr_in6 rtp_address;
 socklen_t rtp_addrlen = sizeof(rtp_address);
 
+int ctl_sock;
 
-int ctl;
+int Skips;
+int Olds;
+
+int Demod_sock;
+
 
 
 int main(int argc,char *argv[]){
@@ -264,18 +269,22 @@ int main(int argc,char *argv[]){
   ctl_address.sin6_addr = in6addr_any;
   ctl_address.sin6_scope_id = 0;
 
-  if((ctl = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
+  if((ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
     fprintf(stderr,"can't open control socket\n");
     exit(1);
   }
-  if(bind(ctl,&ctl_address,sizeof(ctl_address)) != 0){
+  if(bind(ctl_sock,&ctl_address,sizeof(ctl_address)) != 0){
     fprintf(stderr,"bind failed\n");
     exit(1);
   }
-  fcntl(ctl,F_SETFL,O_NONBLOCK);
+  fcntl(ctl_sock,F_SETFL,O_NONBLOCK);
   set_mode(mode);
   set_second_LO(-second_IF,1);
 
+  int sv[2];
+  socketpair(AF_UNIX,SOCK_STREAM,0,sv);
+  Demod_sock = sv[0];
+  Demod.data_sock = sv[1];
 
   input_loop(NULL);
 
@@ -313,13 +322,15 @@ void *input_loop(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
+  uint16_t seq = 0;
+
   while(1){
     // See if we have any commands
     socklen_t addrlen;
     int rdlen;
     char pktbuf[MAXPKT];
 
-    while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(ctl,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
+    while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
       process_command(pktbuf,rdlen);
 
     cnt = recvmsg(rtp_sock,&message,0);
@@ -332,6 +343,16 @@ void *input_loop(void *arg){
       continue; // Too small, ignore
 
     // Look at the RTP header at some point
+    rtp_header.seq = ntohs(rtp_header.seq);
+    if((int)(seq - rtp_header.seq) < 0){
+      Skips++;
+    } else if((int)(seq - rtp_header.seq) > 0){
+      Olds++;
+    }
+    seq = rtp_header.seq + 1;
+
+
+
     Demod.first_LO = status.frequency;
     Demod.lna_gain = status.lna_gain;
     Demod.mixer_gain = status.mixer_gain;

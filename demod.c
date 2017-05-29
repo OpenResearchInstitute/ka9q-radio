@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.9 2017/05/25 05:10:56 karn Exp karn $
+// $Id: demod.c,v 1.10 2017/05/25 11:14:30 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <fftw3.h>
 
 #include "dsp.h"
 #include "filter.h"
@@ -23,13 +24,6 @@
 
 
 int process_command(char *cmdbuf,int len);
-int process_am();
-int process_cam();
-int process_iq();
-int process_isb();
-int process_ssb();
-int process_fm();
-int process_wfm();
 
 extern int Ctl_port;
 
@@ -42,10 +36,13 @@ void demod(void);
 
 const float SCALE = 1./32768.;
 
+int Bufnum;
+const int nbuffers = 4;
+complex float Buffers[4][4096]; // FIX THIS
+
+
+
 void proc_samples(short *sp,int cnt){
-  if(Demod.filter == NULL || Demod.filter->input == NULL){
-    return; // We're not ready; drop
-  }
 
   // Channel gain balance coefficients
   float gain_i=1,gain_q=1,pscale = 0;
@@ -77,150 +74,17 @@ void proc_samples(short *sp,int cnt){
     // Update residual phase error estimate
     Demod.sinphi += phi_alpha * (samp_i * samp_q) * pscale;
     // Pass corrected sample to demodulator filter, invoke when full
-    Demod.filter->input[In_count++] = CMPLXF(samp_i,samp_q);
-    if(In_count == Demod.filter->blocksize_in){
-      demod();
+    Buffers[Bufnum][In_count++] = CMPLXF(samp_i,samp_q);
+    if(In_count == 4096){ // FIX THIS
+      extern int Demod_sock;
+      complex float *x;
+      
+      x = &Buffers[Bufnum][0];
+      write(Demod_sock,&x,sizeof(x));
       In_count = 0;
+      Bufnum++;
+      if(Bufnum == nbuffers)
+	Bufnum = 0;
     }
   }
-}
-
-
-void demod(){
-
-  spindown(Demod.filter->input,Demod.filter->blocksize_in); // 2nd LO
-  
-  int i;
-  i = execute_filter(Demod.filter);
-  assert(i == 0);
-  switch(Demod.mode){
-   case AM:
-    process_am();
-    break;
-  case CAM:
-    process_cam();
-    break;
-  case IQ:
-  case ISB: // Processed the same except for filter hack
-    process_iq();
-    break;
-  case USB:
-  case CWU:
-  case LSB:
-  case CWL:
-    process_ssb();
-    break;
-  case NFM:
-  case FM:
-    process_fm();
-    break;
-  case WFM:
-    process_wfm();
-    break;
-  }
-}
-
-
-int process_ssb(){
-  // Automatic gain control
-  Demod.amplitude = amplitude(Demod.filter->output.r,Demod.filter->blocksize_out);
-  float snn = Demod.amplitude / Demod.noise; // (S+N)/N amplitude ratio
-  Demod.snr = (snn*snn) -1; // S/N as power ratio
-  ssb_agc();
-  
-  put_mono_audio(Demod.filter->output.r,Demod.filter->blocksize_out,Demod.gain);
-  return 0;
-}
-
-// Envelope detection: take magnitude of complex samples, ignoring phase
-// Also find average carrier level for AGC and DC removal
-int process_am(){
-  float average;
-  int n;
-  float audio[Demod.filter->blocksize_out];
-
-  average = 0;
-  for(n=0; n < Demod.filter->blocksize_out; n++)
-    average += audio[n] = cabs(Demod.filter->output.c[n]);
-  average /= Demod.filter->blocksize_out;
-  Demod.amplitude = average;
-  
-  // AM AGC is carrier-driven
-  Demod.gain = Headroom / average;
-  for(n=0; n<Demod.filter->blocksize_out; n++)
-    audio[n] -= average; // Subtract carrier to remove DC
-  
-  put_mono_audio(audio,Demod.filter->blocksize_out,Demod.gain); // we do our own
-  return 0;
-}
-// Experimental semi-coherent AM detection
-int process_cam(){
-    complex float phase;
-    int n;
-    float audio[Demod.filter->blocksize_out];
-    static complex float lastphase;
-    double freqerror;
-    
-    phase = 0;
-    for(n=0; n < Demod.filter->blocksize_out; n++)
-      phase += Demod.filter->output.c[n];
-
-    phase = conj(phase) / cabs(phase);
-
-    // Rotate signal onto I axis, measure DC (carrier) level
-    Demod.amplitude = 0;
-    for(n=0; n < Demod.filter->blocksize_out; n++)
-      Demod.amplitude += audio[n] = creal(Demod.filter->output.c[n] * phase);
-    
-    Demod.amplitude /= Demod.filter->blocksize_out;
-
-    // Remove carrier DC
-    for(n=0; n < Demod.filter->blocksize_out; n++)
-      audio[n] -= Demod.amplitude;
-
-    // Frequency error is the phase of this block minus the last, times blocks/sec
-    // Phase was already flipped, hence the minus
-    // Only move a fraction of the error at one time
-    freqerror = -0.01 * carg(phase * conj(lastphase))/(2*M_PI) * Demod.samprate/Demod.filter->blocksize_in;
-    lastphase = phase;
-    set_second_LO(-freqerror + Demod.second_LO,0);
-
-    // AM AGC is carrier-driven
-    Demod.gain = Headroom / Demod.amplitude;
-    put_mono_audio(audio,Demod.filter->blocksize_out,Demod.gain); // we do our own
-    return 0;
-}
-
-int process_iq(){
-  // Find average amplitude for AGC
-  Demod.amplitude = camplitude(Demod.filter->output.c,Demod.filter->blocksize_out);
-  ssb_agc();
-  
-  put_stereo_audio(Demod.filter->output.c,Demod.filter->blocksize_out,Demod.gain);
-  return 0;
-}
-
-int process_fm(){
-  float audio[Demod.filter->blocksize_out];
-
-  Demod.snr = fm_snr(Demod.filter->output.c,Demod.filter->blocksize_out);
-
-  // If squelch is closed, just let the output drain
-  if(Demod.snr > 2){
-    do_fm(audio,Demod.filter->output.c,Demod.filter->blocksize_out,&Demod.fmstate);
-    put_mono_audio(audio,Demod.filter->blocksize_out,Demod.gain);
-  }
-  return 0;
-}
-int process_wfm(){
-  float audio[Demod.filter->blocksize_in];
-
-  // If squelch is closed, just let the output drain
-  // We don't use a pre-demod filter, so we work with the *INPUT* buffer only
-  if((Demod.snr = fm_snr(Demod.filter->input,Demod.filter->blocksize_in)) < 2)
-    return 0;
-
-  do_fm(audio,Demod.filter->input,Demod.filter->blocksize_in,&Demod.fmstate);
-  put_mono_audio(audio,Demod.filter->blocksize_in,Demod.gain);
-  return 0;
 }

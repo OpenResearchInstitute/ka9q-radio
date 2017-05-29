@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.8 2017/05/20 10:11:47 karn Exp karn $
+// $Id: radio.c,v 1.9 2017/05/25 11:15:25 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -20,7 +20,7 @@
 #include "audio.h"
 
 
-extern int ctl;
+extern int ctl_sock;
 struct demod Demod;
 double get_exact_samprate();
 
@@ -68,7 +68,7 @@ int set_first_LO(double first_LO,int force){
   // Send commands to source address of last RTP packet from front end
   FE_address = rtp_address;
   FE_address.sin6_port = htons(4160); // make this better!
-  if(sendto(ctl,&requested_status,sizeof(requested_status),0,&FE_address,sizeof(FE_address)) == -1)
+  if(sendto(ctl_sock,&requested_status,sizeof(requested_status),0,&FE_address,sizeof(FE_address)) == -1)
       perror("sendto control socket");
   return 0;
 }
@@ -102,83 +102,51 @@ double set_second_LO_rate(double second_LO_rate,int force){
   return second_LO_rate;
 }
 int set_mode(enum mode mode){
-  const int N = Demod.L + Demod.M - 1;
-  int n;
-  double gain;
 
-  Demod.noise = INFINITY;
-  
+  void *demod_fm(void *);
+  void *demod_ssb(void *);
+  void *demod_iq(void *);
+  void *demod_cam(void *);
+  void *demod_am(void *);  
+
+#if 0
   if(mode == Demod.mode)
     return 0;
+#endif
   
   Demod.mode = mode;
-  Demod.low = N*Modes[mode].low/Demod.samprate;
-  Demod.high = N*Modes[mode].high/Demod.samprate;
-  if(Demod.low > Demod.high){
-    int t;
-    t = Demod.low;
-    Demod.low = Demod.high;
-    Demod.high = t;
-  }
-  Demod.hangmax = 1.1 * (Demod.samprate/Demod.L); // 1.1 second hang before gain increase
-  Demod.agcratio = dB2voltage(6 * ((float)Demod.L/Demod.samprate)); // 6 dB/sec
-  Demod.hangtime = 0;
-  Demod.fmstate = 0;
-
-  if(Demod.filter != NULL){
-    delete_filter(Demod.filter);
-    Demod.response = NULL;
-    Demod.filter = NULL;
-  }
+  Demod.samprate = 192000;
+  Demod.L = 4096;
+  Demod.M = 4097;
   
-  // Adjust for unity gain
-  // The filters for the first 5 modes add conjugate frequencies,
-  // which would otherwise make the gain +3 dB
-  switch(mode){
-  case LSB:
-  case USB:
-  case CWL:
-  case CWU:
-  case ISB:
-    gain = M_SQRT1_2;
-    break;
-  default:
-    gain = 1.0;
-    break;
-  }
-    
-
-  // Set up pre-demodulation filter
-  Demod.response = fftwf_alloc_complex(N);
-  // posix_memalign((void **)&Demod.response,16,N*sizeof(complex float));
-  memset(Demod.response,0,N*sizeof(*Demod.response));
-  for(n=Demod.low; n <= Demod.high; n++)
-    Demod.response[(n+N)%N] = gain;
-  
-  window_filter(Demod.L,Demod.M,Demod.response,Kaiser_beta);
-  Demod.decimate = Demod.samprate / Audio.samprate;
+  pthread_cancel(Demod.demod_thread); // what if it's not running?
+  void *retval;
+  pthread_join(Demod.demod_thread,&retval); // Wait for it to finish
   
   switch(mode){
+  case NFM:
+  case FM:
+    pthread_create(&Demod.demod_thread,NULL,demod_fm,NULL);
+    break;
   case USB:
   case LSB:
   case CWU:
   case CWL:
-    Demod.filter = create_filter(Demod.L,Demod.M,Demod.response,Demod.decimate,REAL);
+    pthread_create(&Demod.demod_thread,NULL,demod_ssb,NULL);
     break;
+  case CAM:
+    pthread_create(&Demod.demod_thread,NULL,demod_cam,NULL);
+    break;
+  case AM:
+    pthread_create(&Demod.demod_thread,NULL,demod_am,NULL);
+    break;
+  case IQ:
   case ISB:
-    Demod.filter = create_filter(Demod.L,Demod.M,Demod.response,Demod.decimate,CROSS_CONJ);
+    pthread_create(&Demod.demod_thread,NULL,demod_iq,NULL);
     break;
-  default:
-    Demod.filter = create_filter(Demod.L,Demod.M,Demod.response,Demod.decimate,COMPLEX);
+  case WFM:
     break;
   }
-  // Constant gain used by FM only; automatically adjusted by AGC in linear modes
-  if(mode == FM)
-    Demod.gain = (Headroom * N / M_PI) / (Demod.decimate * abs(Demod.low - Demod.high));
-  else
-    Demod.gain = dB2voltage(70.); // 70 dB starting point, will adjust with ssb_agc
-  //  audio_change_parms(Demod.samprate/Demod.decimate,Modes[mode].channels,Demod.L);
-  audio_change_parms(Demod.samprate/Demod.decimate,2,Demod.L);  
   return 0;
 }      
 int set_cal(double cal){
@@ -222,8 +190,6 @@ int spindown(complex float *data,int len){
       set_second_LO(-new_first_if,1);
     }
   }
-
-
   return 0;
 }
 
