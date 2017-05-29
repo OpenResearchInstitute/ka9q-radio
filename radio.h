@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.10 2017/05/25 11:13:59 karn Exp karn $
+// $Id: radio.h,v 1.11 2017/05/29 10:29:14 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -33,15 +33,11 @@ struct demod {
   complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
   complex double second_LO_phase_accel; // for frequency sweeping
   int decimate;     // Decimation ratio in frequency domain when filtering
-  complex float *response; // Frequency response of pre-demod filter, set up by set_mode()
   struct filter *filter; // Pre-demodulation filter, set up by demod task using response
   float snr;        // Estimated signal-to-noise ratio (FM only)
   float amplitude; // Amplitude (not power) of signal after filter
   float noise;     // Minimum amplitude for SNR estimates (experimental)
-  int hangmax;      // How long for AGC to hang (clamp) after signal increases
-  int hangtime;     // block times until AGC can increase again
   float gain;       // Current audio gain (linear modes only)
-  float agcratio;   // Gain increase per block when not clamped
   pthread_t demod_thread;
   int data_sock;
 };
@@ -57,15 +53,19 @@ double set_second_LO_rate(double second_LO_rate,int);
 
 int set_mode(enum mode mode);
 int set_cal(double);
-int ssb_agc();
 int spindown(complex float *data,int len);
 void closedown(int a);
+void proc_samples(short *,int);
 
 // Thread entry points
 void *fcd_command(void *);
-void *dial(void *);     // Read tuning dial, set frequency
-void *contour(void *);
 void *display(void *);
-void proc_samples(short *,int);
+
+
+void *demod_fm(void *);
+void *demod_ssb(void *);
+void *demod_iq(void *);
+void *demod_cam(void *);
+void *demod_am(void *);
 
 #endif

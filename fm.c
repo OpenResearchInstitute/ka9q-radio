@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.3 2017/05/20 01:14:08 karn Exp karn $
+// $Id: fm.c,v 1.4 2017/05/29 10:28:55 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -11,7 +11,6 @@
 #include "dsp.h"
 #include "filter.h"
 #include "radio.h"
-#include "fm.h"
 #include "audio.h"
 
 // Estimate FM SNR
@@ -52,16 +51,13 @@ int do_fm(float *output,complex float *buffer,int L,complex float *state){
 }
 
 void *fm_cleanup(void *arg){
-  if(Demod.filter != NULL){
-    delete_filter(Demod.filter);
-    Demod.response = NULL;
-    Demod.filter = NULL;
-  }
+  delete_filter(Demod.filter);
+  Demod.filter = NULL;
   return NULL;
 }
 
 
-void demod_fm(void *arg){
+void *demod_fm(void *arg){
   int n;
   int N;
   float gain = 1.0;  // unity gain
@@ -83,19 +79,18 @@ void demod_fm(void *arg){
 
 
   // Set up pre-demodulation filter
-  Demod.response = (complex float *)fftwf_alloc_complex(N);
-  // posix_memalign((void **)&Demod.response,16,N*sizeof(complex float));
-  memset(Demod.response,0,N*sizeof(*Demod.response));
+  complex float *response = (complex float *)fftwf_alloc_complex(N);
+  // posix_memalign((void **)&response,16,N*sizeof(complex float));
+  memset(response,0,N*sizeof(*response));
   for(n=low; n <= high; n++)
-    Demod.response[(n+N)%N] = gain;
+    response[(n+N)%N] = gain;
   
-  window_filter(Demod.L,Demod.M,Demod.response,Kaiser_beta);
+  window_filter(Demod.L,Demod.M,response,Kaiser_beta);
   Demod.decimate = Demod.samprate / Audio.samprate;
   
-  Demod.filter = create_filter(Demod.L,Demod.M,Demod.response,Demod.decimate,COMPLEX);
+  Demod.filter = create_filter(Demod.L,Demod.M,response,Demod.decimate,COMPLEX);
   // Constant gain used by FM only; automatically adjusted by AGC in linear modes
   Demod.gain = (Headroom * N / M_PI) / (Demod.decimate * abs(low - high));
-  //  audio_change_parms(Demod.samprate/Demod.decimate,Modes[mode].channels,Demod.L);
   audio_change_parms(Audio.samprate,2,Demod.filter->blocksize_out);  
 
   pthread_cleanup_push(fm_cleanup,&Demod);
@@ -111,7 +106,6 @@ void demod_fm(void *arg){
     int i;
     i = execute_filter(Demod.filter);
     assert(i == 0);
-
 
     Demod.snr = fm_snr(Demod.filter->output.c,Demod.filter->blocksize_out);
     

@@ -1,34 +1,28 @@
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
+#include <unistd.h>
 #include <limits.h>
 #include <pthread.h>
-#include <string.h>
 #include <math.h>
 #include <complex.h>
 #undef I
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
 #include <fftw3.h>
 
 #include "dsp.h"
 #include "filter.h"
 #include "radio.h"
-#include "fm.h"
 #include "audio.h"
 
 void *am_cleanup(void *arg){
   if(Demod.filter != NULL){
     delete_filter(Demod.filter);
-    Demod.response = NULL;
     Demod.filter = NULL;
   }
   return NULL;
 }
 
 
-void demod_am(void *arg){
+void *demod_am(void *arg){
   int n;
   int N;
   float gain = 1.0; // Unity
@@ -46,16 +40,16 @@ void demod_am(void *arg){
     high = t;
   }
   // Set up pre-demodulation filter
-  Demod.response = (complex float *)fftwf_alloc_complex(N);
-  // posix_memalign((void **)&Demod.response,16,N*sizeof(complex float));
-  memset(Demod.response,0,N*sizeof(*Demod.response));
+  complex float *response = (complex float *)fftwf_alloc_complex(N);
+  // posix_memalign((void **)&response,16,N*sizeof(complex float));
+  memset(response,0,N*sizeof(*response));
   for(n=low; n <= high; n++)
-    Demod.response[(n+N)%N] = gain;
+    response[(n+N)%N] = gain;
   
-  window_filter(Demod.L,Demod.M,Demod.response,Kaiser_beta);
+  window_filter(Demod.L,Demod.M,response,Kaiser_beta);
   Demod.decimate = Demod.samprate / Audio.samprate;
   
-  Demod.filter = create_filter(Demod.L,Demod.M,Demod.response,Demod.decimate,COMPLEX);
+  Demod.filter = create_filter(Demod.L,Demod.M,response,Demod.decimate,COMPLEX);
   audio_change_parms(Audio.samprate,2,Demod.filter->blocksize_out);  
 
   pthread_cleanup_push(am_cleanup,&Demod);

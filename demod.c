@@ -1,26 +1,15 @@
-// $Id: demod.c,v 1.10 2017/05/25 11:14:30 karn Exp karn $
+// $Id: demod.c,v 1.11 2017/05/29 10:29:28 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
+#include <unistd.h>
 #include <limits.h>
-#include <pthread.h>
-#include <string.h>
 #include <math.h>
 #include <complex.h>
 #undef I
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <fftw3.h>
 
-#include "dsp.h"
-#include "filter.h"
 #include "radio.h"
-#include "fm.h"
-#include "audio.h"
-#include "command.h"
 
 
 int process_command(char *cmdbuf,int len);

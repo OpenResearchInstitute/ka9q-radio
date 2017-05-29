@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.9 2017/05/25 11:15:25 karn Exp karn $
+// $Id: radio.c,v 1.10 2017/05/29 10:29:07 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -17,7 +17,6 @@
 #include "radio.h"
 #include "filter.h"
 #include "dsp.h"
-#include "audio.h"
 
 
 extern int ctl_sock;
@@ -103,11 +102,6 @@ double set_second_LO_rate(double second_LO_rate,int force){
 }
 int set_mode(enum mode mode){
 
-  void *demod_fm(void *);
-  void *demod_ssb(void *);
-  void *demod_iq(void *);
-  void *demod_cam(void *);
-  void *demod_am(void *);  
 
 #if 0
   if(mode == Demod.mode)
@@ -192,26 +186,6 @@ int spindown(complex float *data,int len){
   }
   return 0;
 }
-
-
-int ssb_agc(){
-  if(Demod.gain * Demod.amplitude > Headroom){ // Target to about -10 dBFS
-    // New signal peak: decrease gain and inhibit re-increase for a while
-    Demod.gain = Headroom / Demod.amplitude;
-    Demod.hangtime = Demod.hangmax;
-  } else {
-    // Not a new peak, but the AGC is still hanging at the last peak
-    if(Demod.hangtime !=0){
-      Demod.hangtime--;
-    } else {
-      // OK to increase gain; should enforce a limit
-      Demod.gain *= Demod.agcratio;
-    }
-  }
-  return 0;
-}
-
-
 
 double get_exact_samprate(){
   return Demod.samprate * (1 + Demod.calibrate);

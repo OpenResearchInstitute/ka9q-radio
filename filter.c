@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.2 2016/10/13 23:33:36 karn Exp karn $
+// $Id: filter.c,v 1.3 2016/10/14 04:35:37 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -99,13 +99,15 @@ int execute_filter(struct filter *f){
 }
 
 int delete_filter(struct filter *f){
-  fftwf_destroy_plan(f->fwd_plan);
-  fftwf_destroy_plan(f->rev_plan);  
-  fftwf_free(f->input_buffer);
-  fftwf_free(f->output_buffer.c);
-  fftwf_free(f->response);
-  fftwf_free(f->fdomain);
-  free(f);
+  if(f != NULL){
+    fftwf_destroy_plan(f->fwd_plan);
+    fftwf_destroy_plan(f->rev_plan);  
+    fftwf_free(f->input_buffer);
+    fftwf_free(f->output_buffer.c);
+    fftwf_free(f->response);
+    fftwf_free(f->fdomain);
+    free(f);
+  }
   return 0;
 }
 
