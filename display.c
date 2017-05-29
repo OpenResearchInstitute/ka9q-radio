@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.10 2017/05/25 11:15:16 karn Exp karn $
+// $Id: display.c,v 1.11 2017/05/29 10:29:18 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -34,38 +34,42 @@ void *display(void *arg){
   
 
   for(;;){
-    mvwprintw(fw,0,0,"Frequency   %'17.2f",get_first_LO() - get_second_LO(0) + Modes[Demod.mode].dial);
-    mvwprintw(fw,1,0,"First LO    %'17.2f",get_first_LO());
-    mvwprintw(fw,2,0,"First IF    %'17.2f",-get_second_LO(0));
-    mvwprintw(fw,3,0,"Dial offset %'17.2f",Modes[Demod.mode].dial);
+    wmove(fw,0,0);
+    wprintw(fw,"Frequency   %'17.2f\n",get_first_LO() - get_second_LO(0) + Modes[Demod.mode].dial);
+    wprintw(fw,"First LO    %'17.2f\n",get_first_LO());
+    wprintw(fw,"First IF    %'17.2f\n",-get_second_LO(0));
+    wprintw(fw,"Dial offset %'17.2f\n",Modes[Demod.mode].dial);
     wrefresh(fw);
 
-    mvwprintw(sig,0,0,"Mode         %3s",Modes[Demod.mode].name);
-    mvwprintw(sig,1,0,"IF1     %7.1f dB",power2dB(Demod.power_i + Demod.power_q));
-    mvwprintw(sig,2,0,"IF2     %7.1f dB",voltage2dB(Demod.amplitude));
-    mvwprintw(sig,3,0,"AF Gain %7.1f dB",voltage2dB(Demod.gain));
-    mvwprintw(sig,4,0,"SNR     %7.1f dB",power2dB(Demod.snr));
+    wmove(sig,0,0);
+    wprintw(sig,"Mode         %3s\n",Modes[Demod.mode].name);
+    wprintw(sig,"IF1     %7.1f dB\n",power2dB(Demod.power_i + Demod.power_q));
+    wprintw(sig,"IF2     %7.1f dB\n",voltage2dB(Demod.amplitude));
+    wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(Demod.gain));
+    wprintw(sig,"SNR     %7.1f dB\n",power2dB(Demod.snr));
     wrefresh(sig);
     
-    mvwprintw(sdr,0,0,"I offset %7.1f",Demod.DC_i);
-    mvwprintw(sdr,1,0,"Q offset %7.1f",Demod.DC_q);
-    mvwprintw(sdr,2,0,"I/Q imbal%7.1f dB",power2dB(Demod.power_i/Demod.power_q));
-    mvwprintw(sdr,3,0,"I/Q phi  %10.5f",Demod.sinphi);
-    mvwprintw(sdr,4,0,"LNA      %7u",Demod.lna_gain);
-    mvwprintw(sdr,5,0,"Mix gain %7u",Demod.mixer_gain);
-    mvwprintw(sdr,6,0,"IF gain  %7u",Demod.if_gain);
+    wmove(sdr,0,0);
+    wprintw(sdr,"I offset %7.1f\n",Demod.DC_i);
+    wprintw(sdr,"Q offset %7.1f\n",Demod.DC_q);
+    wprintw(sdr,"I/Q imbal%7.1f dB\n",power2dB(Demod.power_i/Demod.power_q));
+    wprintw(sdr,"I/Q phi  %10.5f\n",Demod.sinphi);
+    wprintw(sdr,"LNA      %7u\n",Demod.lna_gain);
+    wprintw(sdr,"Mix gain %7u\n",Demod.mixer_gain);
+    wprintw(sdr,"IF gain  %7u\n",Demod.if_gain);
     wrefresh(sdr);
     
     extern int Olds,Skips;
 
-    mvwprintw(net,0,0,"Olds %d",Olds);
-    mvwprintw(net,1,0,"Skips %d",Skips);
-    mvwprintw(net,2,0,"audio underrun %d",Audio.underrun);
+    wmove(net,0,0);
+    wprintw(net,"Olds %d\n",Olds);
+    wprintw(net,"Skips %d\n",Skips);
+    wprintw(net,"audio underrun %d\n",Audio.underrun);
     snd_pcm_sframes_t delayp;
     if(Audio.handle != NULL){
       snd_pcm_delay(Audio.handle,&delayp);
-      mvwprintw(net,3,0,"audio delay %d (%.1f ms)",(int)delayp,1000.*(float)delayp/Audio.samprate);
-      mvwprintw(net,4,0,"audio overflow %d",Audio.overflow);
+      wprintw(net,"audio delay %d (%.1f ms)\n",(int)delayp,1000.*(float)delayp/Audio.samprate);
+      wprintw(net,"audio overflow %d\n",Audio.overflow);
     }
     wrefresh(net);
 
