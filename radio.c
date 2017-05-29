@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.10 2017/05/29 10:29:07 karn Exp karn $
+// $Id: radio.c,v 1.11 2017/05/29 16:30:43 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -21,45 +21,44 @@
 
 extern int ctl_sock;
 struct demod Demod;
-double get_exact_samprate();
 
 const float Headroom = .316227766; // sqrt(0.10) = -10 dB
 
 
 // Get true first LO frequency
-double get_first_LO(){
-  return Demod.first_LO * (1 + Demod.calibrate);  // True frequency, as adjusted
+double get_first_LO(struct demod *demod){
+  return demod->first_LO * (1 + demod->calibrate);  // True frequency, as adjusted
 }
 
 
 // Return current frequency of carrier frequency at current first IF
 // If sweeping, return second LO freq at "offset" samples ahead of current sample
-double get_second_LO(int offset){
-  if(cimag(Demod.second_LO_phase_accel) != 0){
+double get_second_LO(struct demod *demod,int offset){
+  if(cimag(demod->second_LO_phase_accel) != 0){
     // sweeping, get instantaneous frequency
-    Demod.second_LO = get_exact_samprate()
-      * (offset * carg(Demod.second_LO_phase_accel) + carg(Demod.second_LO_phase_step)) / (2*M_PI);
+    demod->second_LO = get_exact_samprate(demod)
+      * (offset * carg(demod->second_LO_phase_accel) + carg(demod->second_LO_phase_step)) / (2*M_PI);
   }
-  return Demod.second_LO;
+  return demod->second_LO;
 }
 
 // Return current carrier frequency, including effects of any sweep
-double get_freq(){
-  return get_first_LO() - get_second_LO(0);
+double get_freq(struct demod *demod){
+  return get_first_LO(demod) - get_second_LO(demod,0);
 }
 
 // Set either or both LOs as needed to tune the specified radio frequency to zero audio frequency
 // Actually it goes to the offset specified in the mode table; e.g. +/- 750 Hz for the CW modes
 // Note: single precision floating point is not accurate enough at VHF and above
-int set_first_LO(double first_LO,int force){
+int set_first_LO(struct demod *demod,double first_LO,int force){
   struct status requested_status;
   struct sockaddr_in6 FE_address;
 
-  if(!force && first_LO == get_first_LO())
+  if(!force && first_LO == get_first_LO(demod))
     return 0;
 
   // Change only tuner frequency
-  requested_status.frequency = round(first_LO / (1 + Demod.calibrate)); // What we send to the tuner
+  requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
   requested_status.lna_gain = 0xff;
   requested_status.mixer_gain = 0xff;
   requested_status.if_gain = 0xff;    
@@ -71,122 +70,122 @@ int set_first_LO(double first_LO,int force){
       perror("sendto control socket");
   return 0;
 }
-double set_second_LO(double second_LO,int force){
+double set_second_LO(struct demod *demod,double second_LO,int force){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
-  if(!force && second_LO == Demod.second_LO)
+  if(!force && second_LO == demod->second_LO)
     return second_LO;
   
-  Demod.second_LO = second_LO;
-  Demod.second_LO_phase_step = csincos(2*M_PI*Demod.second_LO/get_exact_samprate());
-  if(Demod.second_LO_phase == 0) // In case it wasn't already set
-    Demod.second_LO_phase = 1;
+  demod->second_LO = second_LO;
+  demod->second_LO_phase_step = csincos(2*M_PI*demod->second_LO/get_exact_samprate(demod));
+  if(demod->second_LO_phase == 0) // In case it wasn't already set
+    demod->second_LO_phase = 1;
   return second_LO;
 }
-double set_second_LO_rate(double second_LO_rate,int force){
+double set_second_LO_rate(struct demod *demod,double second_LO_rate,int force){
   double samprate,sampsq;
 
-  if(!force && second_LO_rate == Demod.second_LO_rate)
+  if(!force && second_LO_rate == demod->second_LO_rate)
     return second_LO_rate;
 
-  samprate = get_exact_samprate(); // calibrated sample rate
+  samprate = get_exact_samprate(demod); // calibrated sample rate
   sampsq = samprate * samprate;
-  Demod.second_LO_rate = second_LO_rate;
+  demod->second_LO_rate = second_LO_rate;
   if(second_LO_rate == 0){
     // if stopped, store current frequency in case somebody reads it
-    Demod.second_LO_phase_accel = 0;
-    Demod.second_LO = get_exact_samprate() * carg(Demod.second_LO_phase_step)/(2*M_PI);
+    demod->second_LO_phase_accel = 0;
+    demod->second_LO = get_exact_samprate(demod) * carg(demod->second_LO_phase_step)/(2*M_PI);
   } else {
-    Demod.second_LO_phase_accel = csincos(2*M_PI*second_LO_rate/sampsq);
+    demod->second_LO_phase_accel = csincos(2*M_PI*second_LO_rate/sampsq);
   }
   return second_LO_rate;
 }
-int set_mode(enum mode mode){
+int set_mode(struct demod *demod,enum mode mode){
 
 
 #if 0
-  if(mode == Demod.mode)
+  if(mode == demod->mode)
     return 0;
 #endif
   
-  Demod.mode = mode;
-  Demod.samprate = 192000;
-  Demod.L = 4096;
-  Demod.M = 4097;
+  demod->mode = mode;
+  demod->samprate = 192000;
+  demod->L = 4096;
+  demod->M = 4097;
   
-  pthread_cancel(Demod.demod_thread); // what if it's not running?
+  pthread_cancel(demod->demod_thread); // what if it's not running?
   void *retval;
-  pthread_join(Demod.demod_thread,&retval); // Wait for it to finish
+  pthread_join(demod->demod_thread,&retval); // Wait for it to finish
   
   switch(mode){
   case NFM:
   case FM:
-    pthread_create(&Demod.demod_thread,NULL,demod_fm,NULL);
+    pthread_create(&demod->demod_thread,NULL,demod_fm,&Demod);
     break;
   case USB:
   case LSB:
   case CWU:
   case CWL:
-    pthread_create(&Demod.demod_thread,NULL,demod_ssb,NULL);
+    pthread_create(&demod->demod_thread,NULL,demod_ssb,&Demod);
     break;
   case CAM:
-    pthread_create(&Demod.demod_thread,NULL,demod_cam,NULL);
+    pthread_create(&demod->demod_thread,NULL,demod_cam,&Demod);
     break;
   case AM:
-    pthread_create(&Demod.demod_thread,NULL,demod_am,NULL);
+    pthread_create(&demod->demod_thread,NULL,demod_am,&Demod);
     break;
   case IQ:
   case ISB:
-    pthread_create(&Demod.demod_thread,NULL,demod_iq,NULL);
+    pthread_create(&demod->demod_thread,NULL,demod_iq,&Demod);
     break;
   case WFM:
     break;
   }
   return 0;
 }      
-int set_cal(double cal){
-  Demod.calibrate = cal;
+int set_cal(struct demod *demod,double cal){
+  demod->calibrate = cal;
   return 0;
 }
 
 
-int spindown(complex float *data,int len){
+int spindown(struct demod *demod,complex float *data,int len){
   int n;
 
-  if(Demod.second_LO_phase == 0) // Make sure it's been initalized
-    Demod.second_LO_phase = 1;
+  if(demod->second_LO_phase == 0) // Make sure it's been initalized
+    demod->second_LO_phase = 1;
 
   // Apply 2nd LO
   for(n=0; n < len; n++){
-    data[n] *= Demod.second_LO_phase;
-    Demod.second_LO_phase *= Demod.second_LO_phase_step;
-    if(Demod.second_LO_phase_accel != 0)
-      Demod.second_LO_phase_step *= Demod.second_LO_phase_accel; // Frequency sweep
+    data[n] *= demod->second_LO_phase;
+    demod->second_LO_phase *= demod->second_LO_phase_step;
+    if(demod->second_LO_phase_accel != 0)
+      demod->second_LO_phase_step *= demod->second_LO_phase_accel; // Frequency sweep
   }
   // Renormalize to guard against accumulated roundoff error
-  Demod.second_LO_phase /= cabs(Demod.second_LO_phase);
-  if(Demod.second_LO_phase_accel != 0)
-    Demod.second_LO_phase_step /= cabs(Demod.second_LO_phase_step);
+  demod->second_LO_phase /= cabs(demod->second_LO_phase);
+  if(demod->second_LO_phase_accel != 0)
+    demod->second_LO_phase_step /= cabs(demod->second_LO_phase_step);
 
-  if(cimag(Demod.second_LO_phase_accel) != 0){
+  if(cimag(demod->second_LO_phase_accel) != 0){
     // We're sweeping, so ensure we won't run the passband past the edges of the first IF bandwidth
-    double first_if = -get_second_LO(Demod.filter->blocksize_in);  // first IF at end of *next* sample block
+    double first_if = -get_second_LO(demod,demod->filter->blocksize_in);  // first IF at end of *next* sample block
     double new_first_if = first_if;
-    if(first_if + max(Modes[Demod.mode].high,0) >= Demod.samprate/2){
+    if(first_if + max(Modes[demod->mode].high,0) >= demod->samprate/2){
       // Will hit upper end
-      new_first_if = -Demod.samprate/2 - min(Modes[Demod.mode].low,0);
-    } else if(first_if - min(Modes[Demod.mode].low,0) <= -Demod.samprate/2){
+      new_first_if = -demod->samprate/2 - min(Modes[demod->mode].low,0);
+    } else if(first_if - min(Modes[demod->mode].low,0) <= -demod->samprate/2){
       // Will hit lower end
-      new_first_if = Demod.samprate/2 - max(Modes[Demod.mode].high,0);
+      new_first_if = demod->samprate/2 - max(Modes[demod->mode].high,0);
     }
     if(new_first_if != first_if){
       // Make the changes
-      set_first_LO(get_first_LO() - (new_first_if - first_if),1);
-      set_second_LO(-new_first_if,1);
+      set_first_LO(demod,get_first_LO(demod) - (new_first_if - first_if),1);
+      set_second_LO(demod,-new_first_if,1);
     }
   }
   return 0;
 }
 
-double get_exact_samprate(){
-  return Demod.samprate * (1 + Demod.calibrate);
+double get_exact_samprate(struct demod *demod){
+  return demod->samprate * (1 + demod->calibrate);
 }

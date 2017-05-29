@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.11 2017/05/29 10:29:14 karn Exp karn $
+// $Id: radio.h,v 1.12 2017/05/29 16:30:51 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -45,17 +45,18 @@ extern struct demod Demod;
 
 extern const float Headroom; // Audio headroom ratio
 
-int set_first_LO(double first_LO,int);
-double get_first_LO(void);
-double set_second_LO(double second_LO,int);
-double get_second_LO(int);
-double set_second_LO_rate(double second_LO_rate,int);
+int set_first_LO(struct demod *demod,double first_LO,int);
+double get_first_LO(struct demod *demod);
+double set_second_LO(struct demod *demod,double second_LO,int);
+double get_second_LO(struct demod *demod,int);
+double set_second_LO_rate(struct demod *demod,double second_LO_rate,int);
+double get_exact_samprate(struct demod *);
 
-int set_mode(enum mode mode);
-int set_cal(double);
-int spindown(complex float *data,int len);
+int set_mode(struct demod *demod,enum mode mode);
+int set_cal(struct demod *,double);
+int spindown(struct demod *demod,complex float *data,int len);
 void closedown(int a);
-void proc_samples(short *,int);
+void proc_samples(struct demod *,short *,int);
 
 // Thread entry points
 void *fcd_command(void *);

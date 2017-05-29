@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.4 2017/05/29 10:28:55 karn Exp karn $
+// $Id: fm.c,v 1.5 2017/05/29 16:30:36 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -14,7 +14,7 @@
 #include "audio.h"
 
 // Estimate FM SNR
-float fm_snr(complex float *buffer,int L){
+float fm_snr(struct demod *demod,complex float *buffer,int L){
   float fm_variance;
   int n;
   
@@ -29,7 +29,7 @@ float fm_snr(complex float *buffer,int L){
   }
   avg_squares /= L; // Average square magnitude
   avg /= L;         // Average magnitude
-  Demod.amplitude = avg;
+  demod->amplitude = avg;
   fm_variance = avg_squares - avg*avg;
   
   // Find SNR
@@ -51,8 +51,9 @@ int do_fm(float *output,complex float *buffer,int L,complex float *state){
 }
 
 void *fm_cleanup(void *arg){
-  delete_filter(Demod.filter);
-  Demod.filter = NULL;
+  struct demod *demod = arg;
+  delete_filter(demod->filter);
+  demod->filter = NULL;
   return NULL;
 }
 
@@ -60,15 +61,16 @@ void *fm_cleanup(void *arg){
 void *demod_fm(void *arg){
   int n;
   int N;
-  float gain = 1.0;  // unity gain
+  const float gain = 1.0;  // unity gain
   complex float state = 0;
   int low,high;
+  struct demod *demod = arg;
 
-  enum mode mode = Demod.mode;
-  N = Demod.L + Demod.M - 1;
+  enum mode mode = demod->mode;
+  N = demod->L + demod->M - 1;
 
-  low = N*Modes[mode].low/Demod.samprate;
-  high = N*Modes[mode].high/Demod.samprate;
+  low = N*Modes[mode].low/demod->samprate;
+  high = N*Modes[mode].high/demod->samprate;
   if(low > high){
     int t;
     t = low;
@@ -85,35 +87,35 @@ void *demod_fm(void *arg){
   for(n=low; n <= high; n++)
     response[(n+N)%N] = gain;
   
-  window_filter(Demod.L,Demod.M,response,Kaiser_beta);
-  Demod.decimate = Demod.samprate / Audio.samprate;
+  window_filter(demod->L,demod->M,response,Kaiser_beta);
+  demod->decimate = demod->samprate / Audio.samprate;
   
-  Demod.filter = create_filter(Demod.L,Demod.M,response,Demod.decimate,COMPLEX);
+  demod->filter = create_filter(demod->L,demod->M,response,demod->decimate,COMPLEX);
   // Constant gain used by FM only; automatically adjusted by AGC in linear modes
-  Demod.gain = (Headroom * N / M_PI) / (Demod.decimate * abs(low - high));
-  audio_change_parms(Audio.samprate,2,Demod.filter->blocksize_out);  
+  demod->gain = (Headroom * N / M_PI) / (demod->decimate * abs(low - high));
+  audio_change_parms(Audio.samprate,2,demod->filter->blocksize_out);  
 
-  pthread_cleanup_push(fm_cleanup,&Demod);
+  pthread_cleanup_push(fm_cleanup,demod);
 
   while(1){
     complex float *buffer;
-    read(Demod.data_sock,&buffer,sizeof(buffer));
+    read(demod->data_sock,&buffer,sizeof(buffer));
     
-    memcpy(Demod.filter->input,buffer,Demod.filter->blocksize_in*sizeof(*buffer));
+    memcpy(demod->filter->input,buffer,demod->filter->blocksize_in*sizeof(*buffer));
 
-    spindown(Demod.filter->input,Demod.filter->blocksize_in); // 2nd LO
+    spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
 
     int i;
-    i = execute_filter(Demod.filter);
+    i = execute_filter(demod->filter);
     assert(i == 0);
 
-    Demod.snr = fm_snr(Demod.filter->output.c,Demod.filter->blocksize_out);
+    demod->snr = fm_snr(demod,demod->filter->output.c,demod->filter->blocksize_out);
     
     // If squelch is closed, just let the output drain
-    if(Demod.snr > 2){
-      float audio[Demod.filter->blocksize_out];
-      do_fm(audio,Demod.filter->output.c,Demod.filter->blocksize_out,&state);
-      put_mono_audio(audio,Demod.filter->blocksize_out,Demod.gain);
+    if(demod->snr > 2){
+      float audio[demod->filter->blocksize_out];
+      do_fm(audio,demod->filter->output.c,demod->filter->blocksize_out,&state);
+      put_mono_audio(audio,demod->filter->blocksize_out,demod->gain);
     }
   }
   pthread_cleanup_pop(1);

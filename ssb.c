@@ -14,8 +14,9 @@
 #include "audio.h"
 
 void *ssb_cleanup(void *arg){
-  delete_filter(Demod.filter);
-  Demod.filter = NULL;
+  struct demod *demod = arg;
+  delete_filter(demod->filter);
+  demod->filter = NULL;
   return NULL;
 }
 
@@ -23,15 +24,16 @@ void *ssb_cleanup(void *arg){
 void *demod_ssb(void *arg){
   int n;
   int N;
-  float gain;
+  const float gain = M_SQRT1_2;  // unity gain
   int low,high;
+  struct demod *demod = arg;
 
-  N = Demod.L + Demod.M - 1;
-  enum mode mode = Demod.mode;
+  N = demod->L + demod->M - 1;
+  enum mode mode = demod->mode;
 
 
-  low = N*Modes[mode].low/Demod.samprate;
-  high = N*Modes[mode].high/Demod.samprate;
+  low = N*Modes[mode].low/demod->samprate;
+  high = N*Modes[mode].high/demod->samprate;
   if(low > high){
     int t;
     t = low;
@@ -39,13 +41,12 @@ void *demod_ssb(void *arg){
     high = t;
   }
   
-  Demod.gain = dB2voltage(70.); // 70 dB starting point, will adjust with ssb_agc
-  float hangmax = 1.1 * (Demod.samprate/Demod.L); // 1.1 second hang before gain increase
-  float agcratio = dB2voltage(6 * ((float)Demod.L/Demod.samprate)); // 6 dB/sec
-  float hangtime = hangmax;
+  demod->gain = dB2voltage(70.); // 70 dB starting point, will adjust with ssb_agc
+  int hangmax = 1.1 * (demod->samprate/demod->L); // 1.1 second hang before gain increase
+  float agcratio = dB2voltage(6 * ((float)demod->L/demod->samprate)); // 6 dB/sec
+  int hangtime = hangmax;
 
-  // Adjust for unity gain
-  gain = M_SQRT1_2;
+
 
   // Set up pre-demodulation filter
   complex float *response = (complex float *)fftwf_alloc_complex(N);
@@ -54,32 +55,32 @@ void *demod_ssb(void *arg){
   for(n=low; n <= high; n++)
     response[(n+N)%N] = gain;
   
-  window_filter(Demod.L,Demod.M,response,Kaiser_beta);
-  Demod.decimate = Demod.samprate / Audio.samprate;
+  window_filter(demod->L,demod->M,response,Kaiser_beta);
+  demod->decimate = demod->samprate / Audio.samprate;
   
-  Demod.filter = create_filter(Demod.L,Demod.M,response,Demod.decimate,REAL);
-  audio_change_parms(Audio.samprate,2,Demod.filter->blocksize_out);  
+  demod->filter = create_filter(demod->L,demod->M,response,demod->decimate,REAL);
+  audio_change_parms(Audio.samprate,2,demod->filter->blocksize_out);  
 
-  pthread_cleanup_push(ssb_cleanup,&Demod);
+  pthread_cleanup_push(ssb_cleanup,demod);
 
   while(1){
     complex float *buffer;
-    read(Demod.data_sock,&buffer,sizeof(buffer));
+    read(demod->data_sock,&buffer,sizeof(buffer));
     
-    memcpy(Demod.filter->input,buffer,Demod.filter->blocksize_in*sizeof(*buffer));
+    memcpy(demod->filter->input,buffer,demod->filter->blocksize_in*sizeof(*buffer));
 
-    spindown(Demod.filter->input,Demod.filter->blocksize_in); // 2nd LO
+    spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
 
     int i;
-    i = execute_filter(Demod.filter);
+    i = execute_filter(demod->filter);
     assert(i == 0);
     // Automatic gain control
-    Demod.amplitude = amplitude(Demod.filter->output.r,Demod.filter->blocksize_out);
-    float snn = Demod.amplitude / Demod.noise; // (S+N)/N amplitude ratio
-    Demod.snr = (snn*snn) -1; // S/N as power ratio
-    if(Demod.gain * Demod.amplitude > Headroom){ // Target to about -10 dBFS
+    demod->amplitude = amplitude(demod->filter->output.r,demod->filter->blocksize_out);
+    float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
+    demod->snr = (snn*snn) -1; // S/N as power ratio
+    if(demod->gain * demod->amplitude > Headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
-      Demod.gain = Headroom / Demod.amplitude;
+      demod->gain = Headroom / demod->amplitude;
       hangtime = hangmax;
     } else {
       // Not a new peak, but the AGC is still hanging at the last peak
@@ -87,10 +88,10 @@ void *demod_ssb(void *arg){
 	hangtime--;
       } else {
 	// OK to increase gain; should enforce a limit
-	Demod.gain *= agcratio;
+	demod->gain *= agcratio;
       }
     }
-    put_mono_audio(Demod.filter->output.r,Demod.filter->blocksize_out,Demod.gain);
+    put_mono_audio(demod->filter->output.r,demod->filter->blocksize_out,demod->gain);
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

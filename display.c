@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.11 2017/05/29 10:29:18 karn Exp karn $
+// $Id: display.c,v 1.12 2017/05/29 10:41:50 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -21,6 +21,7 @@ void *display(void *arg){
   WINDOW *sdr;
   WINDOW *net;
   int c;
+  struct demod *demod = &Demod;
 
   initscr();
   keypad(stdscr,TRUE);
@@ -35,28 +36,28 @@ void *display(void *arg){
 
   for(;;){
     wmove(fw,0,0);
-    wprintw(fw,"Frequency   %'17.2f\n",get_first_LO() - get_second_LO(0) + Modes[Demod.mode].dial);
-    wprintw(fw,"First LO    %'17.2f\n",get_first_LO());
-    wprintw(fw,"First IF    %'17.2f\n",-get_second_LO(0));
-    wprintw(fw,"Dial offset %'17.2f\n",Modes[Demod.mode].dial);
+    wprintw(fw,"Frequency   %'17.2f\n",get_first_LO(demod) - get_second_LO(demod,0) + Modes[demod->mode].dial);
+    wprintw(fw,"First LO    %'17.2f\n",get_first_LO(demod));
+    wprintw(fw,"First IF    %'17.2f\n",-get_second_LO(demod,0));
+    wprintw(fw,"Dial offset %'17.2f\n",Modes[demod->mode].dial);
     wrefresh(fw);
 
     wmove(sig,0,0);
-    wprintw(sig,"Mode         %3s\n",Modes[Demod.mode].name);
-    wprintw(sig,"IF1     %7.1f dB\n",power2dB(Demod.power_i + Demod.power_q));
-    wprintw(sig,"IF2     %7.1f dB\n",voltage2dB(Demod.amplitude));
-    wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(Demod.gain));
-    wprintw(sig,"SNR     %7.1f dB\n",power2dB(Demod.snr));
+    wprintw(sig,"Mode         %3s\n",Modes[demod->mode].name);
+    wprintw(sig,"IF1     %7.1f dB\n",power2dB(demod->power_i + demod->power_q));
+    wprintw(sig,"IF2     %7.1f dB\n",voltage2dB(demod->amplitude));
+    wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(demod->gain));
+    wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
     wrefresh(sig);
     
     wmove(sdr,0,0);
-    wprintw(sdr,"I offset %7.1f\n",Demod.DC_i);
-    wprintw(sdr,"Q offset %7.1f\n",Demod.DC_q);
-    wprintw(sdr,"I/Q imbal%7.1f dB\n",power2dB(Demod.power_i/Demod.power_q));
-    wprintw(sdr,"I/Q phi  %10.5f\n",Demod.sinphi);
-    wprintw(sdr,"LNA      %7u\n",Demod.lna_gain);
-    wprintw(sdr,"Mix gain %7u\n",Demod.mixer_gain);
-    wprintw(sdr,"IF gain  %7u\n",Demod.if_gain);
+    wprintw(sdr,"I offset %7.1f\n",demod->DC_i);
+    wprintw(sdr,"Q offset %7.1f\n",demod->DC_q);
+    wprintw(sdr,"I/Q imbal%7.1f dB\n",power2dB(demod->power_i/demod->power_q));
+    wprintw(sdr,"I/Q phi  %10.5f\n",demod->sinphi);
+    wprintw(sdr,"LNA      %7u\n",demod->lna_gain);
+    wprintw(sdr,"Mix gain %7u\n",demod->mixer_gain);
+    wprintw(sdr,"IF gain  %7u\n",demod->if_gain);
     wrefresh(sdr);
     
     extern int Olds,Skips;
@@ -87,12 +88,15 @@ void *display(void *arg){
       clearok(curscr,TRUE);
       break;
     case 'n':   // Set noise reference to current amplitude; hit with no sig
-      Demod.noise = Demod.amplitude;
+      demod->noise = demod->amplitude;
       break;
     case 'm':
-      prompt = newwin(3,50,20,0);
+      prompt = newwin(3,80,20,0);
       box(prompt,0,0);
-      mvwprintw(prompt,1,1,"Enter mode: ");
+      mvwprintw(prompt,1,1,"Enter mode [");
+      for(i=1;i <= Nmodes;i++)
+	wprintw(prompt," %s",Modes[i].name);
+      wprintw(prompt," ]: ");
       wrefresh(prompt);
       echo();
       timeout(0);
@@ -101,7 +105,7 @@ void *display(void *arg){
       noecho();
       for(i=1;i <= Nmodes;i++){
 	if(strcasecmp(str,Modes[i].name) == 0){
-	  set_mode(Modes[i].mode);
+	  set_mode(demod,Modes[i].mode);
 	  break;
 	}
       }
@@ -121,8 +125,8 @@ void *display(void *arg){
       noecho();
       f = atof(str);
       if(f > 0){
-	set_second_LO(-48000,0);
-	set_first_LO(f - 48000 - Modes[Demod.mode].dial,1);
+	set_second_LO(demod,-48000,0);
+	set_first_LO(demod,f - 48000 - Modes[demod->mode].dial,1);
       }
       werase(prompt);
       wrefresh(prompt);

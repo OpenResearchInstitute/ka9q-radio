@@ -14,9 +14,10 @@
 #include "audio.h"
 
 void *cam_cleanup(void *arg){
-  if(Demod.filter != NULL){
-    delete_filter(Demod.filter);
-    Demod.filter = NULL;
+  struct demod *demod = arg;
+  if(demod->filter != NULL){
+    delete_filter(demod->filter);
+    demod->filter = NULL;
   }
   return NULL;
 }
@@ -25,23 +26,21 @@ void *cam_cleanup(void *arg){
 void *demod_cam(void *arg){
   int n;
   int N;
-  float gain;
+  const float gain = 1.0;  // unity gain
   int low,high;
+  struct demod *demod = arg;
 
-  N = Demod.L + Demod.M - 1;
-  enum mode mode = Demod.mode;
+  N = demod->L + demod->M - 1;
+  enum mode mode = demod->mode;
 
-  low = N*Modes[mode].low/Demod.samprate;
-  high = N*Modes[mode].high/Demod.samprate;
+  low = N*Modes[mode].low/demod->samprate;
+  high = N*Modes[mode].high/demod->samprate;
   if(low > high){
     int t;
     t = low;
     low = high;
     high = t;
   }
-  
-  // Adjust for unity gain
-  gain = 1.0;
 
   // Set up pre-demodulation filter
   complex float *response = (complex float *)fftwf_alloc_complex(N);
@@ -50,62 +49,61 @@ void *demod_cam(void *arg){
   for(n=low; n <= high; n++)
     response[(n+N)%N] = gain;
   
-  window_filter(Demod.L,Demod.M,response,Kaiser_beta);
-  Demod.decimate = Demod.samprate / Audio.samprate;
-  
-  Demod.filter = create_filter(Demod.L,Demod.M,response,Demod.decimate,COMPLEX);
-  audio_change_parms(Audio.samprate,2,Demod.filter->blocksize_out);  
+  window_filter(demod->L,demod->M,response,Kaiser_beta);
+  demod->decimate = demod->samprate / Audio.samprate;
+  demod->filter = create_filter(demod->L,demod->M,response,demod->decimate,COMPLEX);
+  audio_change_parms(Audio.samprate,2,demod->filter->blocksize_out);  
 
-  pthread_cleanup_push(cam_cleanup,&Demod);
+  pthread_cleanup_push(cam_cleanup,demod);
 
   while(1){
     complex float *buffer;
-    read(Demod.data_sock,&buffer,sizeof(buffer));
+    read(demod->data_sock,&buffer,sizeof(buffer));
     
-    memcpy(Demod.filter->input,buffer,Demod.filter->blocksize_in*sizeof(*buffer));
+    memcpy(demod->filter->input,buffer,demod->filter->blocksize_in*sizeof(*buffer));
 
-    spindown(Demod.filter->input,Demod.filter->blocksize_in); // 2nd LO
+    spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
 
     int i;
-    i = execute_filter(Demod.filter);
+    i = execute_filter(demod->filter);
     assert(i == 0);
     // Automatic gain control
     complex float phase;
     int n;
-    float audio[Demod.filter->blocksize_out];
+    float audio[demod->filter->blocksize_out];
     static complex float lastphase;
     double freqerror;
     
     phase = 0;
-    for(n=0; n < Demod.filter->blocksize_out; n++)
-      phase += Demod.filter->output.c[n];
+    for(n=0; n < demod->filter->blocksize_out; n++)
+      phase += demod->filter->output.c[n];
 
     phase = conj(phase) / cabs(phase);
 
     // Rotate signal onto I axis, measure DC (carrier) level
-    Demod.amplitude = 0;
-    for(n=0; n < Demod.filter->blocksize_out; n++)
-      Demod.amplitude += audio[n] = creal(Demod.filter->output.c[n] * phase);
+    demod->amplitude = 0;
+    for(n=0; n < demod->filter->blocksize_out; n++)
+      demod->amplitude += audio[n] = creal(demod->filter->output.c[n] * phase);
     
-    Demod.amplitude /= Demod.filter->blocksize_out;
-    float snn = Demod.amplitude / Demod.noise; // (S+N)/N amplitude ratio
-    Demod.snr = (snn*snn) -1; // S/N as power ratio
+    demod->amplitude /= demod->filter->blocksize_out;
+    float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
+    demod->snr = (snn*snn) -1; // S/N as power ratio
 
 
     // Remove carrier DC
-    for(n=0; n < Demod.filter->blocksize_out; n++)
-      audio[n] -= Demod.amplitude;
+    for(n=0; n < demod->filter->blocksize_out; n++)
+      audio[n] -= demod->amplitude;
 
     // Frequency error is the phase of this block minus the last, times blocks/sec
     // Phase was already flipped, hence the minus
     // Only move a fraction of the error at one time
-    freqerror = -0.01 * carg(phase * conj(lastphase))/(2*M_PI) * Demod.samprate/Demod.filter->blocksize_in;
+    freqerror = -0.01 * carg(phase * conj(lastphase))/(2*M_PI) * demod->samprate/demod->filter->blocksize_in;
     lastphase = phase;
-    set_second_LO(-freqerror + Demod.second_LO,0);
+    set_second_LO(demod,-freqerror + demod->second_LO,0);
 
     // AM AGC is carrier-driven
-    Demod.gain = Headroom / Demod.amplitude;
-    put_mono_audio(audio,Demod.filter->blocksize_out,Demod.gain); // we do our own
+    demod->gain = Headroom / demod->amplitude;
+    put_mono_audio(audio,demod->filter->blocksize_out,demod->gain); // we do our own
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

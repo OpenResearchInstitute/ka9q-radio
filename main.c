@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.10 2017/05/26 00:16:27 karn Exp karn $
+// $Id: main.c,v 1.11 2017/05/29 10:29:04 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -64,6 +64,7 @@ int main(int argc,char *argv[]){
   int source_port = 5555;     // Default for testing
   enum mode mode;
   double second_IF;
+  struct demod *demod = &Demod;
 
 
   locale = getenv("LANG");
@@ -78,8 +79,8 @@ int main(int argc,char *argv[]){
   // Defaults
   Quiet = 0;
   Audio.name = "sysdefault";
-  Demod.L = 4096;      // Number of samples in buffer
-  Demod.M = (4096+1);  // Length of filter impulse response
+  demod->L = 4096;      // Number of samples in buffer
+  demod->M = (4096+1);  // Length of filter impulse response
   mode = FM;
   second_IF = 48000;
 
@@ -107,16 +108,16 @@ int main(int argc,char *argv[]){
       Audio.echo = 1; // Echo sound to standard output
       break;
     case 'h':
-      Demod.min_IF = atof(optarg);
+      demod->min_IF = atof(optarg);
       break;
     case 'x':
-      Demod.max_IF = atof(optarg);
+      demod->max_IF = atof(optarg);
       break;
     case 'L':
-      Demod.L = atoi(optarg);
+      demod->L = atoi(optarg);
       break;
     case 'M':
-      Demod.M = atoi(optarg);
+      demod->M = atoi(optarg);
       break;
     case 'r':
       DAC_samprate = atof(optarg);
@@ -147,7 +148,7 @@ int main(int argc,char *argv[]){
     default:
       fprintf(stderr,"Usage: %s [-r DAC sample rate] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-x maxIF] [-t threads] [-R multicast_address] [-P port]\n",argv[0]);
       fprintf(stderr,"Default: %s -r %u -m %s -l %s -S %s -L %d -M %d -h %.1f -x %.1f -R %s -P %d\n",
-	      argv[0],DAC_samprate,Modes[mode].name,locale,Audio.name,Demod.L,Demod.M,Demod.max_IF,Demod.min_IF,
+	      argv[0],DAC_samprate,Modes[mode].name,locale,Audio.name,demod->L,demod->M,demod->max_IF,demod->min_IF,
 	      source,source_port);
       break;
     }
@@ -159,34 +160,34 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,locale);
 
 
-  Demod.samprate = ADC_samprate;
+  demod->samprate = ADC_samprate;
   Audio.samprate = DAC_samprate;
   // Verify decimation ratio
-  if((Demod.samprate % Audio.samprate) != 0)
+  if((demod->samprate % Audio.samprate) != 0)
     fprintf(stderr,"Warning: A/D rate %'u is not integer multiple of D/A rate %'u; decimation will probably fail\n",
-	    Demod.samprate,Audio.samprate);
-  Demod.decimate = Demod.samprate / Audio.samprate;
+	    demod->samprate,Audio.samprate);
+  demod->decimate = demod->samprate / Audio.samprate;
   
-  N = Demod.L + Demod.M - 1;
-  if((N % Demod.decimate) != 0)
-    fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,Demod.decimate);
+  N = demod->L + demod->M - 1;
+  if((N % demod->decimate) != 0)
+    fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,demod->decimate);
 
-  if((Demod.M - 1) % Demod.decimate != 0)
-    fprintf(stderr,"Warning: Filter length %'u - 1 is not divisible by decimation ratio %d\n",Demod.M,Demod.decimate);
+  if((demod->M - 1) % demod->decimate != 0)
+    fprintf(stderr,"Warning: Filter length %'u - 1 is not divisible by decimation ratio %d\n",demod->M,demod->decimate);
 
   // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
   fftwf_import_system_wisdom();
 
-  if(Demod.max_IF == 0 || Demod.max_IF > Demod.samprate/2)
-    Demod.max_IF = Demod.samprate/2;
+  if(demod->max_IF == 0 || demod->max_IF > demod->samprate/2)
+    demod->max_IF = demod->samprate/2;
   
   fprintf(stderr,"UDP control port %d\n",Ctl_port);
   fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d, max IF +/-%'.1lf Hz\n",
-	  Demod.samprate,Audio.samprate,Demod.decimate,Demod.max_IF);
+	  demod->samprate,Audio.samprate,demod->decimate,demod->max_IF);
   fprintf(stderr,"block size: %'d complex samples (%'.1f ms @ %'u S/s)\n",
-	  Demod.L,1000.*Demod.L/Demod.samprate,Demod.samprate);
+	  demod->L,1000.*demod->L/demod->samprate,demod->samprate);
   fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
-	  Kaiser_beta,Demod.M,1000.*Demod.M/Demod.samprate,Demod.samprate,(float)Demod.samprate/N);
+	  Kaiser_beta,demod->M,1000.*demod->M/demod->samprate,demod->samprate,(float)demod->samprate/N);
 
   if(!Quiet)
     pthread_create(&Display_thread,NULL,display,NULL);
@@ -278,13 +279,13 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   fcntl(ctl_sock,F_SETFL,O_NONBLOCK);
-  set_mode(mode);
-  set_second_LO(-second_IF,1);
+  set_mode(&Demod,mode);
+  set_second_LO(demod,-second_IF,1);
 
   int sv[2];
   socketpair(AF_UNIX,SOCK_STREAM,0,sv);
   Demod_sock = sv[0];
-  Demod.data_sock = sv[1];
+  demod->data_sock = sv[1];
 
   input_loop(NULL);
 
@@ -305,6 +306,7 @@ void *input_loop(void *arg){
   struct rtp_header rtp_header;
   struct status status;
   struct iovec iovec[3];
+  struct demod *demod = &Demod;
 
   iovec[0].iov_base = &rtp_header;
   iovec[0].iov_len = sizeof(rtp_header);
@@ -351,19 +353,18 @@ void *input_loop(void *arg){
     }
     seq = rtp_header.seq + 1;
 
-
-
-    Demod.first_LO = status.frequency;
-    Demod.lna_gain = status.lna_gain;
-    Demod.mixer_gain = status.mixer_gain;
-    Demod.if_gain = status.if_gain;    
+    demod->first_LO = status.frequency;
+    demod->lna_gain = status.lna_gain;
+    demod->mixer_gain = status.mixer_gain;
+    demod->if_gain = status.if_gain;    
     cnt -= sizeof(rtp_header) + sizeof(status);
     cnt /= 4; // count 4-byte stereo samples
-    proc_samples(samples,cnt);
+    proc_samples(demod,samples,cnt);
   }
 }
 int process_command(char *cmdbuf,int len){
   struct command command;
+  struct demod *demod = &Demod;
 
   if(len >= sizeof(command)){
     memcpy(&command,cmdbuf,sizeof(command));
@@ -379,16 +380,16 @@ int process_command(char *cmdbuf,int len){
 #endif
       // Ignore out-of-range values
       if(command.first_LO > 0 && command.first_LO < 2e9)
-	set_first_LO(command.first_LO,0);
+	set_first_LO(demod,command.first_LO,0);
 
-      if(command.second_LO >= -Demod.samprate/2 && command.second_LO <= +Demod.samprate/2)
-	set_second_LO(command.second_LO,0);
+      if(command.second_LO >= -demod->samprate/2 && command.second_LO <= demod->samprate/2)
+	set_second_LO(demod,command.second_LO,0);
       if(fabs(command.second_LO_rate) < 1e9)
-	set_second_LO_rate(command.second_LO_rate,0);
+	set_second_LO_rate(demod,command.second_LO_rate,0);
       if(command.mode > 0 && command.mode <= Nmodes)
-	set_mode(command.mode);
+	set_mode(demod,command.mode);
       if(fabs(command.calibrate) < 1)
-	set_cal(command.calibrate);
+	set_cal(demod,command.calibrate);
       break;
     default:
       break; // Ignore

@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.11 2017/05/29 10:29:28 karn Exp karn $
+// $Id: demod.c,v 1.12 2017/05/29 16:30:39 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -31,37 +31,37 @@ complex float Buffers[4][4096]; // FIX THIS
 
 
 
-void proc_samples(short *sp,int cnt){
+void proc_samples(struct demod *demod,short *sp,int cnt){
 
   // Channel gain balance coefficients
   float gain_i=1,gain_q=1,pscale = 0;
-  if(Demod.power_i != 0 && Demod.power_q != 0){
-    gain_q = sqrt((Demod.power_i + Demod.power_q)/(2*Demod.power_q));
-    gain_i = sqrt((Demod.power_i + Demod.power_q)/(2*Demod.power_i));
-    pscale = 1/(Demod.power_i + Demod.power_q);
+  if(demod->power_i != 0 && demod->power_q != 0){
+    gain_q = sqrt((demod->power_i + demod->power_q)/(2*demod->power_q));
+    gain_i = sqrt((demod->power_i + demod->power_q)/(2*demod->power_i));
+    pscale = 1/(demod->power_i + demod->power_q);
   }
   float secphi,tanphi;
-  secphi = 1/sqrt(1 - Demod.sinphi * Demod.sinphi);
-  tanphi = Demod.sinphi * secphi;
+  secphi = 1/sqrt(1 - demod->sinphi * demod->sinphi);
+  tanphi = demod->sinphi * secphi;
 
 
   int i;
   for(i=0;i<cnt;i++){
     float samp_i,samp_q;
     // Remove and update DC offsets
-    samp_i = sp[2*i] - Demod.DC_i;    samp_q = sp[2*i+1] - Demod.DC_q;
-    Demod.DC_i += dc_alpha * samp_i;     Demod.DC_q += dc_alpha * samp_q;
+    samp_i = sp[2*i] - demod->DC_i;    samp_q = sp[2*i+1] - demod->DC_q;
+    demod->DC_i += dc_alpha * samp_i;     demod->DC_q += dc_alpha * samp_q;
     // Unity peak amplitude
     samp_i *= SCALE;                  samp_q *= SCALE;
     // Update channel power estimates
-    Demod.power_i += power_alpha * (samp_i * samp_i - Demod.power_i);
-    Demod.power_q += power_alpha * (samp_q * samp_q - Demod.power_q);    
+    demod->power_i += power_alpha * (samp_i * samp_i - demod->power_i);
+    demod->power_q += power_alpha * (samp_q * samp_q - demod->power_q);    
     // Balance gains, keeping constant total energy
     samp_i *= gain_i;                       samp_q *= gain_q;
     // Correct phase
     samp_q = samp_q * secphi - tanphi*samp_i;
     // Update residual phase error estimate
-    Demod.sinphi += phi_alpha * (samp_i * samp_q) * pscale;
+    demod->sinphi += phi_alpha * (samp_i * samp_q) * pscale;
     // Pass corrected sample to demodulator filter, invoke when full
     Buffers[Bufnum][In_count++] = CMPLXF(samp_i,samp_q);
     if(In_count == 4096){ // FIX THIS
