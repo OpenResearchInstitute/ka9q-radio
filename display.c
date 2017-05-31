@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.12 2017/05/29 10:41:50 karn Exp karn $
+// $Id: display.c,v 1.13 2017/05/29 18:35:03 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -22,6 +22,7 @@ void *display(void *arg){
   WINDOW *net;
   int c;
   struct demod *demod = &Demod;
+  int tunestep = 0;
 
   initscr();
   keypad(stdscr,TRUE);
@@ -29,9 +30,9 @@ void *display(void *arg){
   cbreak();
   noecho();
   fw = newwin(5,30,0,0);
-  sig = newwin(6,20,5,0);
+  sig = newwin(7,20,5,0);
   sdr = newwin(7,30,5,25);
-  net = newwin(6,35,12,0);
+  net = newwin(6,36,14,0);
   
 
   for(;;){
@@ -40,6 +41,18 @@ void *display(void *arg){
     wprintw(fw,"First LO    %'17.2f\n",get_first_LO(demod));
     wprintw(fw,"First IF    %'17.2f\n",-get_second_LO(demod,0));
     wprintw(fw,"Dial offset %'17.2f\n",Modes[demod->mode].dial);
+    // Tuning step highlight
+    int x;
+    if(tunestep >= -2 && tunestep <= -1){
+      x = 25 - tunestep + 1;
+    } else if(tunestep >= 0 && tunestep <= 2){
+      x = 25 - tunestep;
+    } else if(tunestep >= 3 && tunestep <= 5){
+      x = 25 - tunestep - 1;
+    } else if(tunestep >= 6 && tunestep <= 8){
+      x = 25 - tunestep - 2;
+    }
+    mvwchgat(fw,0,x,1,A_STANDOUT,0,NULL);
     wrefresh(fw);
 
     wmove(sig,0,0);
@@ -48,6 +61,8 @@ void *display(void *arg){
     wprintw(sig,"IF2     %7.1f dB\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(demod->gain));
     wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
+    wprintw(sig,"offset  %7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));
+    wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation/(2*M_PI));
     wrefresh(sig);
     
     wmove(sdr,0,0);
@@ -84,6 +99,20 @@ void *display(void *arg){
       continue;
     case 'q':   // Exit radio program
       goto done;
+    case KEY_LEFT:
+      if(tunestep < 8)
+	tunestep++;
+      break;
+    case KEY_RIGHT:
+      if(tunestep > -2)
+	tunestep--;
+      break;
+    case KEY_UP:
+      set_freq(demod,get_freq(demod) + pow(10.,tunestep),0);
+      break;
+    case KEY_DOWN:
+      set_freq(demod,get_freq(demod) - pow(10.,tunestep),0);
+      break;
     case '\f':  // Screen repaint
       clearok(curscr,TRUE);
       break;
@@ -124,10 +153,9 @@ void *display(void *arg){
       timeout(100);
       noecho();
       f = atof(str);
-      if(f > 0){
-	set_second_LO(demod,-48000,0);
-	set_first_LO(demod,f - 48000 - Modes[demod->mode].dial,1);
-      }
+      if(f > 0)
+	set_freq(demod,f,1);
+
       werase(prompt);
       wrefresh(prompt);
       delwin(prompt);

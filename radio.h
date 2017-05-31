@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.12 2017/05/29 16:30:51 karn Exp karn $
+// $Id: radio.h,v 1.13 2017/05/29 18:35:07 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -38,13 +38,19 @@ struct demod {
   float amplitude; // Amplitude (not power) of signal after filter
   float noise;     // Minimum amplitude for SNR estimates (experimental)
   float gain;       // Current audio gain (linear modes only)
+  float foffset;    // Frequency offset (FM)
+  float pdeviation;
+  int devhold;
   pthread_t demod_thread;
   int data_sock;
 };
 extern struct demod Demod;
+extern int Demod_sock;
 
 extern const float Headroom; // Audio headroom ratio
 
+double get_freq(struct demod *);
+double set_freq(struct demod *,double,int);
 int set_first_LO(struct demod *demod,double first_LO,int);
 double get_first_LO(struct demod *demod);
 double set_second_LO(struct demod *demod,double second_LO,int);

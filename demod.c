@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.12 2017/05/29 16:30:39 karn Exp karn $
+// $Id: demod.c,v 1.13 2017/05/29 18:35:02 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -65,7 +65,6 @@ void proc_samples(struct demod *demod,short *sp,int cnt){
     // Pass corrected sample to demodulator filter, invoke when full
     Buffers[Bufnum][In_count++] = CMPLXF(samp_i,samp_q);
     if(In_count == 4096){ // FIX THIS
-      extern int Demod_sock;
       complex float *x;
       
       x = &Buffers[Bufnum][0];

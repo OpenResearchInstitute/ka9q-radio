@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.2 2016/10/13 23:37:09 karn Exp karn $
+// $Id: modes.c,v 1.3 2017/05/29 18:35:05 karn Exp karn $
 #include "command.h"
 
 struct modetab Modes[] = {
@@ -12,8 +12,8 @@ struct modetab Modes[] = {
   {LSB, "LSB",    0,     100,   -3000, -300, 1,},
   {CWL, "CWL", -750,      10,   -1000, -500, 1,},
   {NFM, "NFM",    0,    1000,   -3000, 3000, 1,}, // For D*star
-  //  {FM,   "FM",    0,    1000,   -7500, 7500, 1,},
-  {FM,   "FM",    0,    1000,   -10000, 10000, 1,},
+  {FM,   "FM",    0,    1000,   -8000, 8000, 1,},
+  //  {FM,   "FM",    0,    1000,   -10000, 10000, 1,},
   //  {WFM, "WFM",    0,  100000,       0,    0, 1,}  // No pre-detection filter
 };
 const int Nmodes = sizeof(Modes)/sizeof(struct modetab) - 1;

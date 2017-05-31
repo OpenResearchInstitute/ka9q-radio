@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.12 2017/05/29 18:35:06 karn Exp karn $
+// $Id: radio.c,v 1.13 2017/05/29 22:05:53 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -42,9 +42,27 @@ double get_second_LO(struct demod *demod,int offset){
   return demod->second_LO;
 }
 
+// Set frequency with optional front end tuning
+double set_freq(struct demod *demod,double f,int force){
+  double change = f - get_freq(demod);
+  double lo1 = get_first_LO(demod);
+  double lo2 = get_second_LO(demod,0) - change;
+
+  if(force
+     || -lo2 > demod->samprate/2 - Modes[demod->mode].high
+     || -lo2 < -demod->samprate/2 - Modes[demod->mode].low){
+    lo2 = -48000;
+  }
+  lo1 = f + lo2 - Modes[demod->mode].dial;
+  set_second_LO(demod,lo2,0);
+  set_first_LO(demod,lo1,1);
+  return f;
+}
+
 // Return current carrier frequency, including effects of any sweep
 double get_freq(struct demod *demod){
-  return get_first_LO(demod) - get_second_LO(demod,0);
+  return get_first_LO(demod) - get_second_LO(demod,0)
+  + Modes[demod->mode].dial;
 }
 
 // Set either or both LOs as needed to tune the specified radio frequency to zero audio frequency

@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.5 2017/05/29 16:30:36 karn Exp karn $
+// $Id: fm.c,v 1.6 2017/05/29 18:35:03 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -94,6 +94,7 @@ void *demod_fm(void *arg){
   // Constant gain used by FM only; automatically adjusted by AGC in linear modes
   demod->gain = (Headroom * N / M_PI) / (demod->decimate * abs(low - high));
   audio_change_parms(Audio.samprate,2,demod->filter->blocksize_out);  
+  demod->foffset = 0;
 
   pthread_cleanup_push(fm_cleanup,demod);
 
@@ -115,6 +116,15 @@ void *demod_fm(void *arg){
     if(demod->snr > 2){
       float audio[demod->filter->blocksize_out];
       do_fm(audio,demod->filter->output.c,demod->filter->blocksize_out,&state);
+      for(i=0;i<demod->filter->blocksize_out;i++){
+	demod->foffset += 0.00005 * (audio[i] - demod->foffset);
+	if(demod->devhold == 0 || (fabs(audio[i] - demod->foffset)) > demod->pdeviation){
+	  demod->pdeviation = fabs(audio[i] - demod->foffset);
+	  demod->devhold = 1 * demod->samprate/demod->decimate;
+	} else {
+	  demod->devhold--;
+	}
+      }
       put_mono_audio(audio,demod->filter->blocksize_out,demod->gain);
     }
   }
