@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.16 2017/06/01 10:32:19 karn Exp karn $
+// $Id: radio.c,v 1.17 2017/06/01 11:30:15 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -81,7 +81,6 @@ double get_freq(struct demod *demod){
 // Note: single precision floating point is not accurate enough at VHF and above
 double set_first_LO(struct demod *demod,double first_LO,int force){
   struct status requested_status;
-  struct sockaddr_in6 FE_address;
 
   if(!force && first_LO == get_first_LO(demod))
     return get_first_LO(demod);
@@ -93,9 +92,7 @@ double set_first_LO(struct demod *demod,double first_LO,int force){
   requested_status.if_gain = 0xff;    
 
   // Send commands to source address of last RTP packet from front end
-  FE_address = rtp_address;
-  FE_address.sin6_port = htons(4160); // make this better!
-  if(sendto(Ctl_sock,&requested_status,sizeof(requested_status),0,&FE_address,sizeof(FE_address)) == -1)
+  if(sendto(Ctl_sock,&requested_status,sizeof(requested_status),0,&rtp_address,sizeof(rtp_address)) == -1)
       perror("sendto control socket");
   return requested_status.frequency * (1 + demod->calibrate);
 }

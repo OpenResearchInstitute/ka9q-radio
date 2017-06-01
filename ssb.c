@@ -17,6 +17,11 @@ void *ssb_cleanup(void *arg){
   struct demod *demod = arg;
   delete_filter(demod->filter);
   demod->filter = NULL;
+  if(Audio.handle){
+    snd_pcm_drop(Audio.handle);
+    snd_pcm_close(Audio.handle);
+    Audio.handle = NULL;
+  }
   return NULL;
 }
 

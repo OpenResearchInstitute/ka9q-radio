@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.12 2017/05/29 18:35:04 karn Exp karn $
+// $Id: main.c,v 1.13 2017/05/29 22:05:41 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -43,15 +43,17 @@ int Quiet;
 int Ctl_port = 4159;
 struct sockaddr_in6 ctl_address;
 struct sockaddr_in6 FE_address;
+int FE_source_port;
 
 int rtp_sock;
 struct sockaddr_in6 rtp_address;
 socklen_t rtp_addrlen = sizeof(rtp_address);
 
+
 int Ctl_sock;
 
 int Skips;
-int Olds;
+int Delayed;
 
 int Demod_sock;
 
@@ -264,21 +266,25 @@ int main(int argc,char *argv[]){
     perror("setsockopt multicast ttl failed");
   }
 
+#if 0
   // Set up control port
   ctl_address.sin6_family = AF_INET6;
   ctl_address.sin6_port = htons(Ctl_port);
   ctl_address.sin6_flowinfo = 0;
   ctl_address.sin6_addr = in6addr_any;
   ctl_address.sin6_scope_id = 0;
+#endif
 
   if((Ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
     fprintf(stderr,"can't open control socket\n");
     exit(1);
   }
+#if 0
   if(bind(Ctl_sock,&ctl_address,sizeof(ctl_address)) != 0){
     fprintf(stderr,"bind failed\n");
     exit(1);
   }
+#endif
   fcntl(Ctl_sock,F_SETFL,O_NONBLOCK);
   set_mode(demod,mode);
   set_second_LO(demod,-second_IF,1);
@@ -349,7 +355,7 @@ void *input_loop(struct demod *demod){
     if((int)(seq - rtp_header.seq) < 0){
       Skips++;
     } else if((int)(seq - rtp_header.seq) > 0){
-      Olds++;
+      Delayed++;
     }
     seq = rtp_header.seq + 1;
 

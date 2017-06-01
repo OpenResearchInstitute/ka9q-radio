@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.9 2017/05/20 10:12:07 karn Exp karn $
+// $Id: funcube.c,v 1.10 2017/05/26 11:47:03 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Correct for DC offset, I/Q gain and phase imbalance
 // Emit complex float sample stream on stdout
@@ -62,7 +62,7 @@ void *fcd_command(void *arg);
 int process_fc_command(char *,int);
 double set_fc_LO(double);
 
-int ctl;
+int rtp_sock;
 
 
 int main(int argc,char *argv[]){
@@ -70,13 +70,14 @@ int main(int argc,char *argv[]){
 
   char *locale;
   int c;
-  int ctl_port = 4160;
   int blocksize = 350;
   int Dongle = 0;
   struct rtp_header rtp;
-  int rtp_sock;
+
   char *dest = "239.1.2.3"; // Default for testing
   int dest_port = 5555; // Default for testing
+  int dest_is_ipv4 = 0;
+  int dest_is_ipv6 = 0;  
 
 
   locale = getenv("LANG");
@@ -104,14 +105,11 @@ int main(int argc,char *argv[]){
     case 'b':
       blocksize = atoi(optarg);
       break;
-    case 'p':
-      ctl_port = atoi(optarg);
-      break;
     }
   }
   if(Verbose){
-    fprintf(stderr,"funcube dongle %d: blocksize %d, UDP control port %d\n",
-	    Dongle,blocksize,ctl_port);
+    fprintf(stderr,"funcube dongle %d: blocksize %d\n",
+	    Dongle,blocksize);
   }
   setlocale(LC_ALL,locale);
   signal(SIGPIPE,SIG_IGN);
@@ -125,16 +123,14 @@ int main(int argc,char *argv[]){
   struct sockaddr_in6 address6;
   if(inet_pton(AF_INET,dest,&address4.sin_addr) == 1){
     // Destination is IPv4
-    address4.sin_family = AF_INET;
-    address4.sin_port = htons(dest_port);
+    dest_is_ipv4 = 1;
     if((rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
       perror("funcube: can't create IPv4 output socket");
       exit(1);
     }
-    if(connect(rtp_sock,&address4,sizeof(address4)) != 0){
-      perror("connect to IPv4 output address failed");
-      exit(1);
-    }
+    address4.sin_family = AF_INET;
+    address4.sin_port = htons(dest_port);
+
     if(IN_MULTICAST(ntohl(address4.sin_addr.s_addr))){
       // Destination is multicast; join it
       struct group_req group_req;
@@ -146,16 +142,13 @@ int main(int argc,char *argv[]){
     }
   } else if(inet_pton(AF_INET6,dest,&address6.sin6_addr) == 1){
     // Destination is IPv6
+    dest_is_ipv6 = 1;
     address6.sin6_family = AF_INET6;
     address6.sin6_flowinfo = 0;  
     address6.sin6_port = htons(dest_port);
     address6.sin6_scope_id = 0;
     if((rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
       perror("funcube: can't create IPv6 output socket");
-      exit(1);
-    }
-    if(connect(rtp_sock,&address6,sizeof(address6)) != 0){
-      perror("connect to IPv6 address failed");
       exit(1);
     }
     if(IN6_IS_ADDR_MULTICAST(&address6)){
@@ -181,24 +174,6 @@ int main(int argc,char *argv[]){
     perror("setsockopt multicast ttl failed");
   }
       
-  // Set up control input socket
-  // Will accept either IPv4 or IPv6
-  if((ctl = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
-    perror("funcube: can't open control socket");
-    exit(1);
-  }
-  struct sockaddr_in6 local_address;
-  local_address.sin6_family = AF_INET6;
-  local_address.sin6_port = htons(ctl_port);
-  local_address.sin6_flowinfo = 0;
-  local_address.sin6_addr = in6addr_any;
-  local_address.sin6_scope_id = 0;
-  if(bind(ctl,&local_address,sizeof(local_address)) != 0){
-    perror("funcube: control port bind failed");
-    exit(1);
-  }
-
-
   front_end_init(Dongle,ADC_samprate,blocksize);
   usleep(100000); // Let things settle
 
@@ -224,8 +199,16 @@ int main(int argc,char *argv[]){
   iovec[2].iov_len = sizeof(sampbuf);
 
   struct msghdr message;
-  message.msg_name = NULL;
-  message.msg_namelen = 0;
+  if(dest_is_ipv4){
+    message.msg_name = &address4;
+    message.msg_namelen = sizeof(address4);
+  } else if(dest_is_ipv6){
+    message.msg_name = &address6;
+    message.msg_namelen = sizeof(address6);
+  } else {
+    fprintf(stderr,"No valid dest address\n");
+    exit(1);
+  }
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 3;
   message.msg_control = NULL;
@@ -253,10 +236,10 @@ int main(int argc,char *argv[]){
     rtp.timestamp = htonl(timestamp);
     timestamp += blocksize;
 
-    sendmsg(rtp_sock,&message,0);
+    if(sendmsg(rtp_sock,&message,0) == -1)
+      perror("sendmsg");
   }
   close(rtp_sock);
-  close(ctl);
   exit(0);
 }
 
@@ -398,6 +381,7 @@ int get_adc(short *buffer,int L){
 }
 
 // Process commands to change FCD state
+// We listen on the same IP address and port we use as a multicasting source
 void *fcd_command(void *arg){
 
   while(1){
@@ -408,10 +392,10 @@ void *fcd_command(void *arg){
     struct status requested_status;
 
     FD_ZERO(&fdset);
-    FD_SET(ctl,&fdset);
+    FD_SET(rtp_sock,&fdset);
     timeout.tv_sec = 1;
     timeout.tv_usec = 0;
-    r = select(ctl+1,&fdset,NULL,NULL,&timeout);
+    r = select(rtp_sock+1,&fdset,NULL,NULL,&timeout);
     if(r == -1){
       perror("select");
       sleep(50000); // don't loop tightly
@@ -437,7 +421,7 @@ void *fcd_command(void *arg){
     // Should probably log these
     struct sockaddr_in6 command_address;
     addrlen = sizeof(command_address);
-    if((r = recvfrom(ctl,&requested_status,sizeof(requested_status),0,&command_address,&addrlen)) <= 0){
+    if((r = recvfrom(rtp_sock,&requested_status,sizeof(requested_status),0,&command_address,&addrlen)) <= 0){
       if(r < 0)
 	perror("recv");
       sleep(50000); // don't loop tightly

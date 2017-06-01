@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.16 2017/06/01 10:31:42 karn Exp karn $
+// $Id: display.c,v 1.17 2017/06/01 11:30:18 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -105,10 +105,10 @@ void *display(void *arg){
     wprintw(sdr,"IF gain  %10u dB\n",demod->if_gain);
     wrefresh(sdr);
     
-    extern int Olds,Skips;
+    extern int Delayed,Skips;
 
     wmove(net,0,0);
-    wprintw(net,"Olds %d\n",Olds);
+    wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips %d\n",Skips);
     wprintw(net,"audio underrun %d\n",Audio.underrun);
     snd_pcm_sframes_t delayp;

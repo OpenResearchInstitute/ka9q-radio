@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.7 2017/05/31 22:26:57 karn Exp karn $
+// $Id: fm.c,v 1.8 2017/06/01 10:31:42 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -54,6 +54,11 @@ void *fm_cleanup(void *arg){
   struct demod *demod = arg;
   delete_filter(demod->filter);
   demod->filter = NULL;
+  if(Audio.handle){
+    snd_pcm_drop(Audio.handle);
+    snd_pcm_close(Audio.handle);
+    Audio.handle = NULL;
+  }
   return NULL;
 }
 
@@ -80,9 +85,6 @@ void *demod_fm(void *arg){
     low = high;
     high = t;
   }
-  
-
-
   // Set up pre-demodulation filter
   complex float *response = (complex float *)fftwf_alloc_complex(N);
   // posix_memalign((void **)&response,16,N*sizeof(complex float));
