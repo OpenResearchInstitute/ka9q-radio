@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.14 2017/05/31 22:27:14 karn Exp karn $
+// $Id: radio.c,v 1.16 2017/06/01 10:32:19 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -52,10 +52,10 @@ double set_freq(struct demod *demod,double f,int force){
   if(force
      || -lo2 >= demod->samprate/2 - max(0,Modes[demod->mode].high)
      || -lo2 <= -demod->samprate/2 - min(0,Modes[demod->mode].low)){
-    if(fabs(change) >= demod->samprate/2 || change < 0)
-      lo2 = -48000;
+    if(change < 0)
+      lo2 = -demod->samprate/4;
     else
-      lo2 = +48000;
+      lo2 = demod->samprate/4;
   }
   lo1 = f + lo2 - demod->dial_offset;
   lo1 = set_first_LO(demod,lo1,force);

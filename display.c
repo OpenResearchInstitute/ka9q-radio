@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.15 2017/06/01 06:23:27 karn Exp karn $
+// $Id: display.c,v 1.16 2017/06/01 10:31:42 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -86,7 +86,7 @@ void *display(void *arg){
     wprintw(sig,"IF1     %7.1f dB\n",power2dB(demod->power_i + demod->power_q));
     wprintw(sig,"IF2     %7.1f dB\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(demod->gain));
-    if(demod->noise != 0)
+    if(demod->mode == FM || demod->mode == NFM || demod->noise != 0)
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
     if(!isnan(demod->foffset))
       wprintw(sig,"offset  %7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));
