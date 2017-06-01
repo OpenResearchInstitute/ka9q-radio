@@ -31,6 +31,8 @@ void *demod_ssb(void *arg){
   N = demod->L + demod->M - 1;
   enum mode mode = demod->mode;
 
+  demod->foffset = NAN; // not used
+  demod->pdeviation = NAN;
 
   low = N*Modes[mode].low/demod->samprate;
   high = N*Modes[mode].high/demod->samprate;

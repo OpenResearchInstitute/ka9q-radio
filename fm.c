@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.6 2017/05/29 18:35:03 karn Exp karn $
+// $Id: fm.c,v 1.7 2017/05/31 22:26:57 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -68,6 +68,9 @@ void *demod_fm(void *arg){
 
   enum mode mode = demod->mode;
   N = demod->L + demod->M - 1;
+
+  demod->pdeviation = 0;
+  demod->foffset = 0;
 
   low = N*Modes[mode].low/demod->samprate;
   high = N*Modes[mode].high/demod->samprate;

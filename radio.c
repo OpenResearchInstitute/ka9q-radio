@@ -2,6 +2,7 @@
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
+#include <unistd.h>
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
@@ -58,6 +59,12 @@ double set_freq(struct demod *demod,double f,int force){
   }
   lo1 = f + lo2 - demod->dial_offset;
   lo1 = set_first_LO(demod,lo1,force);
+  int i;
+  for(i=0;i<10;i++){
+    if(get_first_LO(demod) == lo1)
+      break;
+    usleep(50000);
+  }
   lo2 = lo1 - f + demod->dial_offset;
   set_second_LO(demod,lo2,force);
   return f;

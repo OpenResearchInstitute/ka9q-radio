@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.14 2017/05/31 22:27:19 karn Exp karn $
+// $Id: radio.h,v 1.15 2017/06/01 06:23:13 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -23,7 +23,7 @@ struct demod {
   float DC_i,DC_q;  // Average DC offsets
   float power_i,power_q; // Average channel powers
   float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
-  float sinphi;      // Sine of I/Q phase error, ideally zero
+  float dotprod;     // smoothed dot product of I,Q
   uint8_t lna_gain;
   uint8_t mixer_gain;
   uint8_t if_gain;
@@ -40,7 +40,7 @@ struct demod {
   float noise;     // Minimum amplitude for SNR estimates (experimental)
   float gain;       // Current audio gain (linear modes only)
   float foffset;    // Frequency offset (FM)
-  float pdeviation;
+  float pdeviation; // Peak frequency deviation (FM)
   int devhold;
   pthread_t demod_thread;
   int data_sock;

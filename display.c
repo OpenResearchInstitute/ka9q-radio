@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.14 2017/05/31 22:26:52 karn Exp karn $
+// $Id: display.c,v 1.15 2017/06/01 06:23:27 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -18,8 +18,26 @@
 
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
 
+void getentry(char *prompt,char *response,int len){
+  WINDOW *pwin;
+
+  pwin = newwin(3,70,19,0);
+  box(pwin,0,0);
+  mvwprintw(pwin,1,1,prompt);
+  wrefresh(pwin);
+  echo();
+  timeout(0);
+  wgetnstr(pwin,response,len);
+  timeout(100);
+  noecho();
+  werase(pwin);
+  wrefresh(pwin);
+  delwin(pwin);
+}
+
+
 void *display(void *arg){
-  WINDOW *fw,*prompt;
+  WINDOW *fw;
   WINDOW *sig;
   WINDOW *sdr;
   WINDOW *net;
@@ -62,21 +80,26 @@ void *display(void *arg){
     mvwchgat(fw,tuneitem,x,1,A_STANDOUT,0,NULL);
     wrefresh(fw);
 
+    wclrtobot(sig);
     wmove(sig,0,0);
     wprintw(sig,"Mode         %3s\n",Modes[demod->mode].name);
     wprintw(sig,"IF1     %7.1f dB\n",power2dB(demod->power_i + demod->power_q));
     wprintw(sig,"IF2     %7.1f dB\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(demod->gain));
-    wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
-    wprintw(sig,"offset  %7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));
-    wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation/(2*M_PI));
+    if(demod->noise != 0)
+      wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
+    if(!isnan(demod->foffset))
+      wprintw(sig,"offset  %7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));
+    if(!isnan(demod->pdeviation))
+      wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation/(2*M_PI));
     wrefresh(sig);
     
     wmove(sdr,0,0);
     wprintw(sdr,"I offset %10.1f\n",demod->DC_i);
     wprintw(sdr,"Q offset %10.1f\n",demod->DC_q);
     wprintw(sdr,"I/Q imbal%10.1f dB\n",power2dB(demod->power_i/demod->power_q));
-    wprintw(sdr,"I/Q phi  %10.5f rad\n",demod->sinphi);
+    double sinphi = demod->dotprod / (demod->power_i + demod->power_q);
+    wprintw(sdr,"I/Q phi  %10.5f rad\n",sinphi);
     wprintw(sdr,"LNA      %10u\n",demod->lna_gain);
     wprintw(sdr,"Mix gain %10u\n",demod->mixer_gain);
     wprintw(sdr,"IF gain  %10u dB\n",demod->if_gain);
@@ -97,7 +120,7 @@ void *display(void *arg){
     wrefresh(net);
 
     double f;
-    char str[80];
+    char str[160];
     int i;
 
     
@@ -208,65 +231,34 @@ void *display(void *arg){
       clearok(curscr,TRUE);
       break;
     case 'c':
-      prompt = newwin(3,50,20,0);
-      box(prompt,0,0);
-      mvwprintw(prompt,1,1,"Enter calibrate offset in ppm: ");
-      wrefresh(prompt);
-      echo();
-      timeout(0);
-      wgetnstr(prompt,str,sizeof(str));
-      timeout(100);
-      noecho();
+      getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
       f = atof(str);
       set_cal(demod,f * 1e-6);
-
-      werase(prompt);
-      wrefresh(prompt);
-      delwin(prompt);
       break;
     case 'n':   // Set noise reference to current amplitude; hit with no sig
       demod->noise = demod->amplitude;
       break;
     case 'm':
-      prompt = newwin(3,80,20,0);
-      box(prompt,0,0);
-      mvwprintw(prompt,1,1,"Enter mode [");
-      for(i=1;i <= Nmodes;i++)
-	wprintw(prompt," %s",Modes[i].name);
-      wprintw(prompt," ]: ");
-      wrefresh(prompt);
-      echo();
-      timeout(0);
-      wgetnstr(prompt,str,sizeof(str));
-      timeout(100);
-      noecho();
+      strncpy(str,"Enter mode [ ",sizeof(str));
+      for(i=1;i <= Nmodes;i++){
+	strncat(str,Modes[i].name,sizeof(str) - strlen(str));
+	strncat(str," ",sizeof(str) - strlen(str));
+      }
+      strncat(str,"]: ",sizeof(str) - strlen(str));
+      getentry(str,str,sizeof(str));
       for(i=1;i <= Nmodes;i++){
 	if(strcasecmp(str,Modes[i].name) == 0){
 	  set_mode(demod,Modes[i].mode);
 	  break;
 	}
-      }
-      werase(prompt);
-      wrefresh(prompt);
-      delwin(prompt);
+      } 
       break;
     case 'f':   // Tune to new frequency
-      prompt = newwin(3,50,20,0);
-      box(prompt,0,0);
-      mvwprintw(prompt,1,1,"Enter frequency in Hz: ");
-      wrefresh(prompt);
-      echo();
-      timeout(0);
-      wgetnstr(prompt,str,sizeof(str));
-      timeout(100);
-      noecho();
+      getentry("Enter frequency in Hz: ",str,sizeof(str));
       f = atof(str);
       if(f > 0)
 	set_freq(demod,f,1);
 
-      werase(prompt);
-      wrefresh(prompt);
-      delwin(prompt);
       break;
     default:
       //      fprintf(stderr,"char %d 0x%x",c,c);
