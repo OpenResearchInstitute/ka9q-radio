@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.13 2017/05/29 18:35:03 karn Exp karn $
+// $Id: display.c,v 1.14 2017/05/31 22:26:52 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -10,10 +10,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ncurses.h>
+//#include <linux/input.h> // definitions conflict with ncurses.h !!
 
 #include "radio.h"
 #include "audio.h"
 #include "dsp.h"
+
+#define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
 
 void *display(void *arg){
   WINDOW *fw,*prompt;
@@ -23,24 +26,28 @@ void *display(void *arg){
   int c;
   struct demod *demod = &Demod;
   int tunestep = 0;
+  int tuneitem = 0;
+  int dial_fd;
 
   initscr();
   keypad(stdscr,TRUE);
   timeout(100);
   cbreak();
   noecho();
-  fw = newwin(5,30,0,0);
-  sig = newwin(7,20,5,0);
-  sdr = newwin(7,30,5,25);
+  fw = newwin(5,40,0,0);
+  sig = newwin(7,20,6,0);
+  sdr = newwin(7,30,6,25);
   net = newwin(6,36,14,0);
   
+  dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
 
   for(;;){
     wmove(fw,0,0);
-    wprintw(fw,"Frequency   %'17.2f\n",get_first_LO(demod) - get_second_LO(demod,0) + Modes[demod->mode].dial);
-    wprintw(fw,"First LO    %'17.2f\n",get_first_LO(demod));
-    wprintw(fw,"First IF    %'17.2f\n",-get_second_LO(demod,0));
-    wprintw(fw,"Dial offset %'17.2f\n",Modes[demod->mode].dial);
+    wprintw(fw,"Frequency   %'17.2f Hz\n",get_first_LO(demod) - get_second_LO(demod,0) + demod->dial_offset);
+    wprintw(fw,"First LO    %'17.2f Hz\n",get_first_LO(demod));
+    wprintw(fw,"First IF    %'17.2f Hz\n",-get_second_LO(demod,0));
+    wprintw(fw,"Dial offset %'17.2f Hz\n",demod->dial_offset);
+    wprintw(fw,"Calibrate   %'17.2f ppm\n",get_cal(demod)*1e6);
     // Tuning step highlight
     int x;
     if(tunestep >= -2 && tunestep <= -1){
@@ -52,7 +59,7 @@ void *display(void *arg){
     } else if(tunestep >= 6 && tunestep <= 8){
       x = 25 - tunestep - 2;
     }
-    mvwchgat(fw,0,x,1,A_STANDOUT,0,NULL);
+    mvwchgat(fw,tuneitem,x,1,A_STANDOUT,0,NULL);
     wrefresh(fw);
 
     wmove(sig,0,0);
@@ -66,13 +73,13 @@ void *display(void *arg){
     wrefresh(sig);
     
     wmove(sdr,0,0);
-    wprintw(sdr,"I offset %7.1f\n",demod->DC_i);
-    wprintw(sdr,"Q offset %7.1f\n",demod->DC_q);
-    wprintw(sdr,"I/Q imbal%7.1f dB\n",power2dB(demod->power_i/demod->power_q));
-    wprintw(sdr,"I/Q phi  %10.5f\n",demod->sinphi);
-    wprintw(sdr,"LNA      %7u\n",demod->lna_gain);
-    wprintw(sdr,"Mix gain %7u\n",demod->mixer_gain);
-    wprintw(sdr,"IF gain  %7u\n",demod->if_gain);
+    wprintw(sdr,"I offset %10.1f\n",demod->DC_i);
+    wprintw(sdr,"Q offset %10.1f\n",demod->DC_q);
+    wprintw(sdr,"I/Q imbal%10.1f dB\n",power2dB(demod->power_i/demod->power_q));
+    wprintw(sdr,"I/Q phi  %10.5f rad\n",demod->sinphi);
+    wprintw(sdr,"LNA      %10u\n",demod->lna_gain);
+    wprintw(sdr,"Mix gain %10u\n",demod->mixer_gain);
+    wprintw(sdr,"IF gain  %10u dB\n",demod->if_gain);
     wrefresh(sdr);
     
     extern int Olds,Skips;
@@ -89,16 +96,68 @@ void *display(void *arg){
     }
     wrefresh(net);
 
-
     double f;
     char str[80];
     int i;
-    c = getch();
+
+    
+#if 1
+    struct input_event {
+      struct timeval time;
+      uint16_t type;
+      uint16_t code;
+      int32_t value;
+    };
+
+    struct input_event event;
+    if(read(dial_fd,&event,sizeof(event)) == sizeof(event)){
+      // Got something from the powermate knob
+      switch(event.type){
+      case 0:   //case EV_SYN:
+	continue; // Ignore
+      case 2: // case EV_REL:
+	switch(event.code){
+	case 7: // REL_DIAL:
+	  if(event.value > 0)
+	    c = KEY_UP;
+	  else if(event.value < 0)
+	    c = KEY_DOWN;
+	  break;
+	}
+	break;
+      case 1: // EV_KEY:
+	switch(event.code){
+	case 0x100: // BTN_MISC:
+	  if(event.value){
+	    set_freq(demod,get_freq(demod),1);
+	  }
+	  break;
+	default:
+	  break;
+	}
+      default:
+	break;
+      }
+    } else
+#endif
+      c = getch();
+
     switch(c){
     case ERR:   // no key; timed out. Do nothing.
       continue;
     case 'q':   // Exit radio program
       goto done;
+    case '\t':
+      tuneitem = (tuneitem + 1) % 5;
+      break;
+    case KEY_BTAB:
+      tuneitem = (5 + tuneitem - 1) % 5;
+      break;
+    case KEY_HOME:
+      tuneitem = 0;
+      tunestep = 0;
+      break;
+    case KEY_BACKSPACE:
     case KEY_LEFT:
       if(tunestep < 8)
 	tunestep++;
@@ -108,13 +167,62 @@ void *display(void *arg){
 	tunestep--;
       break;
     case KEY_UP:
-      set_freq(demod,get_freq(demod) + pow(10.,tunestep),0);
+      switch(tuneitem){
+      case 0:
+	set_freq(demod,get_freq(demod) + pow(10.,tunestep),0);
+	break;
+      case 1:
+	set_first_LO(demod,get_first_LO(demod) + pow(10.,tunestep),0);
+	break;
+      case 2:
+	set_second_LO(demod,get_second_LO(demod,0) - pow(10.,tunestep),0);
+	break;
+      case 3:
+	demod->dial_offset += pow(10.,tunestep);
+	break;
+      case 4:
+	set_cal(demod,get_cal(demod) + pow(10.,tunestep) * 1e-6);
+	break;
+      }
       break;
     case KEY_DOWN:
-      set_freq(demod,get_freq(demod) - pow(10.,tunestep),0);
+      switch(tuneitem){
+      case 0:
+	set_freq(demod,get_freq(demod) - pow(10.,tunestep),0);
+	break;
+      case 1:
+	set_first_LO(demod,get_first_LO(demod) - pow(10.,tunestep),0);
+	break;
+      case 2:
+	set_second_LO(demod,get_second_LO(demod,0) + pow(10.,tunestep),0);
+	break;
+      case 3:
+	demod->dial_offset -= pow(10.,tunestep);
+	break;
+      case 4:
+	set_cal(demod,get_cal(demod) - pow(10.,tunestep) * 1e-6);
+	break;
+      }
       break;
     case '\f':  // Screen repaint
       clearok(curscr,TRUE);
+      break;
+    case 'c':
+      prompt = newwin(3,50,20,0);
+      box(prompt,0,0);
+      mvwprintw(prompt,1,1,"Enter calibrate offset in ppm: ");
+      wrefresh(prompt);
+      echo();
+      timeout(0);
+      wgetnstr(prompt,str,sizeof(str));
+      timeout(100);
+      noecho();
+      f = atof(str);
+      set_cal(demod,f * 1e-6);
+
+      werase(prompt);
+      wrefresh(prompt);
+      delwin(prompt);
       break;
     case 'n':   // Set noise reference to current amplitude; hit with no sig
       demod->noise = demod->amplitude;
@@ -159,6 +267,9 @@ void *display(void *arg){
       werase(prompt);
       wrefresh(prompt);
       delwin(prompt);
+      break;
+    default:
+      //      fprintf(stderr,"char %d 0x%x",c,c);
       break;
     }
   }

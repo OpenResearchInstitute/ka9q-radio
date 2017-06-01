@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.13 2017/05/29 22:05:53 karn Exp karn $
+// $Id: radio.c,v 1.14 2017/05/31 22:27:14 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -49,31 +49,35 @@ double set_freq(struct demod *demod,double f,int force){
   double lo2 = get_second_LO(demod,0) - change;
 
   if(force
-     || -lo2 > demod->samprate/2 - Modes[demod->mode].high
-     || -lo2 < -demod->samprate/2 - Modes[demod->mode].low){
-    lo2 = -48000;
+     || -lo2 >= demod->samprate/2 - max(0,Modes[demod->mode].high)
+     || -lo2 <= -demod->samprate/2 - min(0,Modes[demod->mode].low)){
+    if(fabs(change) >= demod->samprate/2 || change < 0)
+      lo2 = -48000;
+    else
+      lo2 = +48000;
   }
-  lo1 = f + lo2 - Modes[demod->mode].dial;
-  set_second_LO(demod,lo2,0);
-  set_first_LO(demod,lo1,1);
+  lo1 = f + lo2 - demod->dial_offset;
+  lo1 = set_first_LO(demod,lo1,force);
+  lo2 = lo1 - f + demod->dial_offset;
+  set_second_LO(demod,lo2,force);
   return f;
 }
 
 // Return current carrier frequency, including effects of any sweep
 double get_freq(struct demod *demod){
   return get_first_LO(demod) - get_second_LO(demod,0)
-  + Modes[demod->mode].dial;
+    + demod->dial_offset;
 }
 
 // Set either or both LOs as needed to tune the specified radio frequency to zero audio frequency
 // Actually it goes to the offset specified in the mode table; e.g. +/- 750 Hz for the CW modes
 // Note: single precision floating point is not accurate enough at VHF and above
-int set_first_LO(struct demod *demod,double first_LO,int force){
+double set_first_LO(struct demod *demod,double first_LO,int force){
   struct status requested_status;
   struct sockaddr_in6 FE_address;
 
   if(!force && first_LO == get_first_LO(demod))
-    return 0;
+    return get_first_LO(demod);
 
   // Change only tuner frequency
   requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
@@ -86,7 +90,7 @@ int set_first_LO(struct demod *demod,double first_LO,int force){
   FE_address.sin6_port = htons(4160); // make this better!
   if(sendto(Ctl_sock,&requested_status,sizeof(requested_status),0,&FE_address,sizeof(FE_address)) == -1)
       perror("sendto control socket");
-  return 0;
+  return requested_status.frequency * (1 + demod->calibrate);
 }
 double set_second_LO(struct demod *demod,double second_LO,int force){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
@@ -129,6 +133,7 @@ int set_mode(struct demod *demod,enum mode mode){
   demod->samprate = 192000;
   demod->L = 4096;
   demod->M = 4097;
+  demod->dial_offset = Modes[mode].dial;
   
   pthread_cancel(demod->demod_thread); // what if it's not running?
   void *retval;
@@ -161,9 +166,15 @@ int set_mode(struct demod *demod,enum mode mode){
   return 0;
 }      
 int set_cal(struct demod *demod,double cal){
+  double f = get_freq(demod);
   demod->calibrate = cal;
+  set_freq(demod,f,0);
   return 0;
 }
+double get_cal(struct demod *demod){
+  return demod->calibrate;
+}
+
 
 
 int spindown(struct demod *demod,complex float *data,int len){

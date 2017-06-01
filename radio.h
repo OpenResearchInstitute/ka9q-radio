@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.13 2017/05/29 18:35:07 karn Exp karn $
+// $Id: radio.h,v 1.14 2017/05/31 22:27:19 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -32,6 +32,7 @@ struct demod {
   complex double second_LO_phase;
   complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
   complex double second_LO_phase_accel; // for frequency sweeping
+  double dial_offset;
   int decimate;     // Decimation ratio in frequency domain when filtering
   struct filter *filter; // Pre-demodulation filter, set up by demod task using response
   float snr;        // Estimated signal-to-noise ratio (FM only)
@@ -51,7 +52,7 @@ extern const float Headroom; // Audio headroom ratio
 
 double get_freq(struct demod *);
 double set_freq(struct demod *,double,int);
-int set_first_LO(struct demod *demod,double first_LO,int);
+double set_first_LO(struct demod *demod,double first_LO,int);
 double get_first_LO(struct demod *demod);
 double set_second_LO(struct demod *demod,double second_LO,int);
 double get_second_LO(struct demod *demod,int);
@@ -60,6 +61,7 @@ double get_exact_samprate(struct demod *);
 
 int set_mode(struct demod *demod,enum mode mode);
 int set_cal(struct demod *,double);
+double get_cal(struct demod *);
 int spindown(struct demod *demod,complex float *data,int len);
 void closedown(int a);
 void proc_samples(struct demod *,short *,int);
