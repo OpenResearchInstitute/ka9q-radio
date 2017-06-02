@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.13 2017/05/29 22:05:41 karn Exp karn $
+// $Id: main.c,v 1.14 2017/06/01 23:50:37 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -37,27 +37,19 @@ int Nthreads = 1;
 int ADC_samprate = 192000;
 int DAC_samprate = 48000;
 
-
-
 int Quiet;
 int Ctl_port = 4159;
 struct sockaddr_in6 ctl_address;
-struct sockaddr_in6 FE_address;
-int FE_source_port;
-
-int rtp_sock;
 struct sockaddr_in6 rtp_address;
 socklen_t rtp_addrlen = sizeof(rtp_address);
 
 
+int rtp_sock;
 int Ctl_sock;
+int Demod_sock;
 
 int Skips;
 int Delayed;
-
-int Demod_sock;
-
-
 
 int main(int argc,char *argv[]){
   int c,N;
@@ -68,7 +60,6 @@ int main(int argc,char *argv[]){
   double second_IF;
   struct demod *demod = &Demod;
 
-
   locale = getenv("LANG");
   setlocale(LC_ALL,locale);
 
@@ -76,16 +67,13 @@ int main(int argc,char *argv[]){
   fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
   fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
 
-  locale = getenv("LANG");
-
   // Defaults
   Quiet = 0;
   Audio.name = "sysdefault";
   demod->L = 4096;      // Number of samples in buffer
-  demod->M = (4096+1);  // Length of filter impulse response
+  demod->M = 4096+1;  // Length of filter impulse response
   mode = FM;
   second_IF = 48000;
-
 
   while((c = getopt(argc,argv,"qb:m:l:d:S:L:M:x:h:r:t:c:eT:p:R:P:i:")) != EOF){
     int i;
@@ -108,12 +96,6 @@ int main(int argc,char *argv[]){
       break;
     case 'e':
       Audio.echo = 1; // Echo sound to standard output
-      break;
-    case 'h':
-      demod->min_IF = atof(optarg);
-      break;
-    case 'x':
-      demod->max_IF = atof(optarg);
       break;
     case 'L':
       demod->L = atoi(optarg);
@@ -148,9 +130,9 @@ int main(int argc,char *argv[]){
       second_IF = atof(optarg);
       break;
     default:
-      fprintf(stderr,"Usage: %s [-r DAC sample rate] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-x maxIF] [-t threads] [-R multicast_address] [-P port]\n",argv[0]);
-      fprintf(stderr,"Default: %s -r %u -m %s -l %s -S %s -L %d -M %d -h %.1f -x %.1f -R %s -P %d\n",
-	      argv[0],DAC_samprate,Modes[mode].name,locale,Audio.name,demod->L,demod->M,demod->max_IF,demod->min_IF,
+      fprintf(stderr,"Usage: %s [-r DAC sample rate] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-t threads] [-R multicast_address] [-P port]\n",argv[0]);
+      fprintf(stderr,"Default: %s -r %u -m %s -l %s -S %s -L %d -M %d -R %s -P %d\n",
+	      argv[0],DAC_samprate,Modes[mode].name,locale,Audio.name,demod->L,demod->M,
 	      source,source_port);
       break;
     }
@@ -180,12 +162,9 @@ int main(int argc,char *argv[]){
   // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
   fftwf_import_system_wisdom();
 
-  if(demod->max_IF == 0 || demod->max_IF > demod->samprate/2)
-    demod->max_IF = demod->samprate/2;
-  
   fprintf(stderr,"UDP control port %d\n",Ctl_port);
-  fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d, max IF +/-%'.1lf Hz\n",
-	  demod->samprate,Audio.samprate,demod->decimate,demod->max_IF);
+  fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d\n",
+	  demod->samprate,Audio.samprate,demod->decimate);
   fprintf(stderr,"block size: %'d complex samples (%'.1f ms @ %'u S/s)\n",
 	  demod->L,1000.*demod->L/demod->samprate,demod->samprate);
   fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
@@ -266,42 +245,47 @@ int main(int argc,char *argv[]){
     perror("setsockopt multicast ttl failed");
   }
 
-#if 0
   // Set up control port
   ctl_address.sin6_family = AF_INET6;
   ctl_address.sin6_port = htons(Ctl_port);
   ctl_address.sin6_flowinfo = 0;
   ctl_address.sin6_addr = in6addr_any;
   ctl_address.sin6_scope_id = 0;
-#endif
 
   if((Ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
     fprintf(stderr,"can't open control socket\n");
     exit(1);
   }
-#if 0
   if(bind(Ctl_sock,&ctl_address,sizeof(ctl_address)) != 0){
     fprintf(stderr,"bind failed\n");
     exit(1);
   }
-#endif
   fcntl(Ctl_sock,F_SETFL,O_NONBLOCK);
   set_mode(demod,mode);
   set_second_LO(demod,-second_IF,1);
 
   int sv[2];
-  socketpair(AF_UNIX,SOCK_STREAM,0,sv);
-  Demod_sock = sv[0];
-  demod->data_sock = sv[1];
+  pipe(sv);
+  Demod_sock = sv[1]; // write end
+  demod->data_sock = sv[0]; // read end
+  int sz;
+  sz = fcntl(Demod_sock,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+  fprintf(stderr,"sock size %d\n",sz);
+  if(sz == -1)
+    perror("F_SETPIPE_SZ");
 
   input_loop(demod);
 
   exit(0);
 }
 
+void *display_cleanup(void *);
+
 void closedown(int a){
   if(!Quiet)
     fprintf(stderr,"radio: caught signal %d: %s\n",a,strsignal(a));
+  display_cleanup(NULL);
+
   exit(1);
 }
 

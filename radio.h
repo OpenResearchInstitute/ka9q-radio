@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.15 2017/06/01 06:23:13 karn Exp karn $
+// $Id: radio.h,v 1.16 2017/06/01 10:31:42 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -9,41 +9,47 @@
 
 // Demodulator state block
 struct demod {
-  enum mode mode;
+  // Front end state
   int samprate;     // Nominal sample rate of associated SDR front end
-  int L;            // Signal samples in FFT buffer
-  int M;            // Samples in filter impulse response
-  double max_IF;
-  double min_IF;
-  double calibrate; // Tuner calibration; - -> frequency low, + -> frequency high
   double first_LO;  // Local copy of frequency sent to front end tuner, uncorrected
-  double second_LO; // Same as second_LO_phase step except when sweeping
-                    // Provided because round trip through csincos/carg is less accurate
-  double second_LO_rate;
-  float DC_i,DC_q;  // Average DC offsets
-  float power_i,power_q; // Average channel powers
-  float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
-  float dotprod;     // smoothed dot product of I,Q
+  double calibrate; // Tuner TCXO calibration; - -> frequency low, + -> frequency high
   uint8_t lna_gain;
   uint8_t mixer_gain;
   uint8_t if_gain;
 
+  float DC_i,DC_q;   // Average DC offsets
+  float power_i,power_q; // Average channel powers
+  float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
+  float dotprod;     // smoothed dot product of I,Q for quadrature, ideally zero
 
-  complex double second_LO_phase;
-  complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
-  complex double second_LO_phase_accel; // for frequency sweeping
+  // Demod thread data
+  int data_sock;
+  pthread_t demod_thread;
+
   double dial_offset;
-  int decimate;     // Decimation ratio in frequency domain when filtering
-  struct filter *filter; // Pre-demodulation filter, set up by demod task using response
-  float snr;        // Estimated signal-to-noise ratio (FM only)
-  float amplitude; // Amplitude (not power) of signal after filter
-  float noise;     // Minimum amplitude for SNR estimates (experimental)
+
+  // Second (software) local oscillator parameters
+  complex double second_LO_phase;
+  double second_LO; // Same as second_LO_phase step except when sweeping
+                    // Provided because round trip through csincos/carg is less accurate
+  complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
+  double second_LO_rate;                // for frequency sweeping
+  complex double second_LO_phase_accel;
+
+  // Pre-demod filter parameters
+  struct filter *filter;
+  int L;            // Signal samples in FFT buffer
+  int M;            // Samples in filter impulse response
+  int decimate;     // Input/output sample rate decimation ratio
+
+  // Demodulator parameters
+  enum mode mode;   // USB/LSB/FM/etc
+  float amplitude;  // Amplitude (not power) of signal after filter
+  float noise;      // Minimum amplitude for SNR estimates (experimental)
+  float snr;        // Estimated signal-to-noise ratio
   float gain;       // Current audio gain (linear modes only)
   float foffset;    // Frequency offset (FM)
   float pdeviation; // Peak frequency deviation (FM)
-  int devhold;
-  pthread_t demod_thread;
-  int data_sock;
 };
 extern struct demod Demod;
 extern int Demod_sock;
@@ -64,7 +70,7 @@ int set_cal(struct demod *,double);
 double get_cal(struct demod *);
 int spindown(struct demod *demod,complex float *data,int len);
 void closedown(int a);
-void proc_samples(struct demod *,short *,int);
+void proc_samples(struct demod *,const short *,const int);
 
 // Thread entry points
 void *fcd_command(void *);

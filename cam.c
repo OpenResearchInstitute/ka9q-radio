@@ -62,22 +62,18 @@ void *demod_cam(void *arg){
 
   pthread_cleanup_push(cam_cleanup,demod);
 
+  complex float lastphase = 0;
   while(1){
-    complex float *buffer;
-    read(demod->data_sock,&buffer,sizeof(buffer));
-    
-    memcpy(demod->filter->input,buffer,demod->filter->blocksize_in*sizeof(*buffer));
-
+    fillbuf(demod->data_sock,(char *)demod->filter->input,
+	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
+    execute_filter(demod->filter);
 
-    int i;
-    i = execute_filter(demod->filter);
-    assert(i == 0);
     // Automatic gain control
     complex float phase;
     int n;
     float audio[demod->filter->blocksize_out];
-    static complex float lastphase;
+
     double freqerror;
     
     phase = 0;
@@ -94,7 +90,6 @@ void *demod_cam(void *arg){
     demod->amplitude /= demod->filter->blocksize_out;
     float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
     demod->snr = (snn*snn) -1; // S/N as power ratio
-
 
     // Remove carrier DC
     for(n=0; n < demod->filter->blocksize_out; n++)

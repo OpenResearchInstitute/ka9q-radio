@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.8 2017/06/01 10:31:42 karn Exp karn $
+// $Id: fm.c,v 1.9 2017/06/01 23:50:36 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -70,6 +70,7 @@ void *demod_fm(void *arg){
   complex float state = 0;
   int low,high;
   struct demod *demod = arg;
+  int devhold = 0;
 
   enum mode mode = demod->mode;
   N = demod->L + demod->M - 1;
@@ -104,30 +105,23 @@ void *demod_fm(void *arg){
   pthread_cleanup_push(fm_cleanup,demod);
 
   while(1){
-    complex float *buffer;
-    read(demod->data_sock,&buffer,sizeof(buffer));
-    
-    memcpy(demod->filter->input,buffer,demod->filter->blocksize_in*sizeof(*buffer));
-
+    fillbuf(demod->data_sock,(char *)demod->filter->input,
+	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
+    execute_filter(demod->filter);
 
-    int i;
-    i = execute_filter(demod->filter);
-    assert(i == 0);
-
-    demod->snr = fm_snr(demod,demod->filter->output.c,demod->filter->blocksize_out);
-    
     // If squelch is closed, just let the output drain
+    demod->snr = fm_snr(demod,demod->filter->output.c,demod->filter->blocksize_out);
     if(demod->snr > 2){
       float audio[demod->filter->blocksize_out];
       do_fm(audio,demod->filter->output.c,demod->filter->blocksize_out,&state);
-      for(i=0;i<demod->filter->blocksize_out;i++){
-	demod->foffset += 0.00005 * (audio[i] - demod->foffset);
-	if(demod->devhold == 0 || (fabs(audio[i] - demod->foffset)) > demod->pdeviation){
-	  demod->pdeviation = fabs(audio[i] - demod->foffset);
-	  demod->devhold = 1 * demod->samprate/demod->decimate;
+      for(n=0;n<demod->filter->blocksize_out;n++){
+	demod->foffset += 0.00005 * (audio[n] - demod->foffset);
+	if(devhold == 0 || (fabs(audio[n] - demod->foffset)) > demod->pdeviation){
+	  demod->pdeviation = fabs(audio[n] - demod->foffset);
+	  devhold = 1 * demod->samprate/demod->decimate;
 	} else {
-	  demod->devhold--;
+	  devhold--;
 	}
       }
       put_mono_audio(audio,demod->filter->blocksize_out,demod->gain);

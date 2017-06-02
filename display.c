@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.17 2017/06/01 11:30:18 karn Exp karn $
+// $Id: display.c,v 1.18 2017/06/01 23:50:35 karn Exp karn $
 // Thread to display internal state of 'radio' command on command line 
 #include <assert.h>
 #include <limits.h>
@@ -36,16 +36,26 @@ void getentry(char *prompt,char *response,int len){
 }
 
 
+void *display_cleanup(void *arg){
+  echo();
+  nocbreak();
+  endwin();
+  return NULL;
+}
+
+
 void *display(void *arg){
-  WINDOW *fw;
-  WINDOW *sig;
-  WINDOW *sdr;
-  WINDOW *net;
   int c;
   struct demod *demod = &Demod;
   int tunestep = 0;
   int tuneitem = 0;
   int dial_fd;
+  WINDOW *fw;
+  WINDOW *sig;
+  WINDOW *sdr;
+  WINDOW *net;
+
+  pthread_cleanup_push(display_cleanup,demod);
 
   initscr();
   keypad(stdscr,TRUE);
@@ -232,8 +242,10 @@ void *display(void *arg){
       break;
     case 'c':
       getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
-      f = atof(str);
-      set_cal(demod,f * 1e-6);
+      if(strlen(str) > 0){
+	f = atof(str);
+	set_cal(demod,f * 1e-6);
+      }
       break;
     case 'n':   // Set noise reference to current amplitude; hit with no sig
       demod->noise = demod->amplitude;
@@ -246,19 +258,22 @@ void *display(void *arg){
       }
       strncat(str,"]: ",sizeof(str) - strlen(str));
       getentry(str,str,sizeof(str));
-      for(i=1;i <= Nmodes;i++){
-	if(strcasecmp(str,Modes[i].name) == 0){
-	  set_mode(demod,Modes[i].mode);
-	  break;
-	}
-      } 
+      if(strlen(str) > 0){
+	for(i=1;i <= Nmodes;i++){
+	  if(strcasecmp(str,Modes[i].name) == 0){
+	    set_mode(demod,Modes[i].mode);
+	    break;
+	  }
+	} 
+      }
       break;
     case 'f':   // Tune to new frequency
       getentry("Enter frequency in Hz: ",str,sizeof(str));
-      f = atof(str);
-      if(f > 0)
+      if(strlen(str) > 0){
+	f = atof(str);
+	if(f > 0)
 	set_freq(demod,f,1);
-
+      }
       break;
     default:
       //      fprintf(stderr,"char %d 0x%x",c,c);
@@ -266,23 +281,7 @@ void *display(void *arg){
     }
   }
  done:;
-  werase(fw);
-  wrefresh(fw);
-
-  werase(sig);
-  wrefresh(sig);
-
-  werase(sdr);
-  wrefresh(sdr);
-
-  werase(net);
-  wrefresh(net);
-  
-  echo();
-  nocbreak();
-
-  endwin();
-
+  pthread_cleanup_pop(1);
   exit(0);
-  pthread_exit(0);
+  pthread_exit(NULL);
 }

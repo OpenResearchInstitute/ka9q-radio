@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.14 2017/05/31 22:26:49 karn Exp karn $
+// $Id: demod.c,v 1.15 2017/06/01 10:31:42 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -12,27 +12,14 @@
 #include "radio.h"
 
 
-int process_command(char *cmdbuf,int len);
-
 extern int Ctl_port;
 
-int In_count = 0;
 float dc_alpha = 0.00001; // high pass filter coefficient for offset and I/Q imbalance estimates
-float phi_alpha = 0.0001;
-float power_alpha = 0.0001; // high pass filter coefficient for power estimates
-
-void demod(void);
+float power_alpha = 0.00001; // high pass filter coefficient for power estimates
 
 const float SCALE = 1./32768.;
 
-int Bufnum;
-const int nbuffers = 4;
-complex float Buffers[4][4096]; // FIX THIS
-
-
-
-void proc_samples(struct demod *demod,short *sp,int cnt){
-
+void proc_samples(struct demod *demod,const short *sp,const int cnt){
   // Channel gain balance coefficients
   float gain_i=1,gain_q=1,sinphi = 0,secphi=1,tanphi = 0;
   if(demod->power_i != 0 && demod->power_q != 0){
@@ -48,6 +35,7 @@ void proc_samples(struct demod *demod,short *sp,int cnt){
   }
 
   int i;
+  complex float buffer[cnt];
   for(i=0;i<cnt;i++){
     float samp_i,samp_q;
     // Remove and update DC offsets
@@ -66,16 +54,7 @@ void proc_samples(struct demod *demod,short *sp,int cnt){
     // Update residual phase error estimate
     demod->dotprod += power_alpha * ((samp_i * samp_q) - demod->dotprod); 
     // Pass corrected sample to demodulator filter, invoke when full
-    Buffers[Bufnum][In_count++] = CMPLXF(samp_i,samp_q);
-    if(In_count == 4096){ // FIX THIS
-      complex float *x;
-      
-      x = &Buffers[Bufnum][0];
-      write(Demod_sock,&x,sizeof(x));
-      In_count = 0;
-      Bufnum++;
-      if(Bufnum == nbuffers)
-	Bufnum = 0;
-    }
+    buffer[i] = CMPLXF(samp_i,samp_q);
   }
+  write(Demod_sock,buffer,sizeof(buffer));
 }

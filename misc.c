@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.3 2016/10/14 00:35:26 karn Exp karn $
+// $Id: misc.c,v 1.5 2016/10/14 06:08:47 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -7,6 +7,7 @@
 #undef I
 #include <math.h>
 #include <assert.h>
+#include <unistd.h>
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -60,5 +61,17 @@ const float camplitude(const complex float *data, int len){
   return sqrtf(amplitude/len);
 }
 
+int fillbuf(const int fd,char *buffer,int cnt){
+  int i;
+  for(i=0;i<cnt;){
+    int n;
+    
+    n = read(fd,&buffer[i],cnt-i);
+    if(n < 0)
+      return n;
+    i += n;
+  }
+  return cnt;
 
+}
 

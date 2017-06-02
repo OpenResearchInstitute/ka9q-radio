@@ -74,16 +74,11 @@ void *demod_iq(void *arg){
   pthread_cleanup_push(iq_cleanup,demod);
 
   while(1){
-    complex float *buffer;
-    read(demod->data_sock,&buffer,sizeof(buffer));
-    
-    memcpy(demod->filter->input,buffer,demod->filter->blocksize_in*sizeof(*buffer));
-
+    fillbuf(demod->data_sock,(char *)demod->filter->input,
+	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
+    execute_filter(demod->filter);
 
-    int i;
-    i = execute_filter(demod->filter);
-    assert(i == 0);
     // Automatic gain control
     // Find average amplitude for AGC
     demod->amplitude = camplitude(demod->filter->output.c,demod->filter->blocksize_out);

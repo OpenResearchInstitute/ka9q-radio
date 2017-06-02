@@ -71,16 +71,11 @@ void *demod_ssb(void *arg){
   pthread_cleanup_push(ssb_cleanup,demod);
 
   while(1){
-    complex float *buffer;
-    read(demod->data_sock,&buffer,sizeof(buffer));
-    
-    memcpy(demod->filter->input,buffer,demod->filter->blocksize_in*sizeof(*buffer));
+    fillbuf(demod->data_sock,(char *)demod->filter->input,
+	    demod->filter->blocksize_in*sizeof(complex float));
 
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
-
-    int i;
-    i = execute_filter(demod->filter);
-    assert(i == 0);
+    execute_filter(demod->filter);
     // Automatic gain control
     demod->amplitude = amplitude(demod->filter->output.r,demod->filter->blocksize_out);
     float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
