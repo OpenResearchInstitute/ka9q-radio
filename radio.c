@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.17 2017/06/01 11:30:15 karn Exp karn $
+// $Id: radio.c,v 1.18 2017/06/01 23:50:38 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -54,11 +54,18 @@ double set_freq(struct demod *demod,double f,int force){
      || -lo2 <= -demod->samprate/2 - min(0,Modes[demod->mode].low)){
     if(change < 0)
       lo2 = -demod->samprate/4;
-    else
+    else if(change > 0)
       lo2 = demod->samprate/4;
+    else   // No change; flip to the image
+      lo2 = -lo2; 
   }
   lo1 = f + lo2 - demod->dial_offset;
+  // returns actual frequency, which may be a fraction of a Hz
+  // different from requested because of calibration offset and
+  // the fact that the tuner can only tune in 1 Hz steps
   lo1 = set_first_LO(demod,lo1,force);
+  // Wait for it to actually change before we retune the second LO
+  // (What if we're reading from a recording?)
   int i;
   for(i=0;i<10;i++){
     if(get_first_LO(demod) == lo1)

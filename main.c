@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.14 2017/06/01 23:50:37 karn Exp karn $
+// $Id: main.c,v 1.15 2017/06/02 12:05:38 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -55,7 +55,7 @@ int main(int argc,char *argv[]){
   int c,N;
   char *locale;
   char *source = "239.1.2.3"; // Default for testing
-  int source_port = 5555;     // Default for testing
+  int source_port = 5004;     // Default for testing; recommended default RTP port
   enum mode mode;
   double second_IF;
   struct demod *demod = &Demod;
@@ -70,8 +70,9 @@ int main(int argc,char *argv[]){
   // Defaults
   Quiet = 0;
   Audio.name = "sysdefault";
+  // The FFT length will be L + M - 1 because of window overlapping
   demod->L = 4096;      // Number of samples in buffer
-  demod->M = 4096+1;  // Length of filter impulse response
+  demod->M = 4096+1;    // Length of filter impulse response
   mode = FM;
   second_IF = 48000;
 

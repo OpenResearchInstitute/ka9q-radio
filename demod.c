@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.15 2017/06/01 10:31:42 karn Exp karn $
+// $Id: demod.c,v 1.16 2017/06/02 12:06:05 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -19,6 +19,9 @@ float power_alpha = 0.00001; // high pass filter coefficient for power estimates
 
 const float SCALE = 1./32768.;
 
+// Preprocessing of samples performed for all demodulators
+// Remove DC biases, equalize I/Q power, correct phase imbalance
+// Update power measurement
 void proc_samples(struct demod *demod,const short *sp,const int cnt){
   // Channel gain balance coefficients
   float gain_i=1,gain_q=1,sinphi = 0,secphi=1,tanphi = 0;
@@ -53,8 +56,9 @@ void proc_samples(struct demod *demod,const short *sp,const int cnt){
     assert(!isnan(samp_q) && !isnan(samp_i));
     // Update residual phase error estimate
     demod->dotprod += power_alpha * ((samp_i * samp_q) - demod->dotprod); 
-    // Pass corrected sample to demodulator filter, invoke when full
+    // Final corrected sample
     buffer[i] = CMPLXF(samp_i,samp_q);
   }
+  // Pass to demodulator thread (ssb/fm/iq etc)
   write(Demod_sock,buffer,sizeof(buffer));
 }

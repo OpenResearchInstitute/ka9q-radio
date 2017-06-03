@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.10 2017/05/26 11:47:03 karn Exp karn $
+// $Id: funcube.c,v 1.11 2017/06/01 23:50:36 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Correct for DC offset, I/Q gain and phase imbalance
 // Emit complex float sample stream on stdout
@@ -56,14 +56,13 @@ pthread_t FCD_control_thread;
 const int ADC_samprate = 192000;
 int Verbose;
 int No_hold_open; // if set, close control between commands
-int Dongle;
+int Dongle;       // Which of several funcube dongles to use
 
 void *fcd_command(void *arg);
 int process_fc_command(char *,int);
 double set_fc_LO(double);
 
-int rtp_sock;
-
+int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 
 int main(int argc,char *argv[]){
 
@@ -75,10 +74,8 @@ int main(int argc,char *argv[]){
   struct rtp_header rtp;
 
   char *dest = "239.1.2.3"; // Default for testing
-  int dest_port = 5555; // Default for testing
-  int dest_is_ipv4 = 0;
-  int dest_is_ipv6 = 0;  
-
+  int dest_port = 5004;     // Default for testing; recommended default RTP port
+  int dest_is_ipv6 = -1;
 
   locale = getenv("LANG");
 
@@ -123,8 +120,8 @@ int main(int argc,char *argv[]){
   struct sockaddr_in6 address6;
   if(inet_pton(AF_INET,dest,&address4.sin_addr) == 1){
     // Destination is IPv4
-    dest_is_ipv4 = 1;
-    if((rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
+    dest_is_ipv6 = 0;
+    if((Rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
       perror("funcube: can't create IPv4 output socket");
       exit(1);
     }
@@ -136,10 +133,9 @@ int main(int argc,char *argv[]){
       struct group_req group_req;
       group_req.gr_interface = 0;
       memcpy(&group_req.gr_group,&address4,sizeof(address4));
-      if(setsockopt(rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+      if(setsockopt(Rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
 	perror("setsockopt ipv4 multicast join group failed");
-      }
-    }
+    } // IN_MULTICAST
   } else if(inet_pton(AF_INET6,dest,&address6.sin6_addr) == 1){
     // Destination is IPv6
     dest_is_ipv6 = 1;
@@ -147,7 +143,7 @@ int main(int argc,char *argv[]){
     address6.sin6_flowinfo = 0;  
     address6.sin6_port = htons(dest_port);
     address6.sin6_scope_id = 0;
-    if((rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
+    if((Rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
       perror("funcube: can't create IPv6 output socket");
       exit(1);
     }
@@ -156,23 +152,21 @@ int main(int argc,char *argv[]){
       struct group_req group_req;
       group_req.gr_interface = 0;
       memcpy(&group_req.gr_group,&address6,sizeof(address6));
-      if(setsockopt(rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+      if(setsockopt(Rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
 	perror("setsockopt ipv6 multicast join group failed");
-      }
-    }
+    } // IN6_IS_ADDR_MULTICAST
   } else {
     fprintf(stderr,"Can't parse destination %s\n",dest);
     exit(1);
   }
   // Apparently works for both IPv4 and IPv6
   u_char loop = 1;
-  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
+  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
     perror("setsockopt multicast loop failed");
-  }
+
   u_char ttl = 1;
-  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
+  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
     perror("setsockopt multicast ttl failed");
-  }
       
   front_end_init(Dongle,ADC_samprate,blocksize);
   usleep(100000); // Let things settle
@@ -186,7 +180,7 @@ int main(int argc,char *argv[]){
   ssrc = tt & 0xffffffff; // low 32 bits of clock time
 
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-  rtp.mpt = 10;         // L16, stereo, but implies 44100 Hz and big-endian byte order?
+  rtp.mpt = 97;         // ordinarily dynamically allocated
   rtp.ssrc = htonl(ssrc);
 
   short sampbuf[2*blocksize];
@@ -199,12 +193,12 @@ int main(int argc,char *argv[]){
   iovec[2].iov_len = sizeof(sampbuf);
 
   struct msghdr message;
-  if(dest_is_ipv4){
-    message.msg_name = &address4;
-    message.msg_namelen = sizeof(address4);
-  } else if(dest_is_ipv6){
+  if(dest_is_ipv6){
     message.msg_name = &address6;
     message.msg_namelen = sizeof(address6);
+  } else if(!dest_is_ipv6){
+    message.msg_name = &address4;
+    message.msg_namelen = sizeof(address4);
   } else {
     fprintf(stderr,"No valid dest address\n");
     exit(1);
@@ -236,10 +230,11 @@ int main(int argc,char *argv[]){
     rtp.timestamp = htonl(timestamp);
     timestamp += blocksize;
 
-    if(sendmsg(rtp_sock,&message,0) == -1)
+    if(sendmsg(Rtp_sock,&message,0) == -1)
       perror("sendmsg");
   }
-  close(rtp_sock);
+  // Can't really get here
+  close(Rtp_sock);
   exit(0);
 }
 
@@ -283,7 +278,7 @@ int front_end_init(int dongle, int samprate,int L){
   fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_IF_GAIN1,&FCD.status.if_gain,sizeof(FCD.status.if_gain));
 
 
-  // Now set up sample stream through ALSA subsystem
+  // Set up sample stream through ALSA subsystem
   if(Verbose)
     fprintf(stderr,"adc_setup(%s): ",FCD.sdr_name);
   if((r = snd_pcm_open(&FCD.sdr_handle,FCD.sdr_name,SND_PCM_STREAM_CAPTURE,0)) < 0){
@@ -311,31 +306,31 @@ int front_end_init(int dongle, int samprate,int L){
     goto done;
   }
   exact_rate = FCD.status.samprate;
-  if(snd_pcm_hw_params_set_rate_near(FCD.sdr_handle,FCD.sdrparams,&exact_rate,0)<0){
+  if(snd_pcm_hw_params_set_rate_near(FCD.sdr_handle,FCD.sdrparams,&exact_rate,0) < 0){
     perror("error setting rate");
     r = -1;
     goto done;
   }
   FCD.status.samprate = exact_rate;
-  if(snd_pcm_hw_params_set_channels(FCD.sdr_handle,FCD.sdrparams,2)<0){
+  if(snd_pcm_hw_params_set_channels(FCD.sdr_handle,FCD.sdrparams,2) < 0){
     perror("error setting channels");
     r = -1;
     goto done;
   }
   // We will generally read L-sample blocks at a time
   snd_pcm_uframes_t LL = L;
-  if(snd_pcm_hw_params_set_period_size_near(FCD.sdr_handle,FCD.sdrparams,&LL,0)<0){
+  if(snd_pcm_hw_params_set_period_size_near(FCD.sdr_handle,FCD.sdrparams,&LL,0) < 0){
     perror("error setting periods");
     r = -1;
     goto done;
   }
   buffer_size = 1<<18;
-  if(snd_pcm_hw_params_set_buffer_size_near(FCD.sdr_handle,FCD.sdrparams,&buffer_size)<0){
+  if(snd_pcm_hw_params_set_buffer_size_near(FCD.sdr_handle,FCD.sdrparams,&buffer_size) < 0){
     perror("error setting buffersize");
     r = -1;
     goto done;
   }
-  if(snd_pcm_hw_params(FCD.sdr_handle,FCD.sdrparams)<0){
+  if(snd_pcm_hw_params(FCD.sdr_handle,FCD.sdrparams) < 0){
     perror("error setting HW params");
     r = -1;
     goto done;
@@ -350,8 +345,7 @@ int front_end_init(int dongle, int samprate,int L){
   pthread_create(&FCD_control_thread,NULL,fcd_command,&FCD);
   r = 0;
 
- done:;
-  
+ done:; // Also the abort target: close handle before returning
   if(No_hold_open && FCD.phd != NULL){
     fcdClose(FCD.phd);
     FCD.phd = NULL;
@@ -361,7 +355,7 @@ int front_end_init(int dongle, int samprate,int L){
 
 // Read buffer of samples from front end
 // L is number of stero samples, so buffer must have 2*L elements
-int get_adc(short *buffer,int L){
+int get_adc(short *buffer,const int L){
   int r;
 
   // Read block of I/Q samples from A/D converter
@@ -390,19 +384,21 @@ void *fcd_command(void *arg){
     int r;
     struct timeval timeout;
     struct status requested_status;
-
+    
+    // We're only reading one socket, but do it with a timeout so
+    // we can periocally poll the Funcube Pro's status in case it
+    // has been changed by another program, e.g., fcdpp
     FD_ZERO(&fdset);
-    FD_SET(rtp_sock,&fdset);
+    FD_SET(Rtp_sock,&fdset);
     timeout.tv_sec = 1;
     timeout.tv_usec = 0;
-    r = select(rtp_sock+1,&fdset,NULL,NULL,&timeout);
-    if(r == -1){
+    if((r = select(Rtp_sock+1,&fdset,NULL,NULL,&timeout)) == -1){
       perror("select");
       sleep(50000); // don't loop tightly
       continue;
-    }
-    if(r == 0){
-      // Poll the FCD for its current state, in case it has changed independently, e.g., from fcdctl command
+    } else if(r == 0){
+      // Timeout: poll the FCD for its current state, in case it
+      // has changed independently, e.g., from fcdctl command
       if(FCD.phd == NULL && (FCD.phd = fcdOpen(FCD.sdr_name,sizeof(FCD.sdr_name),Dongle)) == NULL){
 	perror("funcube: can't re-open control port, aborting");
 	sleep(50000);
@@ -421,7 +417,7 @@ void *fcd_command(void *arg){
     // Should probably log these
     struct sockaddr_in6 command_address;
     addrlen = sizeof(command_address);
-    if((r = recvfrom(rtp_sock,&requested_status,sizeof(requested_status),0,&command_address,&addrlen)) <= 0){
+    if((r = recvfrom(Rtp_sock,&requested_status,sizeof(requested_status),0,&command_address,&addrlen)) <= 0){
       if(r < 0)
 	perror("recv");
       sleep(50000); // don't loop tightly
