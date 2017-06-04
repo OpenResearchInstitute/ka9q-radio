@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.18 2017/06/01 23:50:38 karn Exp karn $
+// $Id: radio.c,v 1.19 2017/06/03 04:14:39 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -27,28 +27,31 @@ const float Headroom = .316227766; // sqrt(0.10) = -10 dB
 
 
 // Get true first LO frequency
-double get_first_LO(struct demod *demod){
+const double get_first_LO(const struct demod *demod){
   return demod->first_LO * (1 + demod->calibrate);  // True frequency, as adjusted
 }
 
 
 // Return current frequency of carrier frequency at current first IF
 // If sweeping, return second LO freq at "offset" samples ahead of current sample
-double get_second_LO(struct demod *demod,int offset){
+const double get_second_LO(const struct demod *demod,const int offset){
   if(cimag(demod->second_LO_phase_accel) != 0){
     // sweeping, get instantaneous frequency
-    demod->second_LO = get_exact_samprate(demod)
+    return get_exact_samprate(demod)
       * (offset * carg(demod->second_LO_phase_accel) + carg(demod->second_LO_phase_step)) / (2*M_PI);
-  }
-  return demod->second_LO;
+  } else 
+    return demod->second_LO;
 }
 
 // Set frequency with optional front end tuning
-double set_freq(struct demod *demod,double f,int force){
+double set_freq(struct demod *demod,const double f,const int force){
   double change = f - get_freq(demod);
-  double lo1 = get_first_LO(demod);
-  double lo2 = get_second_LO(demod,0) - change;
+  double lo1,lo2;
 
+  // Calculate new LO2 frequency
+  lo2 = get_second_LO(demod,0) - change;
+  // If the new LO2 is out of range, or if we're forced, recenter LO2
+  // and retune LO1
   if(force
      || -lo2 >= demod->samprate/2 - max(0,Modes[demod->mode].high)
      || -lo2 <= -demod->samprate/2 - min(0,Modes[demod->mode].low)){
@@ -65,35 +68,39 @@ double set_freq(struct demod *demod,double f,int force){
   // the fact that the tuner can only tune in 1 Hz steps
   lo1 = set_first_LO(demod,lo1,force);
   // Wait for it to actually change before we retune the second LO
+  // Adjust LO2 for any fractional Hz error in LO1
   // (What if we're reading from a recording?)
   int i;
   for(i=0;i<10;i++){
-    if(get_first_LO(demod) == lo1)
+    if(fabs(get_first_LO(demod) - lo1) < 1.0) // Retuning has occurred
       break;
     usleep(50000);
   }
+  
   lo2 = lo1 - f + demod->dial_offset;
   set_second_LO(demod,lo2,force);
   return f;
 }
 
-// Return current carrier frequency, including effects of any sweep
-double get_freq(struct demod *demod){
+// Return current frequency, including effects of any sweep & dial offset
+const double get_freq(const struct demod *demod){
   return get_first_LO(demod) - get_second_LO(demod,0)
     + demod->dial_offset;
 }
 
-// Set either or both LOs as needed to tune the specified radio frequency to zero audio frequency
-// Actually it goes to the offset specified in the mode table; e.g. +/- 750 Hz for the CW modes
+// Set tuner LO
 // Note: single precision floating point is not accurate enough at VHF and above
-double set_first_LO(struct demod *demod,double first_LO,int force){
+// demod->first_LO isn't updated here, but by the
+// incoming status frames so it don't change right away
+double set_first_LO(struct demod *demod,const double first_LO,const int force){
   struct status requested_status;
 
   if(!force && first_LO == get_first_LO(demod))
-    return get_first_LO(demod);
+    return first_LO;
 
-  // Change only tuner frequency
+  // Set tuner to integer nearest requested frequency after decalibration
   requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
+  // No change to gain settings
   requested_status.lna_gain = 0xff;
   requested_status.mixer_gain = 0xff;
   requested_status.if_gain = 0xff;    
@@ -101,20 +108,21 @@ double set_first_LO(struct demod *demod,double first_LO,int force){
   // Send commands to source address of last RTP packet from front end
   if(sendto(Ctl_sock,&requested_status,sizeof(requested_status),0,&rtp_address,sizeof(rtp_address)) == -1)
       perror("sendto control socket");
+  // Return new true frequency (which probably won't have taken effect yet)
   return requested_status.frequency * (1 + demod->calibrate);
 }
-double set_second_LO(struct demod *demod,double second_LO,int force){
+double set_second_LO(struct demod *demod,const double second_LO,const int force){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
   if(!force && second_LO == demod->second_LO)
     return second_LO;
   
   demod->second_LO = second_LO;
-  demod->second_LO_phase_step = csincos(2*M_PI*demod->second_LO/get_exact_samprate(demod));
+  demod->second_LO_phase_step = csincos(2*M_PI*second_LO/get_exact_samprate(demod));
   if(demod->second_LO_phase == 0) // In case it wasn't already set
     demod->second_LO_phase = 1;
   return second_LO;
 }
-double set_second_LO_rate(struct demod *demod,double second_LO_rate,int force){
+double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int force){
   double samprate,sampsq;
 
   if(!force && second_LO_rate == demod->second_LO_rate)
@@ -132,22 +140,13 @@ double set_second_LO_rate(struct demod *demod,double second_LO_rate,int force){
   }
   return second_LO_rate;
 }
-int set_mode(struct demod *demod,enum mode mode){
+int set_mode(struct demod *demod,const enum mode mode){
 
-
-#if 0
-  if(mode == demod->mode)
-    return 0;
-#endif
-  
   demod->mode = mode;
-  demod->samprate = 192000;
-  demod->L = 4096;
-  demod->M = 4097;
   demod->dial_offset = Modes[mode].dial;
-  
+
   pthread_cancel(demod->demod_thread); // what if it's not running?
-  void *retval;
+  void *retval; // Ignored
   pthread_join(demod->demod_thread,&retval); // Wait for it to finish
   
   switch(mode){
@@ -182,13 +181,12 @@ int set_cal(struct demod *demod,double cal){
   set_freq(demod,f,0);
   return 0;
 }
-double get_cal(struct demod *demod){
+const double get_cal(const struct demod *demod){
   return demod->calibrate;
 }
 
 
-
-int spindown(struct demod *demod,complex float *data,int len){
+int spindown(struct demod *demod,complex float *data,const int len){
   int n;
 
   if(demod->second_LO_phase == 0) // Make sure it's been initalized
@@ -226,6 +224,6 @@ int spindown(struct demod *demod,complex float *data,int len){
   return 0;
 }
 
-double get_exact_samprate(struct demod *demod){
+const double get_exact_samprate(const struct demod *demod){
   return demod->samprate * (1 + demod->calibrate);
 }

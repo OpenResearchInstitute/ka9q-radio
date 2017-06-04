@@ -74,7 +74,7 @@ void *demod_iq(void *arg){
   pthread_cleanup_push(iq_cleanup,demod);
 
   while(1){
-    fillbuf(demod->data_sock,(char *)demod->filter->input,
+    fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
     execute_filter(demod->filter);
@@ -98,7 +98,10 @@ void *demod_iq(void *arg){
 	demod->gain *= agcratio;
       }
     }
-    put_stereo_audio(demod->filter->output.c,demod->filter->blocksize_out,demod->gain);
+    for(n=0;n<demod->filter->blocksize_out;n++){
+      demod->filter->output.c[n] *= demod->gain;
+    }
+    write(demod->output,demod->filter->output.c,demod->filter->blocksize_out*sizeof(complex float));
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

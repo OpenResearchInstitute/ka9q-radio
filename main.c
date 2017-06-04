@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.15 2017/06/02 12:05:38 karn Exp karn $
+// $Id: main.c,v 1.16 2017/06/03 04:14:29 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -69,7 +69,7 @@ int main(int argc,char *argv[]){
 
   // Defaults
   Quiet = 0;
-  Audio.name = "sysdefault";
+  Audio.name = "default";
   // The FFT length will be L + M - 1 because of window overlapping
   demod->L = 4096;      // Number of samples in buffer
   demod->M = 4096+1;    // Length of filter impulse response
@@ -262,20 +262,33 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   fcntl(Ctl_sock,F_SETFL,O_NONBLOCK);
-  set_mode(demod,mode);
-  set_second_LO(demod,-second_IF,1);
 
+  // Pipes for front end -> demod
   int sv[2];
   pipe(sv);
   Demod_sock = sv[1]; // write end
-  demod->data_sock = sv[0]; // read end
+  demod->input = sv[0]; // read end
   int sz;
   sz = fcntl(Demod_sock,F_SETPIPE_SZ,demod->L * sizeof(complex float));
   fprintf(stderr,"sock size %d\n",sz);
   if(sz == -1)
     perror("F_SETPIPE_SZ");
 
-  input_loop(demod);
+  // Pipes for demod -> audio output
+  pipe(sv);
+  Audio.input = sv[0]; // read end
+  demod->output = sv[1]; // write end
+  sz = fcntl(Audio.input,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+  fprintf(stderr,"sock size %d\n",sz);
+  if(sz == -1)
+    perror("F_SETPIPE_SZ");
+
+  pthread_create(&Audio_thread,NULL,audio_thread,NULL);
+
+  set_mode(demod,mode);
+  set_second_LO(demod,-second_IF,1);
+
+  input_loop(demod); // Doesn't return
 
   exit(0);
 }
@@ -326,6 +339,7 @@ void *input_loop(struct demod *demod){
     while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
       process_command(demod,pktbuf,rdlen);
 
+    // Receive I/Q data from front end
     cnt = recvmsg(rtp_sock,&message,0);
     if(cnt <= 0){    // ??
       perror("recvfrom");

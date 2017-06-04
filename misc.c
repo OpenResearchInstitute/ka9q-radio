@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.5 2016/10/14 06:08:47 karn Exp karn $
+// $Id: misc.c,v 1.6 2017/06/02 12:06:07 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -14,7 +14,7 @@
 #endif
 
 // return unit magnitude complex number with phase x radians
-const complex float csincosf(float x){
+const complex float csincosf(const float x){
   float s,c;
 
   sincosf(x,&s,&c);
@@ -22,22 +22,22 @@ const complex float csincosf(float x){
 }
 
 // return unit magnitude complex number with phase x radians
-const complex double csincos(double x){
+const complex double csincos(const double x){
   double s,c;
 
   sincos(x,&s,&c);
   return CMPLX(c,s);
 }
 
-const float cnrmf(complex float x){
+const float cnrmf(const complex float x){
   return crealf(x)*crealf(x) + cimagf(x) * cimagf(x);
 }
-const double cnrm(complex double x){
+const double cnrm(const complex double x){
   return creal(x)*creal(x) + cimag(x) * cimag(x);
 }
 
 // Root-mean-square of an array of floats
-const float amplitude(const float *data,int len){
+const float amplitude(const float *data,const int len){
   float sum = 0;  
   int n;
   
@@ -49,7 +49,7 @@ const float amplitude(const float *data,int len){
 }
 
 // Root-mean-square of the magnitudes of an array of complex floats
-const float camplitude(const complex float *data, int len){
+const float camplitude(const complex float *data, const int len){
   float amplitude = 0;
   int n;
 
@@ -61,7 +61,7 @@ const float camplitude(const complex float *data, int len){
   return sqrtf(amplitude/len);
 }
 
-int fillbuf(const int fd,char *buffer,int cnt){
+int fillbuf(const int fd,char *buffer,const int cnt){
   int i;
   for(i=0;i<cnt;){
     int n;

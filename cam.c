@@ -64,7 +64,7 @@ void *demod_cam(void *arg){
 
   complex float lastphase = 0;
   while(1){
-    fillbuf(demod->data_sock,(char *)demod->filter->input,
+    fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
     execute_filter(demod->filter);
@@ -72,8 +72,8 @@ void *demod_cam(void *arg){
     // Automatic gain control
     complex float phase;
     int n;
+    float amplitude,noise;
     float audio[demod->filter->blocksize_out];
-
     double freqerror;
     
     phase = 0;
@@ -83,11 +83,18 @@ void *demod_cam(void *arg){
     phase = conj(phase) / cabs(phase);
 
     // Rotate signal onto I axis, measure DC (carrier) level
-    demod->amplitude = 0;
-    for(n=0; n < demod->filter->blocksize_out; n++)
-      demod->amplitude += audio[n] = creal(demod->filter->output.c[n] * phase);
-    
-    demod->amplitude /= demod->filter->blocksize_out;
+    amplitude = 0;
+    noise = 0;
+    for(n=0; n < demod->filter->blocksize_out; n++){
+      // Sample with signal rotated onto I axis
+      complex float rsamp = demod->filter->output.c[n] * phase;
+      audio[n] = creal(rsamp);
+      amplitude += creal(rsamp) * creal(rsamp);
+      noise += cimag(rsamp) * cimag(rsamp);
+    }
+    // RMS signal+noise and noise amplitudes
+    demod->amplitude = sqrtf(amplitude / demod->filter->blocksize_out);
+    demod->noise = sqrtf(noise / demod->filter->blocksize_out);
     float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
     demod->snr = (snn*snn) -1; // S/N as power ratio
 
@@ -104,7 +111,11 @@ void *demod_cam(void *arg){
 
     // AM AGC is carrier-driven
     demod->gain = Headroom / demod->amplitude;
-    put_mono_audio(audio,demod->filter->blocksize_out,demod->gain); // we do our own
+    complex float buffer[demod->filter->blocksize_out];
+    for(n=0;n<demod->filter->blocksize_out;n++)
+      buffer[n] = demod->gain * CMPLXF(audio[n],audio[n]);
+
+    write(demod->output,buffer,sizeof(buffer));
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

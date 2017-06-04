@@ -71,7 +71,7 @@ void *demod_ssb(void *arg){
   pthread_cleanup_push(ssb_cleanup,demod);
 
   while(1){
-    fillbuf(demod->data_sock,(char *)demod->filter->input,
+    fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
 
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
@@ -93,7 +93,13 @@ void *demod_ssb(void *arg){
 	demod->gain *= agcratio;
       }
     }
-    put_mono_audio(demod->filter->output.r,demod->filter->blocksize_out,demod->gain);
+
+    complex float buffer[demod->filter->blocksize_out];
+    for(n=0;n<demod->filter->blocksize_out;n++){
+      buffer[n] = demod->gain * CMPLXF(demod->filter->output.r[n],
+				       demod->filter->output.r[n]);
+    }
+    write(demod->output,buffer,sizeof(buffer));
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.6 2017/05/26 11:44:55 karn Exp karn $
+// $Id: audio.c,v 1.7 2017/05/29 10:29:25 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <stdio.h>
@@ -142,7 +142,7 @@ int audio_change_parms(unsigned samprate,int channels,int L){
     fprintf(stderr,"Can not configure driver for %s\n",Audio.name);
     return -1;
   }
-  if(snd_pcm_sw_params_set_start_threshold(Audio.handle,sw_params,1*LL) < 0){
+  if(snd_pcm_sw_params_set_start_threshold(Audio.handle,sw_params,2*LL) < 0){
     fprintf(stderr,"Can not configure start threshold for %s\n",Audio.name);
     return -1;
   }
@@ -158,23 +158,19 @@ int audio_change_parms(unsigned samprate,int channels,int L){
   return 0;
 }
 
-int put_stereo_audio(complex float *buffer,int L,float gain){
+
+void *audio_thread(void *arg){
+  const int L = 1024;
+  const int channels = 2;
+  const unsigned samprate = Audio.samprate;
+  complex float buffer[L];
   signed short outsamps[2*L];
-  int cnt = L;
-  int start,n;
+  int i,chunk,r;
+  snd_pcm_state_t state;
 
-  start = 0;
-  for(n=0;n<L;n++){
-    outsamps[2*n] = CLIP(SHRT_MAX*gain*creal(buffer[n]));
-    outsamps[2*n+1] = CLIP(SHRT_MAX*gain*cimag(buffer[n]));
-  }
-  if(Audio.echo)
-    write(1,outsamps,2*L*sizeof(short));
+  audio_change_parms(samprate,channels,L);
 
-  while(cnt > 0){
-    int chunk,r;
-    snd_pcm_state_t state;
-
+  while(1){
     state = snd_pcm_state(Audio.handle);
     // Underruns can deliberately happen when the demodulator thread simply
     // stops sending data, e.g., when a FM squelch is closed
@@ -185,81 +181,28 @@ int put_stereo_audio(complex float *buffer,int L,float gain){
     chunk = snd_pcm_avail(Audio.handle); // Don't send more than it can take!
     if(chunk == 0){
       Audio.overflow++;
-#if 0
-      // Wait for some room to open up 
-      struct timespec req;
-      req.tv_sec = 0;
-      req.tv_nsec = (int)(128e9 / Audio.samprate); // wait for 128 samples to open up
-      nanosleep(&req,NULL);
+      usleep(L * 1e6 / Audio.samprate); // Wait one buffer time for some room
       continue;
-#else
-      return 0; // Intentionally drop to avoid excessive delay
-#endif      
-      
-
     }
-    chunk = min(chunk,cnt);
-    if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){
-#if 0
-      fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
-#endif
-      continue; // retry
-    }
-    cnt -= chunk;
-    start += 2*chunk;
-  }
-  return 0;
-}
-int put_mono_audio(float *buffer,int L,float gain){
-  signed short outsamps[2*L];
-  int cnt = L;
-  int start,n;
-
-  start = 0;
-  for(n=0;n<L;n++){
-    outsamps[2*n] = CLIP(SHRT_MAX*gain*buffer[n]);
-    outsamps[2*n+1] = CLIP(SHRT_MAX*gain*buffer[n]);    
-  }
-  if(Audio.echo)
-    write(1,outsamps,2*L*sizeof(short));
-
-  while(cnt > 0){
-    int chunk,r;
-    snd_pcm_state_t state;
+    // Size of the buffer, or the max available in the device, whichever is less
+    chunk = min(chunk,L);
     
-    state = snd_pcm_state(Audio.handle);
-    // Underruns can deliberately happen when the demodulator thread simply
-    // stops sending data, e.g., when a FM squelch is closed
-    if(state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED){
-      Audio.underrun++;
-      snd_pcm_prepare(Audio.handle);
-    }
-    chunk = snd_pcm_avail(Audio.handle); // Don't send more than it can take!
-    if(chunk == 0){
-      Audio.overflow++;
-#if 0
-      // Wait for some room to open up 
-      struct timespec req;
-      req.tv_sec = 0;
-      req.tv_nsec = (int)(128e9 / Audio.samprate); // wait for 128 samples to open up
-      nanosleep(&req,NULL);
+    i = read(Audio.input,buffer,chunk*sizeof(complex float));
+    if(i < 0){
+      perror("audio pipe read");
+      usleep(500000);
       continue;
-#else
-      return 0; // Intentionally drop to avoid excessive delay
-#endif
     }
-    chunk = min(chunk,cnt);
-    if((r = snd_pcm_writei(Audio.handle,&outsamps[start],chunk)) != chunk){
+    // Actual number of samples read
+    chunk = i / sizeof(complex float);
+    for(i=0;i<chunk;i++){
+      outsamps[2*i] = CLIP(SHRT_MAX*creal(buffer[i])); // Scale and clip
+      outsamps[2*i+1] = CLIP(SHRT_MAX*cimag(buffer[i]));
+    }
+    if((r = snd_pcm_writei(Audio.handle,outsamps,chunk)) != chunk){
 #if 0
       fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
 #endif
-      continue; // retry
     }
-    cnt -= chunk;
-    start += chunk;
   }
-  return 0;
 }
-
-
-

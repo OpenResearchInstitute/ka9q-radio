@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.16 2017/06/01 10:31:42 karn Exp karn $
+// $Id: radio.h,v 1.17 2017/06/02 12:06:08 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -23,7 +23,8 @@ struct demod {
   float dotprod;     // smoothed dot product of I,Q for quadrature, ideally zero
 
   // Demod thread data
-  int data_sock;
+  int input;  // Input pipe fd
+  int output; // Output pipe fd
   pthread_t demod_thread;
 
   double dial_offset;
@@ -56,20 +57,20 @@ extern int Demod_sock;
 
 extern const float Headroom; // Audio headroom ratio
 
-double get_freq(struct demod *);
-double set_freq(struct demod *,double,int);
-double set_first_LO(struct demod *demod,double first_LO,int);
-double get_first_LO(struct demod *demod);
-double set_second_LO(struct demod *demod,double second_LO,int);
-double get_second_LO(struct demod *demod,int);
-double set_second_LO_rate(struct demod *demod,double second_LO_rate,int);
-double get_exact_samprate(struct demod *);
+const double get_freq(const struct demod *);
+double set_freq(struct demod *,const double,const int);
+double set_first_LO(struct demod *demod,const double first_LO,const int);
+const double get_first_LO(const struct demod *demod);
+double set_second_LO(struct demod *demod,const double second_LO,const int);
+const double get_second_LO(const struct demod *demod,const int);
+double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int);
+const double get_exact_samprate(const struct demod *);
 
-int set_mode(struct demod *demod,enum mode mode);
-int set_cal(struct demod *,double);
-double get_cal(struct demod *);
-int spindown(struct demod *demod,complex float *data,int len);
-void closedown(int a);
+int set_mode(struct demod *demod,const enum mode mode);
+int set_cal(struct demod *,const double);
+const double get_cal(const struct demod *);
+int spindown(struct demod *demod,complex float *data,const int len);
+void closedown(const int a);
 void proc_samples(struct demod *,const short *,const int);
 
 // Thread entry points

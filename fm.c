@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.9 2017/06/01 23:50:36 karn Exp karn $
+// $Id: fm.c,v 1.10 2017/06/02 12:06:06 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -105,7 +105,7 @@ void *demod_fm(void *arg){
   pthread_cleanup_push(fm_cleanup,demod);
 
   while(1){
-    fillbuf(demod->data_sock,(char *)demod->filter->input,
+    fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
     execute_filter(demod->filter);
@@ -124,7 +124,12 @@ void *demod_fm(void *arg){
 	  devhold--;
 	}
       }
-      put_mono_audio(audio,demod->filter->blocksize_out,demod->gain);
+      // Scale, convert to stereo and send to audio thread
+      complex float buffer[demod->filter->blocksize_out];
+      for(n=0;n<demod->filter->blocksize_out;n++){
+	buffer[n] = demod->gain * CMPLXF(audio[n],audio[n]);
+      }
+      write(demod->output,buffer,sizeof(buffer));
     }
   }
   pthread_cleanup_pop(1);

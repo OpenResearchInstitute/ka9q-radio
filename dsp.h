@@ -1,23 +1,21 @@
-// $Id: dsp.h,v 1.3 2016/10/14 04:34:21 karn Exp karn $
+// $Id: dsp.h,v 1.4 2017/06/02 12:05:45 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
 #include <complex.h>
 #undef I
 
-const complex float csincosf(float x);
-const complex double csincos(double x);
+const complex float csincosf(const float x);
+const complex double csincos(const double x);
 
-float amplitude(const float *data,int len);
-float camplitude(const complex float *data, int len);
+const float amplitude(const float *data,const int len);
+const float camplitude(const complex float *data, const int len);
 
 // Compute norm = x * conj(x) = Re{x}^2 + Im{x}^2
-const float cnrmf(complex float x);
-const double cnrm(complex double x);
+const float cnrmf(const complex float x);
+const double cnrm(const complex double x);
 
-void verify(complex float *,int);
-
-int fillbuf(const int,char *,int);
+int fillbuf(const int,char *,const int);
 
 #define CLIP(x) ((x) > SHRT_MAX ? SHRT_MAX : (x) < SHRT_MIN ? SHRT_MIN : (x))
 #define max(x,y) ((x) > (y) ? (x) : (y))

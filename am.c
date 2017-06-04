@@ -62,7 +62,7 @@ void *demod_am(void *arg){
   pthread_cleanup_push(am_cleanup,demod);
 
   while(1){
-    fillbuf(demod->data_sock,(char *)demod->filter->input,
+    fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
     execute_filter(demod->filter);
@@ -84,7 +84,11 @@ void *demod_am(void *arg){
     for(n=0; n<demod->filter->blocksize_out; n++)
       audio[n] -= average; // Subtract carrier to remove DC
     
-    put_mono_audio(audio,demod->filter->blocksize_out,demod->gain); // we do our own
+    complex float buffer[demod->filter->blocksize_out];
+    for(n=0;n<demod->filter->blocksize_out;n++)
+      buffer[n] = demod->gain * CMPLXF(audio[n],audio[n]);
+
+    write(demod->output,buffer,sizeof(buffer));
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

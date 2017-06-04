@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.16 2017/06/02 12:06:05 karn Exp karn $
+// $Id: demod.c,v 1.17 2017/06/03 04:14:16 karn Exp karn $
 // Common demod thread for all modes
 // Takes commands from UDP packets on a socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -11,8 +11,6 @@
 
 #include "radio.h"
 
-
-extern int Ctl_port;
 
 float dc_alpha = 0.00001; // high pass filter coefficient for offset and I/Q imbalance estimates
 float power_alpha = 0.00001; // high pass filter coefficient for power estimates
