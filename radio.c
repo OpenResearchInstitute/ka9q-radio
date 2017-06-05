@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.20 2017/06/04 10:52:10 karn Exp karn $
+// $Id: radio.c,v 1.21 2017/06/05 06:09:17 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -54,8 +54,8 @@ double set_freq(struct demod *demod,const double f,const int force){
   // If the new LO2 is out of range, or if we're forced, recenter LO2
   // and retune LO1
   if(force
-     || -lo2 >= demod->samprate/2 - max(0,Modes[demod->mode].high)
-     || -lo2 <= -demod->samprate/2 - min(0,Modes[demod->mode].low)){
+     || -lo2 >= demod->samprate/2 - max(0,demod->high)
+     || -lo2 <= -demod->samprate/2 - min(0,demod->low)){
     if(change < 0)
       lo2 = -demod->samprate/4;
     else if(change > 0)

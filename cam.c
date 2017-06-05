@@ -43,7 +43,7 @@ void *demod_cam(void *arg){
     complex float phase;
     int n;
     float amplitude,noise;
-    float audio[demod->filter->blocksize_out];
+
     double freqerror;
     
     phase = 0;
@@ -57,8 +57,7 @@ void *demod_cam(void *arg){
     noise = 0;
     for(n=0; n < demod->filter->blocksize_out; n++){
       // Sample with signal rotated onto I axis
-      complex float rsamp = demod->filter->output.c[n] * phase;
-      audio[n] = creal(rsamp);
+      complex float rsamp = demod->filter->output.c[n] *= phase;
       amplitude += creal(rsamp) * creal(rsamp);
       noise += cimag(rsamp) * cimag(rsamp);
     }
@@ -68,10 +67,6 @@ void *demod_cam(void *arg){
     float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
     demod->snr = (snn*snn) -1; // S/N as power ratio
 
-    // Remove carrier DC
-    for(n=0; n < demod->filter->blocksize_out; n++)
-      audio[n] -= demod->amplitude;
-
     // Frequency error is the phase of this block minus the last, times blocks/sec
     // Phase was already flipped, hence the minus
     // Only move a fraction of the error at one time
@@ -79,12 +74,25 @@ void *demod_cam(void *arg){
     lastphase = phase;
     set_second_LO(demod,-freqerror + demod->second_LO,0);
 
+    // Remove carrier DC
     // AM AGC is carrier-driven
     demod->gain = Headroom / demod->amplitude;
-    for(n=0;n<demod->filter->blocksize_out;n++)
-      audio[n] *= demod->gain;
-
+#if 1
+    float audio[demod->filter->blocksize_out];
+    for(n=0; n < demod->filter->blocksize_out; n++){
+      audio[n] = demod->gain * (creal(demod->filter->output.c[n]) - demod->amplitude);
+    }
     write(demod->output,audio,sizeof(audio));
+#else
+    // Experimental stereo write, AM signal (ideally) on I (left) channel, noise on Q (right) channel
+    for(n=0; n < demod->filter->blocksize_out; n++){
+      demod->filter->output.c[n] = demod->gain * CMPLXF(creal(demod->filter->output.c[n]) - demod->amplitude,
+					   cimag(demod->filter->output.c[n]));
+    }
+    write(Audio_stereo_sock,demod->filter->output.c,
+	  demod->filter->blocksize_out * sizeof(complex float));
+#endif
+
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.4 2017/05/31 22:26:57 karn Exp karn $
+// $Id: modes.c,v 1.5 2017/06/05 06:09:16 karn Exp karn $
 #include "command.h"
 
 struct modetab Modes[] = {
@@ -8,9 +8,9 @@ struct modetab Modes[] = {
   {IQ,   "IQ",    0,      10,   -5000, 5000, },
   {ISB, "ISB",    0,     100,   -5000, 5000, },
   {USB, "USB",    0,     100,     300, 3000, },
-  {CWU, "CWU",  750,      10,     500, 1000, },
+  {CWU, "CWU",  400,      10,     200, 600, },
   {LSB, "LSB",    0,     100,   -3000, -300, },
-  {CWL, "CWL", -750,      10,   -1000, -500, },
+  {CWL, "CWL", -400,      10,   -600, -200, },
   {NFM, "NFM",    0,    1000,   -3000, 3000, }, // For D*star
   {FM,   "FM",    0,    1000,   -8000, 8000, },
   //  {FM,   "FM",    0,    1000,   -10000, 10000, },

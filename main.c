@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.18 2017/06/05 06:09:16 karn Exp karn $
+// $Id: main.c,v 1.19 2017/06/05 06:40:23 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -187,19 +187,10 @@ int main(int argc,char *argv[]){
   struct sockaddr_in address4;  
 
   if(inet_pton(AF_INET,source,&address4.sin_addr) == 1){
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_port = htons(source_port);
-    address.sin_addr.s_addr = INADDR_ANY;
     if((rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
       perror("can't create IPv4 input socket");
       exit(1);
     }
-    if(bind(rtp_sock,&address,sizeof(address)) != 0){
-      perror("ipv4 bind on input socket failed");
-      exit(1);
-    }
-
     struct group_req group_req;
     group_req.gr_interface = 0;
     address4.sin_family = AF_INET;
@@ -209,19 +200,26 @@ int main(int argc,char *argv[]){
       perror("setsockopt ipv6/v4 multicast join group failed");
       exit(1);
     }
-  } else if(inet_pton(AF_INET6,source,&address6.sin6_addr) == 1){
-    struct sockaddr_in6 address;
-    address.sin6_family = AF_INET6;
-    address.sin6_flowinfo = 0;  
-    address.sin6_port = htons(source_port);
-    address.sin6_scope_id = 0;
-    address.sin6_addr = in6addr_any;
-    if((rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
-      fprintf(stderr,"funcube: can't create IPv6 output socket\n");
+    u_char reuse = 1;
+    if(setsockopt(rtp_sock,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0){
+      perror("ipv4 so_reuseaddr failed");
+    }
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_port = htons(source_port);
+    //    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_addr.s_addr = address4.sin_addr.s_addr;
+
+    
+
+    if(bind(rtp_sock,&address,sizeof(address)) != 0){
+      perror("ipv4 bind on input socket failed");
       exit(1);
     }
-    if(bind(rtp_sock,&address,sizeof(address)) != 0){
-      perror("bind to IPv6 multicast address failed");
+
+  } else if(inet_pton(AF_INET6,source,&address6.sin6_addr) == 1){
+    if((rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
+      perror("funcube: can't create IPv6 output socket");
       exit(1);
     }
     struct group_req group_req;
@@ -231,6 +229,18 @@ int main(int argc,char *argv[]){
     memcpy(&group_req.gr_group,&address6,sizeof(address6));
     if(setsockopt(rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
       perror("setsockopt ipv6 multicast join group failed");
+      exit(1);
+    }
+    u_char reuse = 1;
+    setsockopt(rtp_sock,IPPROTO_IPV6,SO_REUSEADDR,&reuse,sizeof(reuse));
+    struct sockaddr_in6 address;
+    address.sin6_family = AF_INET6;
+    address.sin6_flowinfo = 0;  
+    address.sin6_port = htons(source_port);
+    address.sin6_scope_id = 0;
+    address.sin6_addr = in6addr_any;
+    if(bind(rtp_sock,&address,sizeof(address)) != 0){
+      perror("bind to IPv6 multicast address failed");
       exit(1);
     }
   } else {
@@ -255,12 +265,11 @@ int main(int argc,char *argv[]){
   ctl_address.sin6_scope_id = 0;
 
   if((Ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
-    fprintf(stderr,"can't open control socket\n");
+    perror("can't open control socket");
     exit(1);
   }
   if(bind(Ctl_sock,&ctl_address,sizeof(ctl_address)) != 0){
-    fprintf(stderr,"bind failed\n");
-    exit(1);
+    perror("control bind failed");
   }
   fcntl(Ctl_sock,F_SETFL,O_NONBLOCK);
 
