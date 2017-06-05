@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.17 2017/06/04 10:52:09 karn Exp karn $
+// $Id: main.c,v 1.18 2017/06/05 06:09:16 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -355,21 +355,21 @@ void *input_loop(struct demod *demod){
     socklen_t addrlen;
     int rdlen;
     char pktbuf[MAXPKT];
-    fd_set fd_set;
+    fd_set mask;
 
-    FD_ZERO(&fd_set);
-    FD_SET(Ctl_sock,&fd_set);
-    FD_SET(rtp_sock,&fd_set);
+    FD_ZERO(&mask);
+    FD_SET(Ctl_sock,&mask);
+    FD_SET(rtp_sock,&mask);
     
-    select(max(Ctl_sock,rtp_sock)+1,&fd_set,NULL,NULL,NULL);
+    select(max(Ctl_sock,rtp_sock)+1,&mask,NULL,NULL,NULL);
 
-    if(FD_ISSET(Ctl_sock,&fd_set)){
+    if(FD_ISSET(Ctl_sock,&mask)){
       addrlen = sizeof(ctl_address);
       rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen);
       if(rdlen > 0)
 	process_command(demod,pktbuf,rdlen);
     }
-    if(FD_ISSET(rtp_sock,&fd_set)){
+    if(FD_ISSET(rtp_sock,&mask)){
       // Receive I/Q data from front end
       cnt = recvmsg(rtp_sock,&message,0);
       if(cnt <= 0){    // ??

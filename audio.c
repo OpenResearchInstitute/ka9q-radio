@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.8 2017/06/04 10:52:07 karn Exp karn $
+// $Id: audio.c,v 1.9 2017/06/05 06:09:13 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <stdio.h>
@@ -191,12 +191,12 @@ void *audio_thread(void *arg){
     // Size of the buffer, or the max available in the device, whichever is less
     chunk = min(chunk,L);
     
-    fd_set fd_set;
-    FD_ZERO(&fd_set);
-    FD_SET(Audio.stereo_input,&fd_set);
-    FD_SET(Audio.mono_input,&fd_set);
-    select(max(Audio.stereo_input,Audio.mono_input)+1,&fd_set,NULL,NULL,NULL);
-    if(FD_ISSET(Audio.stereo_input,&fd_set)){
+    fd_set mask;
+    FD_ZERO(&mask);
+    FD_SET(Audio.stereo_input,&mask);
+    FD_SET(Audio.mono_input,&mask);
+    select(max(Audio.stereo_input,Audio.mono_input)+1,&mask,NULL,NULL,NULL);
+    if(FD_ISSET(Audio.stereo_input,&mask)){
 	complex float buffer[L];
 	i = read(Audio.stereo_input,buffer,chunk*sizeof(complex float));
 	if(i < 0){
@@ -217,7 +217,7 @@ void *audio_thread(void *arg){
 #endif
 	}
     }
-    if(FD_ISSET(Audio.mono_input,&fd_set)){
+    if(FD_ISSET(Audio.mono_input,&mask)){
 	float buffer[L];
 	i = read(Audio.mono_input,buffer,chunk*sizeof(float));
 	if(i < 0){
