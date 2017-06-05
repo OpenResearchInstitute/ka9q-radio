@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.19 2017/06/02 12:06:06 karn Exp karn $
+// $Id: display.c,v 1.20 2017/06/03 04:15:05 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -67,26 +67,33 @@ void *display(void *arg){
   timeout(100); // This sets the update interval when nothing is typed
   cbreak();
   noecho();
-  deb = newwin(5,70,20,0);
+  deb = newwin(5,40,14,40);
   scrollok(deb,1);
-  fw = newwin(5,40,0,0);
-  sig = newwin(7,25,6,0);
-  sdr = newwin(7,30,6,25);
-  net = newwin(6,36,14,0);
+  fw = newwin(7,40,0,0);
+  sig = newwin(7,25,8,0);
+  sdr = newwin(7,30,8,25);
+  net = newwin(6,36,16,0);
   
   dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
 
+
   for(;;){
+    float low,high;
+    
     wmove(fw,0,0);
+    get_filter(demod,&low,&high);
     wprintw(fw,"Frequency   %'17.2f Hz\n",get_first_LO(demod) - get_second_LO(demod,0) + demod->dial_offset);
     wprintw(fw,"First LO    %'17.2f Hz\n",get_first_LO(demod));
     wprintw(fw,"First IF    %'17.2f Hz\n",-get_second_LO(demod,0));
+    wprintw(fw,"Filter low  %'17.2f Hz\n",low);
+    wprintw(fw,"Filter high %'17.2f Hz\n",high);
     wprintw(fw,"Dial offset %'17.2f Hz\n",demod->dial_offset);
     wprintw(fw,"Calibrate   %'17.2f ppm\n",get_cal(demod)*1e6);
     // Tuning step highlight
     // A little messy because of the commas in the frequencies
     // They come from the ' option in the printf formats
     int x;
+
     if(tunestep >= -2 && tunestep <= -1){
       x = 25 - tunestep + 1;
     } else if(tunestep >= 0 && tunestep <= 2){
@@ -96,8 +103,9 @@ void *display(void *arg){
     } else if(tunestep >= 6 && tunestep <= 8){
       x = 25 - tunestep - 2;
     }
+    // Highlight digit for current tuning step
     mvwchgat(fw,tuneitem,x,1,A_STANDOUT,0,NULL);
-    wrefresh(fw);
+    wnoutrefresh(fw);
 
     wclrtobot(sig);     // clear previous stuff in case we stop showing the last lines
     wmove(sig,0,0);
@@ -109,21 +117,21 @@ void *display(void *arg){
     if(!isnan(demod->mode) && demod->snr != 0)
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
     if(!isnan(demod->foffset))
-      wprintw(sig,"offset  %7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));
+      wprintw(sig,"offset  %+7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));
     if(!isnan(demod->pdeviation))
       wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation/(2*M_PI));
-    wrefresh(sig);
+    wnoutrefresh(sig);
     
     wmove(sdr,0,0);
-    wprintw(sdr,"I offset %10.1f\n",demod->DC_i);
-    wprintw(sdr,"Q offset %10.1f\n",demod->DC_q);
+    wprintw(sdr,"I offset %10.6f\n",demod->DC_i);
+    wprintw(sdr,"Q offset %10.6f\n",demod->DC_q);
     wprintw(sdr,"I/Q imbal%10.1f dB\n",power2dB(demod->power_i/demod->power_q));
     double sinphi = demod->dotprod / (demod->power_i + demod->power_q);
     wprintw(sdr,"I/Q phi  %10.5f rad\n",sinphi);
     wprintw(sdr,"LNA      %10u\n",demod->lna_gain);
     wprintw(sdr,"Mix gain %10u\n",demod->mixer_gain);
     wprintw(sdr,"IF gain  %10u dB\n",demod->if_gain);
-    wrefresh(sdr);
+    wnoutrefresh(sdr);
     
     extern int Delayed,Skips;
 
@@ -137,7 +145,7 @@ void *display(void *arg){
       wprintw(net,"audio delay %d (%.1f ms)\n",(int)delayp,1000.*(float)delayp/Audio.samprate);
       wprintw(net,"audio overflow %d\n",Audio.overflow);
     }
-    wrefresh(net);
+    wnoutrefresh(net);
 
     double f;
     char str[160];
@@ -162,8 +170,6 @@ void *display(void *arg){
     struct input_event event;
     if(read(dial_fd,&event,sizeof(event)) == sizeof(event)){
       // Got something from the powermate knob
-      wprintw(deb,"type %d code %d value %d\n",event.type,event.code,event.value);
-      wrefresh(deb);
       if(event.type == EV_SYN){
 	// Ignore
 	continue;
@@ -185,14 +191,14 @@ void *display(void *arg){
 
     switch(c){
     case ERR:   // no key; timed out. Do nothing.
-      continue;
+      break;
     case 'q':   // Exit radio program
       goto done;
     case '\t':  // tab: cycle through tuning fields
-      tuneitem = (tuneitem + 1) % 5;
+      tuneitem = (tuneitem + 1) % 7;
       break;
     case KEY_BTAB: // Backtab, i.e., shifted tab: cycle backwards through tuning fields
-      tuneitem = (5 + tuneitem - 1) % 5;
+      tuneitem = (7 + tuneitem - 1) % 7;
       break;
     case KEY_HOME: // Go back to starting spot
       tuneitem = 0;
@@ -219,9 +225,19 @@ void *display(void *arg){
 	set_second_LO(demod,get_second_LO(demod,0) - pow(10.,tunestep),0);
 	break;
       case 3:
-	demod->dial_offset += pow(10.,tunestep);
+	get_filter(demod,&low,&high);
+	low += pow(10.,tunestep);
+	set_filter(demod,low,high);
 	break;
       case 4:
+	get_filter(demod,&low,&high);
+	high += pow(10.,tunestep);
+	set_filter(demod,low,high);
+	break;
+      case 5:
+	demod->dial_offset += pow(10.,tunestep);
+	break;
+      case 6:
 	set_cal(demod,get_cal(demod) + pow(10.,tunestep) * 1e-6);
 	break;
       }
@@ -238,9 +254,19 @@ void *display(void *arg){
 	set_second_LO(demod,get_second_LO(demod,0) + pow(10.,tunestep),0);
 	break;
       case 3:
-	demod->dial_offset -= pow(10.,tunestep);
+	get_filter(demod,&low,&high);
+	low -= pow(10.,tunestep);
+	set_filter(demod,low,high);
 	break;
       case 4:
+	get_filter(demod,&low,&high);
+	high -= pow(10.,tunestep);
+	set_filter(demod,low,high);
+	break;
+      case 5:
+	demod->dial_offset -= pow(10.,tunestep);
+	break;
+      case 6:
 	set_cal(demod,get_cal(demod) - pow(10.,tunestep) * 1e-6);
 	break;
       }
@@ -287,6 +313,7 @@ void *display(void *arg){
       //      fprintf(stderr,"char %d 0x%x",c,c);
       break;
     }
+    doupdate();
   }
  done:;
   pthread_cleanup_pop(1);

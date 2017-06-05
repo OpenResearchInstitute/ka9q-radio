@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.3 2017/05/29 10:29:21 karn Exp karn $
+// $Id: audio.h,v 1.4 2017/06/04 10:54:38 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -12,11 +12,13 @@ struct audio {
   int underrun;
   int overflow;
   int echo;     // If set, echo to standard output
-  int input;
+  int stereo_input;
+  int mono_input;
 };
 
 extern struct audio Audio;
-extern int Audio_sock;
+extern int Audio_mono_sock;
+extern int Audio_stereo_sock;
 int audio_change_parms(unsigned samplerate,int channels,int L);
 int audio_out_done();
 void *audio_thread(void *);

@@ -17,49 +17,19 @@ void *cam_cleanup(void *arg){
   struct demod *demod = arg;
   delete_filter(demod->filter);
   demod->filter = NULL;
-  if(Audio.handle){
-    snd_pcm_drop(Audio.handle);
-    snd_pcm_close(Audio.handle);
-    Audio.handle = NULL;
-  }
   return NULL;
 }
 
 
 void *demod_cam(void *arg){
-  int n;
-  int N;
-  const float gain = 1.0;  // unity gain
-  int low,high;
   struct demod *demod = arg;
-
-  N = demod->L + demod->M - 1;
-  enum mode mode = demod->mode;
 
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 
-  low = N*Modes[mode].low/demod->samprate;
-  high = N*Modes[mode].high/demod->samprate;
-  if(low > high){
-    int t;
-    t = low;
-    low = high;
-    high = t;
-  }
-
-  // Set up pre-demodulation filter
-  complex float *response = (complex float *)fftwf_alloc_complex(N);
-  // posix_memalign((void **)&response,16,N*sizeof(complex float));
-  memset(response,0,N*sizeof(*response));
-  for(n=low; n <= high; n++)
-    response[(n+N)%N] = gain;
-  
-  window_filter(demod->L,demod->M,response,Kaiser_beta);
   demod->decimate = demod->samprate / Audio.samprate;
-  demod->filter = create_filter(demod->L,demod->M,response,demod->decimate,COMPLEX);
-  audio_change_parms(Audio.samprate,2,demod->filter->blocksize_out);  
-
+  demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
+  set_filter(demod,demod->low,demod->high);
   pthread_cleanup_push(cam_cleanup,demod);
 
   complex float lastphase = 0;
@@ -111,11 +81,10 @@ void *demod_cam(void *arg){
 
     // AM AGC is carrier-driven
     demod->gain = Headroom / demod->amplitude;
-    complex float buffer[demod->filter->blocksize_out];
     for(n=0;n<demod->filter->blocksize_out;n++)
-      buffer[n] = demod->gain * CMPLXF(audio[n],audio[n]);
+      audio[n] *= demod->gain;
 
-    write(demod->output,buffer,sizeof(buffer));
+    write(demod->output,audio,sizeof(audio));
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

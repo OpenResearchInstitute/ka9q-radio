@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.16 2017/06/03 04:14:29 karn Exp karn $
+// $Id: main.c,v 1.17 2017/06/04 10:52:09 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -17,6 +17,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 
 #include "radio.h"
 #include "filter.h"
@@ -270,18 +271,37 @@ int main(int argc,char *argv[]){
   demod->input = sv[0]; // read end
   int sz;
   sz = fcntl(Demod_sock,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+#if 0
   fprintf(stderr,"sock size %d\n",sz);
+#endif
   if(sz == -1)
     perror("F_SETPIPE_SZ");
 
   // Pipes for demod -> audio output
   pipe(sv);
-  Audio.input = sv[0]; // read end
-  demod->output = sv[1]; // write end
-  sz = fcntl(Audio.input,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+  Audio.stereo_input = sv[0]; // read end
+  Audio_stereo_sock = sv[1]; // write end
+  sz = fcntl(Audio.stereo_input,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+#if 0
   fprintf(stderr,"sock size %d\n",sz);
+#endif
   if(sz == -1)
     perror("F_SETPIPE_SZ");
+
+  // Pipes for demod -> audio output
+  pipe(sv);
+  Audio.mono_input = sv[0]; // read end
+  Audio_mono_sock = sv[1]; // write end
+  sz = fcntl(Audio.stereo_input,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+#if 0
+  fprintf(stderr,"sock size %d\n",sz);
+#endif
+  if(sz == -1)
+    perror("F_SETPIPE_SZ");
+
+
+
+
 
   pthread_create(&Audio_thread,NULL,audio_thread,NULL);
 
@@ -335,36 +355,48 @@ void *input_loop(struct demod *demod){
     socklen_t addrlen;
     int rdlen;
     char pktbuf[MAXPKT];
+    fd_set fd_set;
 
-    while(addrlen = sizeof(ctl_address), (rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen)) > 0)
-      process_command(demod,pktbuf,rdlen);
+    FD_ZERO(&fd_set);
+    FD_SET(Ctl_sock,&fd_set);
+    FD_SET(rtp_sock,&fd_set);
+    
+    select(max(Ctl_sock,rtp_sock)+1,&fd_set,NULL,NULL,NULL);
 
-    // Receive I/Q data from front end
-    cnt = recvmsg(rtp_sock,&message,0);
-    if(cnt <= 0){    // ??
-      perror("recvfrom");
-      usleep(50000);
-      continue;
+    if(FD_ISSET(Ctl_sock,&fd_set)){
+      addrlen = sizeof(ctl_address);
+      rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen);
+      if(rdlen > 0)
+	process_command(demod,pktbuf,rdlen);
     }
-    if(cnt < sizeof(rtp_header) + sizeof(status))
-      continue; // Too small, ignore
-
-    // Look at the RTP header at some point
-    rtp_header.seq = ntohs(rtp_header.seq);
-    if((int)(seq - rtp_header.seq) < 0){
-      Skips++;
-    } else if((int)(seq - rtp_header.seq) > 0){
-      Delayed++;
+    if(FD_ISSET(rtp_sock,&fd_set)){
+      // Receive I/Q data from front end
+      cnt = recvmsg(rtp_sock,&message,0);
+      if(cnt <= 0){    // ??
+	perror("recvfrom");
+	usleep(50000);
+	continue;
+      }
+      if(cnt < sizeof(rtp_header) + sizeof(status))
+	continue; // Too small, ignore
+      
+      // Look at the RTP header at some point
+      rtp_header.seq = ntohs(rtp_header.seq);
+      if((int)(seq - rtp_header.seq) < 0){
+	Skips++;
+      } else if((int)(seq - rtp_header.seq) > 0){
+	Delayed++;
+      }
+      seq = rtp_header.seq + 1;
+      
+      demod->first_LO = status.frequency;
+      demod->lna_gain = status.lna_gain;
+      demod->mixer_gain = status.mixer_gain;
+      demod->if_gain = status.if_gain;    
+      cnt -= sizeof(rtp_header) + sizeof(status);
+      cnt /= 4; // count 4-byte stereo samples
+      proc_samples(demod,samples,cnt);
     }
-    seq = rtp_header.seq + 1;
-
-    demod->first_LO = status.frequency;
-    demod->lna_gain = status.lna_gain;
-    demod->mixer_gain = status.mixer_gain;
-    demod->if_gain = status.if_gain;    
-    cnt -= sizeof(rtp_header) + sizeof(status);
-    cnt /= 4; // count 4-byte stereo samples
-    proc_samples(demod,samples,cnt);
   }
 }
 int process_command(struct demod *demod,char *cmdbuf,int len){

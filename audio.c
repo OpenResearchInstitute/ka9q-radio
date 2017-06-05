@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.7 2017/05/29 10:29:25 karn Exp karn $
+// $Id: audio.c,v 1.8 2017/06/04 10:52:07 karn Exp karn $
 // Send PCM audio to Linux ALSA driver and/or as .wav stream on stdout
 #include <assert.h>
 #include <stdio.h>
@@ -8,6 +8,7 @@
 #include <complex.h>
 #include <stdint.h>
 #undef I
+#include <sys/select.h>
 
 #include "dsp.h"
 #include "audio.h"
@@ -35,6 +36,9 @@ struct wavhdr {
 };
 
 struct audio Audio;
+int Audio_stereo_sock;
+int Audio_mono_sock;
+
 
 int audio_out_done(){
   snd_pcm_drop(Audio.handle);
@@ -163,8 +167,8 @@ void *audio_thread(void *arg){
   const int L = 1024;
   const int channels = 2;
   const unsigned samprate = Audio.samprate;
-  complex float buffer[L];
-  signed short outsamps[2*L];
+
+
   int i,chunk,r;
   snd_pcm_state_t state;
 
@@ -187,22 +191,53 @@ void *audio_thread(void *arg){
     // Size of the buffer, or the max available in the device, whichever is less
     chunk = min(chunk,L);
     
-    i = read(Audio.input,buffer,chunk*sizeof(complex float));
-    if(i < 0){
-      perror("audio pipe read");
-      usleep(500000);
-      continue;
-    }
-    // Actual number of samples read
-    chunk = i / sizeof(complex float);
-    for(i=0;i<chunk;i++){
-      outsamps[2*i] = CLIP(SHRT_MAX*creal(buffer[i])); // Scale and clip
-      outsamps[2*i+1] = CLIP(SHRT_MAX*cimag(buffer[i]));
-    }
-    if((r = snd_pcm_writei(Audio.handle,outsamps,chunk)) != chunk){
+    fd_set fd_set;
+    FD_ZERO(&fd_set);
+    FD_SET(Audio.stereo_input,&fd_set);
+    FD_SET(Audio.mono_input,&fd_set);
+    select(max(Audio.stereo_input,Audio.mono_input)+1,&fd_set,NULL,NULL,NULL);
+    if(FD_ISSET(Audio.stereo_input,&fd_set)){
+	complex float buffer[L];
+	i = read(Audio.stereo_input,buffer,chunk*sizeof(complex float));
+	if(i < 0){
+	  perror("audio pipe read");
+	  usleep(500000);
+	  continue;
+	}
+	// Actual number of samples read
+	chunk = i / sizeof(complex float);
+	signed short outsamps[2*L];
+	for(i=0;i<chunk;i++){
+	  outsamps[2*i] = CLIP(SHRT_MAX*creal(buffer[i])); // Scale and clip
+	  outsamps[2*i+1] = CLIP(SHRT_MAX*cimag(buffer[i]));
+	}
+	if((r = snd_pcm_writei(Audio.handle,outsamps,chunk)) != chunk){
 #if 0
-      fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
+	  fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
 #endif
+	}
+    }
+    if(FD_ISSET(Audio.mono_input,&fd_set)){
+	float buffer[L];
+	i = read(Audio.mono_input,buffer,chunk*sizeof(float));
+	if(i < 0){
+	  perror("audio pipe read");
+	  usleep(500000);
+	  continue;
+	}
+	// Actual number of samples read
+	chunk = i / sizeof(*buffer);
+	signed short outsamps[2*L];
+	for(i=0;i<chunk;i++)
+	  outsamps[2*i+1] = outsamps[2*i] = CLIP(SHRT_MAX*buffer[i]); // Scale and clip
+
+	if((r = snd_pcm_writei(Audio.handle,outsamps,chunk)) != chunk){
+#if 0
+	  fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
+#endif
+	}
     }
   }
 }
+
+

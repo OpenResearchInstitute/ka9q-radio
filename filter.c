@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.3 2016/10/14 04:35:37 karn Exp karn $
+// $Id: filter.c,v 1.4 2017/05/29 16:30:33 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -27,6 +27,7 @@ struct filter *create_filter(int L,int M, complex float *response,int decimate,e
   struct filter *f;
   const int N = L + M - 1;
   const int N_dec = N / decimate;
+  int n;
 
   f = calloc(1,sizeof(*f));
   f->type = type;
@@ -45,20 +46,22 @@ struct filter *create_filter(int L,int M, complex float *response,int decimate,e
   memset(f->input_buffer,0,(M-1)*sizeof(*f->input_buffer)); // Clear earlier state
   f->input = f->input_buffer + M - 1;
   f->response = response;
-  // If response is null, only allocate the input buffer. Used for, e.g., wideband FM
-  if(response != NULL){
-    f->fdomain = fftwf_alloc_complex(N);
-    f->blocksize_out = f->blocksize_in / decimate;
-    f->fwd_plan = fftwf_plan_dft_1d(N,f->input_buffer,f->fdomain,FFTW_FORWARD,FFTW_ESTIMATE);
-    if(type == REAL){
-      f->output_buffer.r = fftwf_alloc_real(N_dec);
-      f->output.r = f->output_buffer.r + (M - 1)/decimate;
-      f->rev_plan = fftwf_plan_dft_c2r_1d(N_dec,f->fdomain,f->output_buffer.r,FFTW_ESTIMATE);
-    } else {
-      f->output_buffer.c = fftwf_alloc_complex(N_dec);  
-      f->output.c = f->output_buffer.c + (M - 1)/decimate;
-      f->rev_plan = fftwf_plan_dft_1d(N_dec,f->fdomain,f->output_buffer.c,FFTW_BACKWARD,FFTW_ESTIMATE);
-    }
+  if(response != NULL && (type == REAL || type == CROSS_CONJ)){
+    for(n=0;n<N;n++)
+      f->response[n] *= M_SQRT1_2;
+  }
+  
+  f->fdomain = fftwf_alloc_complex(N);
+  f->blocksize_out = f->blocksize_in / decimate;
+  f->fwd_plan = fftwf_plan_dft_1d(N,f->input_buffer,f->fdomain,FFTW_FORWARD,FFTW_ESTIMATE);
+  if(type == REAL){
+    f->output_buffer.r = fftwf_alloc_real(N_dec);
+    f->output.r = f->output_buffer.r + (M - 1)/decimate;
+    f->rev_plan = fftwf_plan_dft_c2r_1d(N_dec,f->fdomain,f->output_buffer.r,FFTW_ESTIMATE);
+  } else {
+    f->output_buffer.c = fftwf_alloc_complex(N_dec);  
+    f->output.c = f->output_buffer.c + (M - 1)/decimate;
+    f->rev_plan = fftwf_plan_dft_1d(N_dec,f->fdomain,f->output_buffer.c,FFTW_BACKWARD,FFTW_ESTIMATE);
   }
   return f;
 }

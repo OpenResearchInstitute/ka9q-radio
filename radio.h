@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.17 2017/06/02 12:06:08 karn Exp karn $
+// $Id: radio.h,v 1.18 2017/06/04 10:54:40 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -42,6 +42,8 @@ struct demod {
   int L;            // Signal samples in FFT buffer
   int M;            // Samples in filter impulse response
   int decimate;     // Input/output sample rate decimation ratio
+  float low;        // Edges of filter band
+  float high;
 
   // Demodulator parameters
   enum mode mode;   // USB/LSB/FM/etc
@@ -65,6 +67,8 @@ double set_second_LO(struct demod *demod,const double second_LO,const int);
 const double get_second_LO(const struct demod *demod,const int);
 double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int);
 const double get_exact_samprate(const struct demod *);
+const int get_filter(const struct demod *demod,float *low,float *high);
+int set_filter(struct demod *demod,const float low,const float high);
 
 int set_mode(struct demod *demod,const enum mode mode);
 int set_cal(struct demod *,const double);

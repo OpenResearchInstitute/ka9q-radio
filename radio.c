@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.19 2017/06/03 04:14:39 karn Exp karn $
+// $Id: radio.c,v 1.20 2017/06/04 10:52:10 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -15,6 +15,7 @@
 
 
 #include "command.h"
+#include "audio.h"
 #include "radio.h"
 #include "filter.h"
 #include "dsp.h"
@@ -59,8 +60,15 @@ double set_freq(struct demod *demod,const double f,const int force){
       lo2 = -demod->samprate/4;
     else if(change > 0)
       lo2 = demod->samprate/4;
-    else   // No change; flip to the image
-      lo2 = -lo2; 
+    else {  // No change
+      // If LO2 is not close to +/-samprate/4, move it there
+      if(fabs(fabs(lo2) - demod->samprate/4) > 1.0){
+	lo2 = copysign(demod->samprate/4,lo2);
+      } else {
+	// Close to +/- samprate/4, go to image
+	lo2 = -lo2; 
+      }
+    }
   }
   lo1 = f + lo2 - demod->dial_offset;
   // returns actual frequency, which may be a fraction of a Hz
@@ -142,32 +150,39 @@ double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const 
 }
 int set_mode(struct demod *demod,const enum mode mode){
 
-  demod->mode = mode;
-  demod->dial_offset = Modes[mode].dial;
-
   pthread_cancel(demod->demod_thread); // what if it's not running?
   void *retval; // Ignored
   pthread_join(demod->demod_thread,&retval); // Wait for it to finish
   
+  demod->mode = mode;
+  demod->dial_offset = Modes[mode].dial;
+  demod->low = Modes[mode].low;
+  demod->high = Modes[mode].high;
+
   switch(mode){
   case NFM:
   case FM:
+    demod->output = Audio_mono_sock;
     pthread_create(&demod->demod_thread,NULL,demod_fm,&Demod);
     break;
   case USB:
   case LSB:
   case CWU:
   case CWL:
+    demod->output = Audio_mono_sock;    
     pthread_create(&demod->demod_thread,NULL,demod_ssb,&Demod);
     break;
   case CAM:
+    demod->output = Audio_mono_sock;
     pthread_create(&demod->demod_thread,NULL,demod_cam,&Demod);
     break;
   case AM:
+    demod->output = Audio_mono_sock;
     pthread_create(&demod->demod_thread,NULL,demod_am,&Demod);
     break;
   case IQ:
   case ISB:
+    demod->output = Audio_stereo_sock;
     pthread_create(&demod->demod_thread,NULL,demod_iq,&Demod);
     break;
   case WFM:
@@ -175,6 +190,49 @@ int set_mode(struct demod *demod,const enum mode mode){
   }
   return 0;
 }      
+
+const int get_filter(const struct demod *demod,float *low,float *high){
+  if(low != NULL)
+    *low = demod->low;
+  if(high != NULL)
+    *high = demod->high;
+  return 0;
+}
+
+int set_filter(struct demod *demod,const float low,const float high){
+  float gain;
+  int n;
+  int N = demod->L + demod->M - 1;
+
+  if(high > demod->samprate/2 || low < -demod->samprate/2 || high <= low)
+    return -1;
+
+  if(demod->filter->type == REAL || demod->filter->type == CROSS_CONJ)
+    gain = M_SQRT1_2;
+  else
+    gain = 1; // Complex
+
+  complex float *response = (complex float *)fftwf_alloc_complex(N);
+  // posix_memalign((void **)&response,16,N*sizeof(complex float));
+  memset(response,0,N*sizeof(*response));
+  for(n=N*low/demod->samprate; n <= N*high/demod->samprate; n++)
+    response[(n+N)%N] = gain;
+  
+  window_filter(demod->L,demod->M,response,Kaiser_beta);
+
+  // We don't do any mutual exclusion with the demod thread so
+  // never let the response pointer be invalid
+  complex float *tmp;
+  tmp = demod->filter->response;
+  demod->filter->response = response;
+  fftwf_free(tmp);
+  demod->low = low;
+  demod->high = high;
+  return 0;
+}
+
+
+
 int set_cal(struct demod *demod,double cal){
   double f = get_freq(demod);
   demod->calibrate = cal;

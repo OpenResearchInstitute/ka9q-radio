@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.10 2017/06/02 12:06:06 karn Exp karn $
+// $Id: fm.c,v 1.11 2017/06/04 10:52:09 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -54,11 +54,6 @@ void *fm_cleanup(void *arg){
   struct demod *demod = arg;
   delete_filter(demod->filter);
   demod->filter = NULL;
-  if(Audio.handle){
-    snd_pcm_drop(Audio.handle);
-    snd_pcm_close(Audio.handle);
-    Audio.handle = NULL;
-  }
   return NULL;
 }
 
@@ -66,45 +61,28 @@ void *fm_cleanup(void *arg){
 void *demod_fm(void *arg){
   int n;
   int N;
-  const float gain = 1.0;  // unity gain
   complex float state = 0;
-  int low,high;
   struct demod *demod = arg;
   int devhold = 0;
 
-  enum mode mode = demod->mode;
   N = demod->L + demod->M - 1;
 
   demod->pdeviation = 0;
   demod->foffset = 0;
 
-  low = N*Modes[mode].low/demod->samprate;
-  high = N*Modes[mode].high/demod->samprate;
-  if(low > high){
-    int t;
-    t = low;
-    low = high;
-    high = t;
-  }
-  // Set up pre-demodulation filter
-  complex float *response = (complex float *)fftwf_alloc_complex(N);
-  // posix_memalign((void **)&response,16,N*sizeof(complex float));
-  memset(response,0,N*sizeof(*response));
-  for(n=low; n <= high; n++)
-    response[(n+N)%N] = gain;
-  
-  window_filter(demod->L,demod->M,response,Kaiser_beta);
   demod->decimate = demod->samprate / Audio.samprate;
-  
-  demod->filter = create_filter(demod->L,demod->M,response,demod->decimate,COMPLEX);
-  // Constant gain used by FM only; automatically adjusted by AGC in linear modes
-  demod->gain = (Headroom * N / M_PI) / (demod->decimate * abs(low - high));
-  audio_change_parms(Audio.samprate,2,demod->filter->blocksize_out);  
+  // Create filter, leaving response momentarily empty
+  demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
+  set_filter(demod,demod->low,demod->high); // Set response
   demod->foffset = 0;
 
   pthread_cleanup_push(fm_cleanup,demod);
 
   while(1){
+    // Constant gain used by FM only; automatically adjusted by AGC in linear modes
+    // We do this in the loop because BW can change
+    demod->gain = (Headroom * N / M_PI) / (demod->decimate * N*abs(demod->low - demod->high)/demod->samprate);
+
     fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
     spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
@@ -124,12 +102,11 @@ void *demod_fm(void *arg){
 	  devhold--;
 	}
       }
-      // Scale, convert to stereo and send to audio thread
-      complex float buffer[demod->filter->blocksize_out];
-      for(n=0;n<demod->filter->blocksize_out;n++){
-	buffer[n] = demod->gain * CMPLXF(audio[n],audio[n]);
-      }
-      write(demod->output,buffer,sizeof(buffer));
+      // Scale and send to audio thread
+      for(n=0;n<demod->filter->blocksize_out;n++)
+	audio[n] *= demod->gain;
+
+      write(demod->output,audio,sizeof(audio));
     }
   }
   pthread_cleanup_pop(1);
