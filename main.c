@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.19 2017/06/05 06:40:23 karn Exp karn $
+// $Id: main.c,v 1.20 2017/06/05 09:44:24 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -40,12 +40,18 @@ int DAC_samprate = 48000;
 
 int Quiet;
 int Ctl_port = 4159;
-struct sockaddr_in6 ctl_address;
-struct sockaddr_in6 rtp_address;
-socklen_t rtp_addrlen = sizeof(rtp_address);
+
+struct sockaddr_in6 Ctl_address6;
+struct sockaddr_in6 Rtp_address6;
+struct sockaddr_in Rtp_address;
+
+socklen_t rtp_addrlen = sizeof(Rtp_address);
+
+struct sockaddr_in6 Multicast_address6;
+struct sockaddr_in Multicast_address4;  
 
 
-int rtp_sock;
+int Rtp_sock;
 int Ctl_sock;
 int Demod_sock;
 
@@ -55,8 +61,8 @@ int Delayed;
 int main(int argc,char *argv[]){
   int c,N;
   char *locale;
-  char *source = "239.1.2.3"; // Default for testing
-  int source_port = 5004;     // Default for testing; recommended default RTP port
+  char *mcast_address_text = "239.1.2.3"; // Default for testing
+  int mcast_dest_port = 5004;     // Default for testing; recommended default RTP port
   enum mode mode;
   double second_IF;
   struct demod *demod = &Demod;
@@ -82,10 +88,10 @@ int main(int argc,char *argv[]){
 
     switch(c){
     case 'R':
-      source = optarg;
+      mcast_address_text = optarg;
       break;
     case 'P':
-      source_port = atoi(optarg);
+      mcast_dest_port = atoi(optarg);
       break;
     case 'p':
       Ctl_port = atoi(optarg);
@@ -135,12 +141,12 @@ int main(int argc,char *argv[]){
       fprintf(stderr,"Usage: %s [-r DAC sample rate] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-t threads] [-R multicast_address] [-P port]\n",argv[0]);
       fprintf(stderr,"Default: %s -r %u -m %s -l %s -S %s -L %d -M %d -R %s -P %d\n",
 	      argv[0],DAC_samprate,Modes[mode].name,locale,Audio.name,demod->L,demod->M,
-	      source,source_port);
+	      mcast_address_text,mcast_dest_port);
       break;
     }
   }
-  if(source == NULL || source_port == -1){
-    fprintf(stderr,"Specify -R source_address -P port\n");
+  if(mcast_address_text == NULL || mcast_dest_port == -1){
+    fprintf(stderr,"Specify -R mcast_address_text_address -P port\n");
     exit(1);
   }
   setlocale(LC_ALL,locale);
@@ -183,92 +189,79 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
 
   // Set up input socket for multicast data stream from front end
-  struct sockaddr_in6 address6;
-  struct sockaddr_in address4;  
 
-  if(inet_pton(AF_INET,source,&address4.sin_addr) == 1){
-    if((rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
+  if(inet_pton(AF_INET,mcast_address_text,&Multicast_address4.sin_addr) == 1){
+    if((Rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
       perror("can't create IPv4 input socket");
       exit(1);
     }
     struct group_req group_req;
     group_req.gr_interface = 0;
-    address4.sin_family = AF_INET;
-    address4.sin_port = 0;
-    memcpy(&group_req.gr_group,&address4,sizeof(address4));
-    if(setsockopt(rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
-      perror("setsockopt ipv6/v4 multicast join group failed");
+    Multicast_address4.sin_family = AF_INET;
+    Multicast_address4.sin_port = htons(mcast_dest_port);
+    memcpy(&group_req.gr_group,&Multicast_address4,sizeof(Multicast_address4));
+    if(setsockopt(Rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+      perror("setsockopt ipv4 multicast join group failed");
       exit(1);
     }
     u_char reuse = 1;
-    if(setsockopt(rtp_sock,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0){
+    if(setsockopt(Rtp_sock,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0){
       perror("ipv4 so_reuseaddr failed");
     }
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_port = htons(source_port);
-    //    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_addr.s_addr = address4.sin_addr.s_addr;
-
-    
-
-    if(bind(rtp_sock,&address,sizeof(address)) != 0){
+    if(bind(Rtp_sock,&Multicast_address4,sizeof(Multicast_address4)) != 0){
       perror("ipv4 bind on input socket failed");
       exit(1);
     }
 
-  } else if(inet_pton(AF_INET6,source,&address6.sin6_addr) == 1){
-    if((rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
+  } else if(inet_pton(AF_INET6,mcast_address_text,&Multicast_address6.sin6_addr) == 1){
+    if((Rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
       perror("funcube: can't create IPv6 output socket");
       exit(1);
     }
     struct group_req group_req;
     group_req.gr_interface = 0;
-    address6.sin6_family = AF_INET6;
-    address6.sin6_port = htons(source_port);
-    memcpy(&group_req.gr_group,&address6,sizeof(address6));
-    if(setsockopt(rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+    Multicast_address6.sin6_family = AF_INET6;
+    Multicast_address6.sin6_port = htons(mcast_dest_port);
+    Multicast_address6.sin6_flowinfo = 0;
+    Multicast_address6.sin6_scope_id = 0;
+    memcpy(&group_req.gr_group,&Multicast_address6,sizeof(Multicast_address6));
+    if(setsockopt(Rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
       perror("setsockopt ipv6 multicast join group failed");
       exit(1);
     }
     u_char reuse = 1;
-    setsockopt(rtp_sock,IPPROTO_IPV6,SO_REUSEADDR,&reuse,sizeof(reuse));
-    struct sockaddr_in6 address;
-    address.sin6_family = AF_INET6;
-    address.sin6_flowinfo = 0;  
-    address.sin6_port = htons(source_port);
-    address.sin6_scope_id = 0;
-    address.sin6_addr = in6addr_any;
-    if(bind(rtp_sock,&address,sizeof(address)) != 0){
+    setsockopt(Rtp_sock,IPPROTO_IPV6,SO_REUSEADDR,&reuse,sizeof(reuse));
+    if(bind(Rtp_sock,&Multicast_address6,sizeof(Multicast_address6)) != 0){
       perror("bind to IPv6 multicast address failed");
       exit(1);
     }
   } else {
-    fprintf(stderr,"Can't parse RTP source address %s\n",source);
+    fprintf(stderr,"Can't parse RTP source address %s\n",mcast_address_text);
     exit(1);
   }
   u_char loop,ttl;
   loop = 0;
-  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
+  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
     perror("setsockopt multicast loop failed");
   }
   ttl = 1;
-  if(setsockopt(rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
+  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
     perror("setsockopt multicast ttl failed");
   }
 
   // Set up control port
-  ctl_address.sin6_family = AF_INET6;
-  ctl_address.sin6_port = htons(Ctl_port);
-  ctl_address.sin6_flowinfo = 0;
-  ctl_address.sin6_addr = in6addr_any;
-  ctl_address.sin6_scope_id = 0;
+  // Will work for both IPv4 and IPv6
+  Ctl_address6.sin6_family = AF_INET6;
+  Ctl_address6.sin6_port = htons(Ctl_port);
+  Ctl_address6.sin6_flowinfo = 0;
+  Ctl_address6.sin6_addr = in6addr_any;
+  Ctl_address6.sin6_scope_id = 0;
 
   if((Ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
     perror("can't open control socket");
     exit(1);
   }
-  if(bind(Ctl_sock,&ctl_address,sizeof(ctl_address)) != 0){
+  if(bind(Ctl_sock,&Ctl_address6,sizeof(Ctl_address6)) != 0){
     perror("control bind failed");
   }
   fcntl(Ctl_sock,F_SETFL,O_NONBLOCK);
@@ -308,10 +301,6 @@ int main(int argc,char *argv[]){
   if(sz == -1)
     perror("F_SETPIPE_SZ");
 
-
-
-
-
   pthread_create(&Audio_thread,NULL,audio_thread,NULL);
 
   set_mode(demod,mode);
@@ -349,8 +338,8 @@ void *input_loop(struct demod *demod){
   iovec[2].iov_len = sizeof(samples);
   
   struct msghdr message;
-  message.msg_name = &rtp_address;
-  message.msg_namelen = sizeof(rtp_address);
+  message.msg_name = &Rtp_address;
+  message.msg_namelen = sizeof(Rtp_address);
   message.msg_iov = iovec;
   message.msg_iovlen = sizeof(iovec) / sizeof(struct iovec);
   message.msg_control = NULL;
@@ -368,19 +357,19 @@ void *input_loop(struct demod *demod){
 
     FD_ZERO(&mask);
     FD_SET(Ctl_sock,&mask);
-    FD_SET(rtp_sock,&mask);
+    FD_SET(Rtp_sock,&mask);
     
-    select(max(Ctl_sock,rtp_sock)+1,&mask,NULL,NULL,NULL);
+    select(max(Ctl_sock,Rtp_sock)+1,&mask,NULL,NULL,NULL);
 
     if(FD_ISSET(Ctl_sock,&mask)){
-      addrlen = sizeof(ctl_address);
-      rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&ctl_address,&addrlen);
+      addrlen = sizeof(Ctl_address6);
+      rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&Ctl_address6,&addrlen);
       if(rdlen > 0)
 	process_command(demod,pktbuf,rdlen);
     }
-    if(FD_ISSET(rtp_sock,&mask)){
+    if(FD_ISSET(Rtp_sock,&mask)){
       // Receive I/Q data from front end
-      cnt = recvmsg(rtp_sock,&message,0);
+      cnt = recvmsg(Rtp_sock,&message,0);
       if(cnt <= 0){    // ??
 	perror("recvfrom");
 	usleep(50000);

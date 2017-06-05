@@ -55,9 +55,13 @@ struct status {
 extern struct modetab Modes[];
 extern const int Nmodes;
 
-extern int rtp_sock;
-extern struct sockaddr_in6 rtp_address;
-extern socklen_t rtp_addrlen;
+extern int Rtpsock;
+extern struct sockaddr_in6 Rtp_address6;
+extern struct sockaddr_in Rtp_address;
+extern socklen_t Rtpaddrlen;
+
+extern struct sockaddr_in6 Multicast_address6;
+extern struct sockaddr_in Multicast_address4;  
 
 
 

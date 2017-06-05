@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.20 2017/06/03 04:15:05 karn Exp karn $
+// $Id: display.c,v 1.21 2017/06/05 06:09:15 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -7,6 +7,9 @@
 #include <math.h>
 #include <complex.h>
 #undef I
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ncurses.h>
@@ -25,7 +28,7 @@
 void getentry(char *prompt,char *response,int len){
   WINDOW *pwin;
 
-  pwin = newwin(3,70,19,0);
+  pwin = newwin(3,70,20,0);
   box(pwin,0,0);
   mvwprintw(pwin,1,1,prompt);
   wrefresh(pwin);
@@ -59,6 +62,7 @@ void *display(void *arg){
   WINDOW *sig;
   WINDOW *sdr;
   WINDOW *net;
+  WINDOW *aud;
 
   pthread_cleanup_push(display_cleanup,demod);
 
@@ -72,7 +76,8 @@ void *display(void *arg){
   fw = newwin(7,40,0,0);
   sig = newwin(7,25,8,0);
   sdr = newwin(7,30,8,25);
-  net = newwin(6,36,16,0);
+  net = newwin(6,24,16,0);
+  aud = newwin(6,30,16,25);
   
   dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
 
@@ -136,16 +141,22 @@ void *display(void *arg){
     extern int Delayed,Skips;
 
     wmove(net,0,0);
+    wprintw(net,"Source  %s\n",inet_ntoa(Rtp_address.sin_addr));
+    wprintw(net,"Dest    %s\n",inet_ntoa(Multicast_address4.sin_addr));
     wprintw(net,"Delayed %d\n",Delayed);
-    wprintw(net,"Skips %d\n",Skips);
-    wprintw(net,"audio underrun %d\n",Audio.underrun);
+    wprintw(net,"Skips   %d\n",Skips);
+    wnoutrefresh(net);
+
+    wmove(aud,0,0);
+    wprintw(aud,"audio underrun %d\n",Audio.underrun);
     snd_pcm_sframes_t delayp;
     if(Audio.handle != NULL){
       snd_pcm_delay(Audio.handle,&delayp);
-      wprintw(net,"audio delay %d (%.1f ms)\n",(int)delayp,1000.*(float)delayp/Audio.samprate);
-      wprintw(net,"audio overflow %d\n",Audio.overflow);
+      wprintw(aud,"audio delay %.1f ms\n",1000.*(float)delayp/Audio.samprate);
+      wprintw(aud,"audio overflow %d\n",Audio.overflow);
     }
-    wnoutrefresh(net);
+    wnoutrefresh(aud);
+
 
     double f;
     char str[160];
