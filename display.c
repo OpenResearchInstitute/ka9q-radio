@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.21 2017/06/05 06:09:15 karn Exp karn $
+// $Id: display.c,v 1.22 2017/06/05 21:14:25 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -141,8 +141,15 @@ void *display(void *arg){
     extern int Delayed,Skips;
 
     wmove(net,0,0);
-    wprintw(net,"Source  %s\n",inet_ntoa(Rtp_address.sin_addr));
-    wprintw(net,"Dest    %s\n",inet_ntoa(Multicast_address4.sin_addr));
+    if(Rtp_source_address.sa_family == AF_INET){
+      wprintw(net,"Source  %s\n",inet_ntoa(((struct sockaddr_in *)&Rtp_source_address)->sin_addr));
+    } else if(Rtp_source_address.sa_family == AF_INET6){
+    }
+    if(Multicast_address.sa_family == AF_INET){
+      wprintw(net,"Dest    %s\n",inet_ntoa(((struct sockaddr_in *)&Multicast_address)->sin_addr));
+    } else if(Multicast_address.sa_family == AF_INET6){
+    }
+
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
     wnoutrefresh(net);

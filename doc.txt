@@ -1,0 +1,89 @@
+IQ (Inphase/Quadrature)
+
+This mode performs no additional processing beyond complex filtering
+of the baseband signal. The output is stereo; the I (real) samples are
+fed to the left channel and the Q (imaginary) samples are fed to the
+right channel.
+
+ISB (Independent Sideband)
+
+This is identical to IQ mode except for an extra step taken during
+filtering.  While in the frequency domain, the complex conjugates of
+the positive frequency components are subtracted from the negative
+frequency components, and the complex conjugates of the negative
+frequencies are added to the positive frequencies. (These steps are
+logically performed in parallel.) This puts the lower sideband on the
+I (real) axis and the upper sideband on the Q (imaginary) axis, which
+become the left and right channels of the stereo audio output,
+respectively.
+
+AM (Amplitude Modulation)
+
+The complex baseband signal is envelope demodulated with the cmag
+(complex magnitude) function to produce a real sample stream. The
+sample phase is ignored.  The detected samples are averaged to obtain
+the carrier amplitude, which is subtracted from each sample to remove
+the DC that would otherwise appear at the audio output. The carrier
+amplitude is also used to set the audio gain. The adjusted and scaled
+real samples become mono audio.
+
+CAM (Coherent Amplitude Modulation)
+
+The DC output from the baseband filter is used to determine AM carrier
+phase, with each complex sample rotated to put the carrier onto the +I
+(positive real) axis. The receiver is automatically tuned to drive the
+average baseband carrier frequency to zero.  As in envelope-detected
+AM, the real samples are averaged to find the carrier amplitude, which
+is used to remove DC from the modulated signal and to adjust
+gain. When locked, the Q (imaginary) axis contains a small phase error
+component plus channel noise.  The signal-to-noise ratio is estimated
+by comparing the I and Q channel amplitudes.  The output is mono.
+
+The tracking loop may not lock unless the receiver is manually tuned
+to within +/- 10 Hz or so of the correct frequency. This mode is
+especially useful for determining the TCXO offset of the SDR front end
+from an external reference such as WWV/WWVH.
+
+LSB/USB/CWL/CWU (Single Sideband)
+
+The complex baseband signal is asymmetrically filtered to pass only positive
+(upper sideband) or negative (lower sideband) frequencies. A
+complex-to-real IFFT produces audio samples that are gain-adjusted and
+sent to the mono output.  Since the Q (imaginary) output of the filter
+is not needed, the C2R IFFT saves some time by not computing it.
+
+The only differences between the four modes are the default filter frequency
+settings.
+
+A conventional fast-attack/hold/slow-decay AGC is provided. When the
+audio amplitude exceeds a threshold, the gain is immediately reduced
+to keep the amplitude below the threshold. A timer (default 1.1
+seconds) is started, or restarted if it is already running.  When the
+timer expires, the gain is increased at a default rate of 6 dB/sec
+until the audio level again reaches the threshold.
+
+FM (Frequency Modulation)
+
+The complex baseband signal is detected by taking the complex argument
+(i.e., the arctangent of the imaginary and real parts of each sample)
+to obtain instantaneous carrier phase, and then differentiating to get
+instantaneous frequency. (Compare this with AM, which takes the
+complex magnitude.) Care is taken to get everything in the right
+quadrant so the maximum frequency deviation is pi radians (1/2 cycle)
+per sample period. No de-emphasis or other post-detection filtering is
+performed. The output is mono.
+
+The signal-to-noise ratio is calculated from the variance and RMS
+magnitude of the complex baseband sample magnitudes. Since FM is a
+constant envelope signal, the variance represents additive noise. If
+the FM signal has an AM component, or if the deviation exceeds the
+filter bandwidth, this will lower the SNR estimate. The SNR estimate
+controls the squelch; if it is greater than 2 (3 dB), the squelch opens.
+
+The gain is fixed so that peak deviation will produce an audio signal
+at the correct amplitude, adjusted for the FM bandwidth.
+
+When squelched, the demodulator simply stops sending data to the audio
+output thread, and the audio device underruns and stops. This may
+produce a slight click.
+
