@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.12 2017/06/05 06:09:16 karn Exp karn $
+// $Id: fm.c,v 1.13 2017/06/05 09:44:17 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -53,11 +53,10 @@ int do_fm(float *output,complex float *buffer,int L,complex float *state){
   return 0;
 }
 
-void *fm_cleanup(void *arg){
+void fm_cleanup(void *arg){
   struct demod *demod = arg;
   delete_filter(demod->filter);
   demod->filter = NULL;
-  return NULL;
 }
 
 

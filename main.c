@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.21 2017/06/05 21:14:32 karn Exp karn $
+// $Id: main.c,v 1.22 2017/06/06 10:45:51 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -307,7 +307,7 @@ int main(int argc,char *argv[]){
   exit(0);
 }
 
-void *display_cleanup(void *);
+void display_cleanup(void *);
 
 void closedown(int a){
   if(!Quiet)

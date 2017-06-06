@@ -17,11 +17,10 @@
 static const float hangtime = 1.1;    // Hang for 1.1 seconds after new peak
 static const float recovery_rate = 6; // Recover gain at 6 db/sec after hang finishes
 
-void *iq_cleanup(void *arg){
+void iq_cleanup(void *arg){
   struct demod *demod = arg;
   delete_filter(demod->filter);
   demod->filter = NULL;
-  return NULL;
 }
 
 

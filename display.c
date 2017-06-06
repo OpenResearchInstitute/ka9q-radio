@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.22 2017/06/05 21:14:25 karn Exp karn $
+// $Id: display.c,v 1.23 2017/06/06 10:45:44 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -43,11 +43,10 @@ void getentry(char *prompt,char *response,int len){
 }
 
 
-void *display_cleanup(void *arg){
+void display_cleanup(void *arg){
   echo();
   nocbreak();
   endwin();
-  return NULL;
 }
 
 WINDOW *deb;
@@ -119,7 +118,7 @@ void *display(void *arg){
     wprintw(sig,"IF1     %7.1f dBFS\n",power2dB(demod->power_i + demod->power_q));
     wprintw(sig,"IF2     %7.1f dBFS\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(demod->gain));
-    if(!isnan(demod->mode) && demod->snr != 0)
+    if(!isnan(demod->snr) && demod->snr != 0)
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
     if(!isnan(demod->foffset))
       wprintw(sig,"offset  %+7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));

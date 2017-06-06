@@ -13,11 +13,10 @@
 #include "radio.h"
 #include "audio.h"
 
-void *cam_cleanup(void *arg){
+void cam_cleanup(void *arg){
   struct demod *demod = arg;
   delete_filter(demod->filter);
   demod->filter = NULL;
-  return NULL;
 }
 
 
