@@ -27,7 +27,6 @@ void *demod_am(void *arg){
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 
-  demod->decimate = demod->samprate / Audio.samprate;
   demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
   set_filter(demod,demod->low,demod->high);
   pthread_cleanup_push(am_cleanup,demod);

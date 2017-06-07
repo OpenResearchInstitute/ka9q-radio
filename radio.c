@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.24 2017/06/06 10:46:05 karn Exp karn $
+// $Id: radio.c,v 1.25 2017/06/07 07:46:49 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -38,7 +38,7 @@ const double get_first_LO(const struct demod *demod){
 const double get_second_LO(const struct demod *demod,const int offset){
   if(cimag(demod->second_LO_phase_accel) != 0){
     // sweeping, get instantaneous frequency
-    return get_exact_samprate(demod)
+    return demod->samprate
       * (offset * carg(demod->second_LO_phase_accel) + carg(demod->second_LO_phase_step)) / (2*M_PI);
   } else 
     return demod->second_LO;
@@ -148,25 +148,24 @@ double set_second_LO(struct demod *demod,const double second_LO,const int force)
     return demod->second_LO; // Don't let it go out of range
 
   demod->second_LO = second_LO;
-  demod->second_LO_phase_step = csincos(2*M_PI*second_LO/get_exact_samprate(demod));
+  demod->second_LO_phase_step = csincos(2*M_PI*second_LO/demod->samprate);
   if(demod->second_LO_phase == 0) // In case it wasn't already set
     demod->second_LO_phase = 1;
 
   return second_LO;
 }
 double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int force){
-  double samprate,sampsq;
+  double sampsq;
 
   if(!force && second_LO_rate == demod->second_LO_rate)
     return second_LO_rate;
 
-  samprate = get_exact_samprate(demod); // calibrated sample rate
-  sampsq = samprate * samprate;
+  sampsq = demod->samprate * demod->samprate;
   demod->second_LO_rate = second_LO_rate;
   if(second_LO_rate == 0){
     // if stopped, store current frequency in case somebody reads it
     demod->second_LO_phase_accel = 0;
-    demod->second_LO = get_exact_samprate(demod) * carg(demod->second_LO_phase_step)/(2*M_PI);
+    demod->second_LO = demod->samprate * carg(demod->second_LO_phase_step)/(2*M_PI);
   } else {
     demod->second_LO_phase_accel = csincos(2*M_PI*second_LO_rate/sampsq);
   }
@@ -175,8 +174,7 @@ double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const 
 int set_mode(struct demod *demod,const enum mode mode){
 
   pthread_cancel(demod->demod_thread); // what if it's not running?
-  void *retval; // Ignored
-  pthread_join(demod->demod_thread,&retval); // Wait for it to finish
+  pthread_join(demod->demod_thread,NULL); // Wait for it to finish
   
   demod->mode = mode;
   demod->dial_offset = Modes[mode].dial;
@@ -261,9 +259,10 @@ int set_filter(struct demod *demod,const float low,const float high){
 
 
 
-int set_cal(struct demod *demod,double cal){
+int set_cal(struct demod *demod,const double cal){
   double f = get_freq(demod);
   demod->calibrate = cal;
+  demod->samprate = ADC_samprate * (1 + cal);
   set_freq(demod,f,0);
   return 0;
 }
@@ -308,8 +307,4 @@ int spindown(struct demod *demod,complex float *data,const int len){
     }
   }
   return 0;
-}
-
-const double get_exact_samprate(const struct demod *demod){
-  return demod->samprate * (1 + demod->calibrate);
 }

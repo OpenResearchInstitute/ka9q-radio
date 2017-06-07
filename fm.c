@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.13 2017/06/05 09:44:17 karn Exp karn $
+// $Id: fm.c,v 1.14 2017/06/06 11:20:07 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -72,7 +72,6 @@ void *demod_fm(void *arg){
   demod->pdeviation = 0;
   demod->foffset = 0;
 
-  demod->decimate = demod->samprate / Audio.samprate;
   // Create filter, leaving response momentarily empty
   demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
   set_filter(demod,demod->low,demod->high); // Set response

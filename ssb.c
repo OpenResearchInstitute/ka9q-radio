@@ -37,7 +37,6 @@ void *demod_ssb(void *arg){
   int hangcount = hangmax;
 
   // Set up pre-demodulation filter
-  demod->decimate = demod->samprate / Audio.samprate;
   demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,REAL);
   set_filter(demod,demod->low,demod->high);
   pthread_cleanup_push(ssb_cleanup,demod);

@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.24 2017/06/06 11:20:07 karn Exp karn $
+// $Id: display.c,v 1.25 2017/06/07 07:46:49 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -100,14 +100,16 @@ void *display(void *arg){
     // They come from the ' option in the printf formats
     int x;
 
-    if(tunestep >= -2 && tunestep <= -1){
+    if(tunestep >= -2 && tunestep <= -1){ // .01 or .1
       x = 25 - tunestep + 1;
     } else if(tunestep >= 0 && tunestep <= 2){
-      x = 25 - tunestep;
+      x = 25 - tunestep;  // 1, 10, 100
     } else if(tunestep >= 3 && tunestep <= 5){
-      x = 25 - tunestep - 1;
+      x = 25 - tunestep - 1; // 1,000; 10,000; 100,000
     } else if(tunestep >= 6 && tunestep <= 8){
-      x = 25 - tunestep - 2;
+      x = 25 - tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
+    } else if(tunestep >= 9 && tunestep <= 9){
+      x = 25 - tunestep - 3; // 1,000,000,000
     }
     // Highlight digit for current tuning step
     mvwchgat(fw,tuneitem,x,1,A_STANDOUT,0,NULL);
@@ -228,7 +230,7 @@ void *display(void *arg){
       break;
     case KEY_BACKSPACE: // Cursor left: increase tuning step 10x
     case KEY_LEFT:
-      if(tunestep < 8){
+      if(tunestep < 9){
 	tunestep++;
 	tunestep10 *= 10;
       }

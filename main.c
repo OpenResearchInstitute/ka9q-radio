@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.22 2017/06/06 10:45:51 karn Exp karn $
+// $Id: main.c,v 1.23 2017/06/06 11:20:08 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -147,13 +147,13 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,locale);
 
 
-  demod->samprate = ADC_samprate;
   Audio.samprate = DAC_samprate;
+  demod->samprate = ADC_samprate * (1 + demod->calibrate);
+  demod->decimate = ADC_samprate / DAC_samprate;
   // Verify decimation ratio
-  if((demod->samprate % Audio.samprate) != 0)
+  if((ADC_samprate % DAC_samprate) != 0)
     fprintf(stderr,"Warning: A/D rate %'u is not integer multiple of D/A rate %'u; decimation will probably fail\n",
-	    demod->samprate,Audio.samprate);
-  demod->decimate = demod->samprate / Audio.samprate;
+	    ADC_samprate,DAC_samprate);
   
   N = demod->L + demod->M - 1;
   if((N % demod->decimate) != 0)
@@ -167,11 +167,11 @@ int main(int argc,char *argv[]){
 
   fprintf(stderr,"UDP control port %d\n",Ctl_port);
   fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d\n",
-	  demod->samprate,Audio.samprate,demod->decimate);
+	  ADC_samprate,DAC_samprate,demod->decimate);
   fprintf(stderr,"block size: %'d complex samples (%'.1f ms @ %'u S/s)\n",
-	  demod->L,1000.*demod->L/demod->samprate,demod->samprate);
+	  demod->L,1000.*demod->L/ADC_samprate,ADC_samprate);
   fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
-	  Kaiser_beta,demod->M,1000.*demod->M/demod->samprate,demod->samprate,(float)demod->samprate/N);
+	  Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
 
   if(!Quiet)
     pthread_create(&Display_thread,NULL,display,NULL);

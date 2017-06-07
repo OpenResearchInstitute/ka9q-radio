@@ -35,7 +35,6 @@ void *demod_iq(void *arg){
   const float agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
   int hangcount = 0;
 
-  demod->decimate = demod->samprate / Audio.samprate;
   demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,
 			       demod->mode == ISB ? CROSS_CONJ : COMPLEX);
   set_filter(demod,demod->low,demod->high);

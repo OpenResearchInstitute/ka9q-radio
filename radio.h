@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.19 2017/06/05 06:09:18 karn Exp karn $
+// $Id: radio.h,v 1.20 2017/06/07 07:46:49 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -6,13 +6,16 @@
 #undef I
 #include "command.h"
 
+extern int ADC_samprate;
+
 
 // Demodulator state block
 struct demod {
   // Front end state
-  int samprate;     // Nominal sample rate of associated SDR front end
-  double first_LO;  // Local copy of frequency sent to front end tuner, uncorrected
+  double samprate;  // True A/D sample rate, assuming same TCXO as tuner
+  double first_LO;  // UNcorrected local copy of frequency sent to front end tuner
   double calibrate; // Tuner TCXO calibration; - -> frequency low, + -> frequency high
+                    // True first LO freq =  (1 + calibrate) * demod.first_LO
   uint8_t lna_gain;
   uint8_t mixer_gain;
   uint8_t if_gain;
@@ -27,11 +30,12 @@ struct demod {
   int output; // Output pipe fd
   pthread_t demod_thread;
 
-  double dial_offset;
+  double dial_offset; // displayed dial frequency = carrier freq + dial_offset (useful for CW)
 
   // Second (software) local oscillator parameters
   complex double second_LO_phase;
-  double second_LO; // Same as second_LO_phase step except when sweeping
+  double second_LO; // True second LO frequency, including calibration
+                    // Same as second_LO_phase step except when sweeping
                     // Provided because round trip through csincos/carg is less accurate
   complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
   double second_LO_rate;                // for frequency sweeping
