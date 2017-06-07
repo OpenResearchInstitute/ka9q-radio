@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.23 2017/06/05 21:14:42 karn Exp karn $
+// $Id: radio.c,v 1.24 2017/06/06 10:46:05 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -47,45 +47,35 @@ const double get_second_LO(const struct demod *demod,const int offset){
 // Set frequency with optional front end tuning
 double set_freq(struct demod *demod,const double f,const int force){
   double change = f - get_freq(demod);
-  double lo1,lo2;
 
-  // Calculate new LO2 frequency
-  lo2 = get_second_LO(demod,0) - change;
+  // See if we can change only LO2
+  // Note lo2 is the negative of the IF
+  double lo2 = get_second_LO(demod,0) - change;
   // If the new LO2 is out of range, or if we're forced, recenter LO2
   // and retune LO1
-  if(force
-     || -lo2 >= demod->samprate/2 - max(0,demod->high)
-     || -lo2 <= -demod->samprate/2 - min(0,demod->low)){
-    if(change < 0)
+  if(force || !LO2_in_range(demod,lo2)){
+    if(change < 0){
+      // Assume the user will keep tuning down, so put the IF in the
+      // high half (lo2 in the low half)
       lo2 = -demod->samprate/4;
-    else if(change > 0)
+    } else if(change > 0){
+      // Assume the user will keep tuning up
       lo2 = demod->samprate/4;
-    else {  // No change
+    } else {
       // If LO2 is not close to +/-samprate/4, move it there
       if(fabs(fabs(lo2) - demod->samprate/4) > 1.0){
 	lo2 = copysign(demod->samprate/4,lo2);
-      } else {
-	// Close to +/- samprate/4, go to image
-	lo2 = -lo2; 
       }
     }
+    double lo1 = f + lo2 - demod->dial_offset;
+
+    // returns actual frequency, which may be a fraction of a Hz
+    // different from requested because of calibration offset and
+    // the fact that the tuner can only tune in 1 Hz steps
+    lo1 = set_first_LO(demod,lo1,force);
+    // Adjust LO2 for actual LO1
+    lo2 = lo1 - f + demod->dial_offset;
   }
-  lo1 = f + lo2 - demod->dial_offset;
-  // returns actual frequency, which may be a fraction of a Hz
-  // different from requested because of calibration offset and
-  // the fact that the tuner can only tune in 1 Hz steps
-  lo1 = set_first_LO(demod,lo1,force);
-  // Wait for it to actually change before we retune the second LO
-  // Adjust LO2 for any fractional Hz error in LO1
-  // (What if we're reading from a recording?)
-  int i;
-  for(i=0;i<10;i++){
-    if(fabs(get_first_LO(demod) - lo1) < 1.0) // Retuning has occurred
-      break;
-    usleep(50000);
-  }
-  
-  lo2 = lo1 - f + demod->dial_offset;
   set_second_LO(demod,lo2,force);
   return f;
 }
@@ -116,19 +106,52 @@ double set_first_LO(struct demod *demod,const double first_LO,const int force){
   // Send commands to source address of last RTP packet from front end
   if(sendto(Ctl_sock,&requested_status,sizeof(requested_status),0,&Rtp_source_address,
 	    sizeof(Rtp_source_address)) == -1)
-      perror("sendto control socket");
-  // Return new true frequency (which probably won't have taken effect yet)
+    perror("sendto control socket");
+
+  // Return new true frequency
+  // Wait for it to actually change before we retune the second LO
+  // Adjust LO2 for any fractional Hz error in LO1
+  // (What if we're reading from a recording?)
+  int i;
+  for(i=0;i<10;i++){
+    if(demod->first_LO == requested_status.frequency)
+      break;
+    usleep(50000);
+  }
   return requested_status.frequency * (1 + demod->calibrate);
 }
+
+// Return 1 if specified carrier frequency is in range of LO2 given
+// sampling rate and filter setting
+const int LO2_in_range(const struct demod *demod,const double f){
+  if( f < -demod->samprate/2 + max(0,demod->high)
+      || f > demod->samprate/2 + min(0,demod->low))
+    return 0;
+  else
+    return 1;
+}
+
+
 double set_second_LO(struct demod *demod,const double second_LO,const int force){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
   if(!force && second_LO == demod->second_LO)
     return second_LO;
   
+  // Don't allow a frequency that puts the passband past the nyquist rate
+  // Exception: if we're already in the forbidden region, allow a change
+  // that will move us toward the exit so we don't get stuck, e.g.,
+  // after a filter change
+  if(((second_LO < -demod->samprate/2 + max(0,demod->high))
+      && (second_LO < demod->second_LO))
+     || ((second_LO > demod->samprate/2 + min(0,demod->low))
+      && (second_LO > demod->second_LO)))
+    return demod->second_LO; // Don't let it go out of range
+
   demod->second_LO = second_LO;
   demod->second_LO_phase_step = csincos(2*M_PI*second_LO/get_exact_samprate(demod));
   if(demod->second_LO_phase == 0) // In case it wasn't already set
     demod->second_LO_phase = 1;
+
   return second_LO;
 }
 double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int force){
@@ -159,6 +182,10 @@ int set_mode(struct demod *demod,const enum mode mode){
   demod->dial_offset = Modes[mode].dial;
   demod->low = Modes[mode].low;
   demod->high = Modes[mode].high;
+
+  double lo2 = get_second_LO(demod,0);
+  if(!LO2_in_range(demod,lo2))
+    set_freq(demod,get_freq(demod),1);
 
   switch(mode){
   case NFM:

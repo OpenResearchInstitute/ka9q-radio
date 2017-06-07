@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.23 2017/06/06 10:45:44 karn Exp karn $
+// $Id: display.c,v 1.24 2017/06/06 11:20:07 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -55,6 +55,7 @@ void *display(void *arg){
   int c;
   struct demod *demod = &Demod;
   int tunestep = 0;
+  double tunestep10 = 1;
   int tuneitem = 0;
   int dial_fd;
   WINDOW *fw;
@@ -86,9 +87,10 @@ void *display(void *arg){
     
     wmove(fw,0,0);
     get_filter(demod,&low,&high);
-    wprintw(fw,"Frequency   %'17.2f Hz\n",get_first_LO(demod) - get_second_LO(demod,0) + demod->dial_offset);
+    wprintw(fw,"Frequency   %'17.2f Hz%s\n",get_freq(demod),
+	    demod->frequency_lock ? " LOCK":"");
     wprintw(fw,"First LO    %'17.2f Hz\n",get_first_LO(demod));
-    wprintw(fw,"First IF    %'17.2f Hz\n",-get_second_LO(demod,0));
+    wprintw(fw,"IF          %'17.2f Hz\n",-get_second_LO(demod,0));
     wprintw(fw,"Filter low  %'17.2f Hz\n",low);
     wprintw(fw,"Filter high %'17.2f Hz\n",high);
     wprintw(fw,"Dial offset %'17.2f Hz\n",demod->dial_offset);
@@ -201,10 +203,12 @@ void *display(void *arg){
       } else if(event.type == EV_KEY){
 	if(event.code == BTN_MISC)
 	  if(event.value)
-	    set_freq(demod,get_freq(demod),1);
+	    demod->frequency_lock = !demod->frequency_lock;
       }
     } else
       c = getch(); // read with timeout from keyboard
+
+    double new_lo2;
 
     switch(c){
     case ERR:   // no key; timed out. Do nothing.
@@ -220,71 +224,130 @@ void *display(void *arg){
     case KEY_HOME: // Go back to starting spot
       tuneitem = 0;
       tunestep = 0;
+      tunestep10 = 1;
       break;
     case KEY_BACKSPACE: // Cursor left: increase tuning step 10x
     case KEY_LEFT:
-      if(tunestep < 8)
+      if(tunestep < 8){
 	tunestep++;
+	tunestep10 *= 10;
+      }
       break;
     case KEY_RIGHT:     // Cursor right: decrease tuning step /10
-      if(tunestep > -2)
+      if(tunestep > -2){
 	tunestep--;
+	tunestep10 /= 10;
+      }
       break;
     case KEY_UP:        // Increase whatever we're tuning
       switch(tuneitem){
-      case 0:
-	set_freq(demod,get_freq(demod) + pow(10.,tunestep),0);
+      case 0: // Dial frequency
+	if(!demod->frequency_lock)
+	  set_freq(demod,get_freq(demod) + tunestep10,0);
 	break;
-      case 1:
-	set_first_LO(demod,get_first_LO(demod) + pow(10.,tunestep),0);
+      case 1: // First LO
+	if(tunestep10 < 1)
+	  break; // First LO can't make steps < 1  Hz
+
+	if(demod->frequency_lock){
+	  // See how much we'll have to retune LO2 to stay on frequency
+	  new_lo2 = get_second_LO(demod,0) + tunestep10 * (1 + demod->calibrate);
+	  if(!LO2_in_range(demod,new_lo2))
+	    break; // Can't stay on frequency by changing LO2
+	}
+	set_first_LO(demod, get_first_LO(demod) + tunestep10 * (1 + demod->calibrate),0);
+	if(demod->frequency_lock){
+	  // Change LO2 by actual amount of LO1 change
+	  set_second_LO(demod,new_lo2,0);
+	}
 	break;
-      case 2:
-	set_second_LO(demod,get_second_LO(demod,0) - pow(10.,tunestep),0);
+      case 2: // IF
+	if(demod->frequency_lock){
+	  if(tunestep10 < 1)
+	    break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
+
+	  new_lo2 = get_second_LO(demod,0) - tunestep10 * (1 + demod->calibrate);
+	  if(!LO2_in_range(demod,new_lo2))
+	    break;
+	  set_first_LO(demod, get_first_LO(demod) - tunestep10 * (1 + demod->calibrate),0);
+	} else {
+	  new_lo2 = get_second_LO(demod,0) - tunestep10;
+	  if(!LO2_in_range(demod,new_lo2))
+	    break;
+	}
+	set_second_LO(demod,new_lo2,0);
 	break;
-      case 3:
+      case 3: // Filter low edge
 	get_filter(demod,&low,&high);
-	low += pow(10.,tunestep);
+	low += tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 4:
+      case 4: // Filter high edge
 	get_filter(demod,&low,&high);
-	high += pow(10.,tunestep);
+	high += tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 5:
-	demod->dial_offset += pow(10.,tunestep);
+      case 5: // Dial offset
+	demod->dial_offset += tunestep10;
 	break;
-      case 6:
-	set_cal(demod,get_cal(demod) + pow(10.,tunestep) * 1e-6);
+      case 6: // Calibrate offset
+	set_cal(demod,get_cal(demod) + tunestep10 * 1e-6);
 	break;
       }
       break;
     case KEY_DOWN:      // Decrease whatever we're tuning
       switch(tuneitem){
-      case 0:
-	set_freq(demod,get_freq(demod) - pow(10.,tunestep),0);
+      case 0:  // Dial frequency
+	if(!demod->frequency_lock)
+	  set_freq(demod,get_freq(demod) - tunestep10,0);
 	break;
-      case 1:
-	set_first_LO(demod,get_first_LO(demod) - pow(10.,tunestep),0);
+      case 1:  // First LO
+	if(tunestep10 < 1)
+	  break;	  // First LO can't make steps < 1  Hz
+
+	if(demod->frequency_lock){
+	  // See if new LO2 is OK
+	  new_lo2 = get_second_LO(demod,0) - tunestep10 * (1 + demod->calibrate);
+	  if(!LO2_in_range(demod,new_lo2))
+	    break; // Can't stay on frequency by changing LO2
+	}
+	set_first_LO(demod, get_first_LO(demod) - tunestep10 * (1 + demod->calibrate),0);
+	if(demod->frequency_lock){
+	  // Change LO2 by actual amount of LO1 change
+	  set_second_LO(demod,new_lo2,0);	  
+	}
 	break;
-      case 2:
-	set_second_LO(demod,get_second_LO(demod,0) + pow(10.,tunestep),0);
+      case 2:  // Second LO
+	if(demod->frequency_lock){
+	  if(tunestep10 < 1)
+	    break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
+
+	  new_lo2 = get_second_LO(demod,0) + tunestep10 * (1 + demod->calibrate);
+	  if(!LO2_in_range(demod,new_lo2))
+	    break;
+	  set_first_LO(demod, get_first_LO(demod) + tunestep10 * (1 + demod->calibrate),0);
+	} else {
+	  new_lo2 = get_second_LO(demod,0) + tunestep10;
+	  if(!LO2_in_range(demod,new_lo2))
+	    break;
+	}
+	set_second_LO(demod,new_lo2,0);
 	break;
-      case 3:
+      case 3:  // Filter low edge
 	get_filter(demod,&low,&high);
-	low -= pow(10.,tunestep);
+	low -= tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 4:
+      case 4:  // Filter high edge
 	get_filter(demod,&low,&high);
-	high -= pow(10.,tunestep);
+	high -= tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 5:
-	demod->dial_offset -= pow(10.,tunestep);
+      case 5:  // Dial offset
+	demod->dial_offset -= tunestep10;
 	break;
-      case 6:
-	set_cal(demod,get_cal(demod) - pow(10.,tunestep) * 1e-6);
+      case 6:  // Calibrate offset
+	set_cal(demod,get_cal(demod) - tunestep10 * 1e-6);
 	break;
       }
       break;
@@ -323,7 +386,7 @@ void *display(void *arg){
       if(strlen(str) > 0){
 	f = atof(str);
 	if(f > 0)
-	set_freq(demod,f,1);
+	set_freq(demod,f,0);
       }
       break;
     default:

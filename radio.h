@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.18 2017/06/04 10:54:40 karn Exp karn $
+// $Id: radio.h,v 1.19 2017/06/05 06:09:18 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -37,6 +37,8 @@ struct demod {
   double second_LO_rate;                // for frequency sweeping
   complex double second_LO_phase_accel;
 
+  int frequency_lock;
+
   // Pre-demod filter parameters
   struct filter *filter;
   int L;            // Signal samples in FFT buffer
@@ -59,6 +61,7 @@ extern int Demod_sock;
 
 extern const float Headroom; // Audio headroom ratio
 
+const int LO2_in_range(const struct demod *demod,const double f);
 const double get_freq(const struct demod *);
 double set_freq(struct demod *,const double,const int);
 double set_first_LO(struct demod *demod,const double first_LO,const int);
