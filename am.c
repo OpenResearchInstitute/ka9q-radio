@@ -53,7 +53,7 @@ void *demod_am(void *arg){
     for(n=0; n<demod->filter->blocksize_out; n++)
       audio[n] = (audio[n] - average) * demod->gain;
     
-    write(demod->output,audio,sizeof(audio));
+    send_mono_audio(audio,n);
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

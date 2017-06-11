@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.23 2017/06/06 11:20:08 karn Exp karn $
+// $Id: main.c,v 1.24 2017/06/07 09:45:51 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -42,12 +42,12 @@ int Quiet;
 int Ctl_port = 4159;
 
 struct sockaddr_in6 Ctl_address;
-struct sockaddr Rtp_source_address;
-struct sockaddr Multicast_address;
+struct sockaddr Input_source_address;
+struct sockaddr Input_mcast_sockaddr;
 
 
-int Rtp_sock;
-int Ctl_sock;
+int Input_fd;
+int Ctl_fd;
 int Demod_sock;
 
 int Skips;
@@ -71,14 +71,13 @@ int main(int argc,char *argv[]){
 
   // Defaults
   Quiet = 0;
-  Audio.name = "default";
   // The FFT length will be L + M - 1 because of window overlapping
   demod->L = 4096;      // Number of samples in buffer
   demod->M = 4096+1;    // Length of filter impulse response
   mode = FM;
   second_IF = 48000;
 
-  while((c = getopt(argc,argv,"qb:m:l:d:S:L:M:x:h:r:t:c:eT:p:R:P:i:")) != EOF){
+  while((c = getopt(argc,argv,"qb:m:l:d:L:M:x:h:r:t:c:T:p:R:P:i:")) != EOF){
     int i;
 
     switch(c){
@@ -96,9 +95,6 @@ int main(int argc,char *argv[]){
       break;
     case 'b':
       Kaiser_beta = atof(optarg);
-      break;
-    case 'e':
-      Audio.echo = 1; // Echo sound to standard output
       break;
     case 'L':
       demod->L = atoi(optarg);
@@ -120,9 +116,6 @@ int main(int argc,char *argv[]){
     case 'l':
       locale = optarg;
       break;
-    case 'S':
-      Audio.name = optarg;
-      break;
     case 't':
       Nthreads = atoi(optarg);
       fftwf_init_threads();
@@ -134,8 +127,8 @@ int main(int argc,char *argv[]){
       break;
     default:
       fprintf(stderr,"Usage: %s [-r DAC sample rate] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-t threads] [-R multicast_address] [-P port]\n",argv[0]);
-      fprintf(stderr,"Default: %s -r %u -m %s -l %s -S %s -L %d -M %d -R %s -P %d\n",
-	      argv[0],DAC_samprate,Modes[mode].name,locale,Audio.name,demod->L,demod->M,
+      fprintf(stderr,"Default: %s -r %u -m %s -l %s -L %d -M %d -R %s -P %d\n",
+	      argv[0],DAC_samprate,Modes[mode].name,locale,demod->L,demod->M,
 	      mcast_address_text,mcast_dest_port);
       break;
     }
@@ -147,7 +140,6 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,locale);
 
 
-  Audio.samprate = DAC_samprate;
   demod->samprate = ADC_samprate * (1 + demod->calibrate);
   demod->decimate = ADC_samprate / DAC_samprate;
   // Verify decimation ratio
@@ -182,52 +174,53 @@ int main(int argc,char *argv[]){
   signal(SIGKILL,closedown);
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);        
+  signal(SIGPIPE,SIG_IGN);
 
   // Set up input socket for multicast data stream from front end
-  if(inet_pton(AF_INET,mcast_address_text,&((struct sockaddr_in *)&Multicast_address)->sin_addr) == 1){
-    if((Rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
+  if(inet_pton(AF_INET,mcast_address_text,&((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr) == 1){
+    if((Input_fd = socket(PF_INET,SOCK_DGRAM,0)) == -1){
       perror("can't create IPv4 input socket");
       exit(1);
     }
-    Multicast_address.sa_family = AF_INET;
-    ((struct sockaddr_in *)&Multicast_address)->sin_port = htons(mcast_dest_port);
+    Input_mcast_sockaddr.sa_family = AF_INET;
+    ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port = htons(mcast_dest_port);
 
     struct group_req group_req;
     group_req.gr_interface = 0;
-    memcpy(&group_req.gr_group,&Multicast_address,sizeof(Multicast_address));
-    if(setsockopt(Rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+    memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
+    if(setsockopt(Input_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
       perror("setsockopt ipv4 multicast join group failed");
       exit(1);
     }
     u_char reuse = 1;
-    if(setsockopt(Rtp_sock,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0){
+    if(setsockopt(Input_fd,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0){
       perror("ipv4 so_reuseaddr failed");
     }
-    if(bind(Rtp_sock,&Multicast_address,sizeof(Multicast_address)) != 0){
+    if(bind(Input_fd,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
       perror("ipv4 bind on input socket failed");
       exit(1);
     }
 
-  } else if(inet_pton(AF_INET6,mcast_address_text,&((struct sockaddr_in6 *)&Multicast_address)->sin6_addr) == 1){
-    if((Rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
+  } else if(inet_pton(AF_INET6,mcast_address_text,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr) == 1){
+    if((Input_fd = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
       perror("funcube: can't create IPv6 output socket");
       exit(1);
     }
-    Multicast_address.sa_family = AF_INET6;
-    ((struct sockaddr_in6 *)&Multicast_address)->sin6_port = htons(mcast_dest_port);
-    ((struct sockaddr_in6 *)&Multicast_address)->sin6_flowinfo = 0;
-    ((struct sockaddr_in6 *)&Multicast_address)->sin6_scope_id = 0;
+    Input_mcast_sockaddr.sa_family = AF_INET6;
+    ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port = htons(mcast_dest_port);
+    ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_flowinfo = 0;
+    ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_scope_id = 0;
 
     struct group_req group_req;
     group_req.gr_interface = 0;
-    memcpy(&group_req.gr_group,&Multicast_address,sizeof(Multicast_address));
-    if(setsockopt(Rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
+    memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
+    if(setsockopt(Input_fd,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
       perror("setsockopt ipv6 multicast join group failed");
       exit(1);
     }
     u_char reuse = 1;
-    setsockopt(Rtp_sock,IPPROTO_IPV6,SO_REUSEADDR,&reuse,sizeof(reuse));
-    if(bind(Rtp_sock,&Multicast_address,sizeof(Multicast_address)) != 0){
+    setsockopt(Input_fd,IPPROTO_IPV6,SO_REUSEADDR,&reuse,sizeof(reuse));
+    if(bind(Input_fd,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
       perror("bind to IPv6 multicast address failed");
       exit(1);
     }
@@ -237,11 +230,11 @@ int main(int argc,char *argv[]){
   }
   u_char loop,ttl;
   loop = 0;
-  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
+  if(setsockopt(Input_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
     perror("setsockopt multicast loop failed");
   }
   ttl = 1;
-  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
+  if(setsockopt(Input_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
     perror("setsockopt multicast ttl failed");
   }
 
@@ -253,14 +246,14 @@ int main(int argc,char *argv[]){
   Ctl_address.sin6_addr = in6addr_any;
   Ctl_address.sin6_scope_id = 0;
 
-  if((Ctl_sock = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
+  if((Ctl_fd = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
     perror("can't open control socket");
     exit(1);
   }
-  if(bind(Ctl_sock,&Ctl_address,sizeof(Ctl_address)) != 0){
+  if(bind(Ctl_fd,&Ctl_address,sizeof(Ctl_address)) != 0){
     perror("control bind failed");
   }
-  fcntl(Ctl_sock,F_SETFL,O_NONBLOCK);
+  fcntl(Ctl_fd,F_SETFL,O_NONBLOCK);
 
   // Pipes for front end -> demod
   int sv[2];
@@ -275,29 +268,7 @@ int main(int argc,char *argv[]){
   if(sz == -1)
     perror("F_SETPIPE_SZ");
 
-  // Pipes for demod -> audio output
-  pipe(sv);
-  Audio.stereo_input = sv[0]; // read end
-  Audio_stereo_sock = sv[1]; // write end
-  sz = fcntl(Audio.stereo_input,F_SETPIPE_SZ,demod->L * sizeof(complex float));
-#if 0
-  fprintf(stderr,"sock size %d\n",sz);
-#endif
-  if(sz == -1)
-    perror("F_SETPIPE_SZ");
-
-  // Pipes for demod -> audio output
-  pipe(sv);
-  Audio.mono_input = sv[0]; // read end
-  Audio_mono_sock = sv[1]; // write end
-  sz = fcntl(Audio.stereo_input,F_SETPIPE_SZ,demod->L * sizeof(complex float));
-#if 0
-  fprintf(stderr,"sock size %d\n",sz);
-#endif
-  if(sz == -1)
-    perror("F_SETPIPE_SZ");
-
-  pthread_create(&Audio_thread,NULL,audio_thread,NULL);
+  setup_audio();
 
   set_mode(demod,mode);
   set_second_LO(demod,-second_IF,1);
@@ -334,8 +305,8 @@ void *input_loop(struct demod *demod){
   iovec[2].iov_len = sizeof(samples);
   
   struct msghdr message;
-  message.msg_name = &Rtp_source_address;
-  message.msg_namelen = sizeof(Rtp_source_address);
+  message.msg_name = &Input_source_address;
+  message.msg_namelen = sizeof(Input_source_address);
   message.msg_iov = iovec;
   message.msg_iovlen = sizeof(iovec) / sizeof(struct iovec);
   message.msg_control = NULL;
@@ -352,21 +323,21 @@ void *input_loop(struct demod *demod){
     fd_set mask;
 
     FD_ZERO(&mask);
-    FD_SET(Ctl_sock,&mask);
-    FD_SET(Rtp_sock,&mask);
+    FD_SET(Ctl_fd,&mask);
+    FD_SET(Input_fd,&mask);
     
-    select(max(Ctl_sock,Rtp_sock)+1,&mask,NULL,NULL,NULL);
+    select(max(Ctl_fd,Input_fd)+1,&mask,NULL,NULL,NULL);
 
-    if(FD_ISSET(Ctl_sock,&mask)){
+    if(FD_ISSET(Ctl_fd,&mask)){
       addrlen = sizeof(Ctl_address);
-      rdlen = recvfrom(Ctl_sock,&pktbuf,sizeof(pktbuf),0,&Ctl_address,&addrlen);
+      rdlen = recvfrom(Ctl_fd,&pktbuf,sizeof(pktbuf),0,&Ctl_address,&addrlen);
       // Should probably look at the source address
       if(rdlen > 0)
 	process_command(demod,pktbuf,rdlen);
     }
-    if(FD_ISSET(Rtp_sock,&mask)){
+    if(FD_ISSET(Input_fd,&mask)){
       // Receive I/Q data from front end
-      cnt = recvmsg(Rtp_sock,&message,0);
+      cnt = recvmsg(Input_fd,&message,0);
       if(cnt <= 0){    // ??
 	perror("recvfrom");
 	usleep(50000);

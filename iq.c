@@ -69,8 +69,7 @@ void *demod_iq(void *arg){
     for(n=0;n<demod->filter->blocksize_out;n++)
       demod->filter->output.c[n] *= demod->gain;
 
-    write(demod->output,demod->filter->output.c,
-	  demod->filter->blocksize_out*sizeof(*demod->filter->output.c));
+    send_stereo_audio(demod->filter->output.c,n);
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);

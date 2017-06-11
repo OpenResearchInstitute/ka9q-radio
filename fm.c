@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.14 2017/06/06 11:20:07 karn Exp karn $
+// $Id: fm.c,v 1.15 2017/06/07 09:45:50 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -115,7 +115,7 @@ void *demod_fm(void *arg){
       for(n=0;n<demod->filter->blocksize_out;n++)
 	audio[n] *= demod->gain;
       
-      write(demod->output,audio,sizeof(audio));
+      send_mono_audio(audio,n);
     }
   }
   pthread_cleanup_pop(1);

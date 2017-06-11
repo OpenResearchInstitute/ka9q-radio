@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.25 2017/06/07 07:46:49 karn Exp karn $
+// $Id: display.c,v 1.26 2017/06/07 09:45:49 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -21,8 +21,12 @@
 #include "radio.h"
 #include "audio.h"
 #include "dsp.h"
+#include "filter.h"
+#include "bandplan.h"
 
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
+
+int Update_interval = 100;
 
 // Pop up a dialog box, issue a prompt and get a response
 void getentry(char *prompt,char *response,int len){
@@ -35,7 +39,7 @@ void getentry(char *prompt,char *response,int len){
   echo();
   timeout(0);
   wgetnstr(pwin,response,len);
-  timeout(100);
+  timeout(Update_interval);
   noecho();
   werase(pwin);
   wrefresh(pwin);
@@ -62,39 +66,56 @@ void *display(void *arg){
   WINDOW *sig;
   WINDOW *sdr;
   WINDOW *net;
-  WINDOW *aud;
 
   pthread_cleanup_push(display_cleanup,demod);
 
   initscr();
   keypad(stdscr,TRUE);
-  timeout(100); // This sets the update interval when nothing is typed
+  timeout(Update_interval); // This sets the update interval when nothing is typed
   cbreak();
   noecho();
   deb = newwin(5,40,14,40);
   scrollok(deb,1);
-  fw = newwin(7,40,0,0);
-  sig = newwin(7,25,8,0);
-  sdr = newwin(7,30,8,25);
-  net = newwin(6,24,16,0);
-  aud = newwin(6,30,16,25);
+  fw = newwin(9,70,0,0);
+  sig = newwin(7,25,10,0);
+  sdr = newwin(7,30,10,25);
+  net = newwin(6,70,18,0);
   
   dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
 
 
   for(;;){
     float low,high;
+    struct bandplan *bp;
     
     wmove(fw,0,0);
     get_filter(demod,&low,&high);
-    wprintw(fw,"Frequency   %'17.2f Hz%s\n",get_freq(demod),
-	    demod->frequency_lock ? " LOCK":"");
+    wprintw(fw,"Frequency   %'17.2f Hz%s",get_freq(demod));
+    if(demod->frequency_lock)
+      wprintw(fw," LOCK");
+    if((bp = lookup_frequency(get_freq(demod))) != NULL){
+      wprintw(fw," %s",bp->name);
+      if(bp->modes & CW)
+	wprintw(fw," CW");
+      if(bp->modes & DATA)
+	wprintw(fw," Data");
+      if(bp->modes & VOICE)
+	wprintw(fw," Voice");
+      if(bp->modes & IMAGE)
+	wprintw(fw," Image");
+      if(bp->power != 0)
+	wprintw(fw," %.0lf watts",bp->power);
+    }
+    wprintw(fw,"\n");
+      
     wprintw(fw,"First LO    %'17.2f Hz\n",get_first_LO(demod));
     wprintw(fw,"IF          %'17.2f Hz\n",-get_second_LO(demod,0));
-    wprintw(fw,"Filter low  %'17.2f Hz\n",low);
-    wprintw(fw,"Filter high %'17.2f Hz\n",high);
     wprintw(fw,"Dial offset %'17.2f Hz\n",demod->dial_offset);
     wprintw(fw,"Calibrate   %'17.2f ppm\n",get_cal(demod)*1e6);
+    wprintw(fw,"Filter low  %'17.2f Hz\n",low);
+    wprintw(fw,"Filter high %'17.2f Hz\n",high);
+    wprintw(fw,"Kaiser Beta %'17.2f\n",Kaiser_beta);
+    wprintw(fw,"Blocksize   %17d\n",demod->L);
     // Tuning step highlight
     // A little messy because of the commas in the frequencies
     // They come from the ' option in the printf formats
@@ -144,28 +165,41 @@ void *display(void *arg){
     extern int Delayed,Skips;
 
     wmove(net,0,0);
-    if(Rtp_source_address.sa_family == AF_INET){
-      wprintw(net,"Source  %s\n",inet_ntoa(((struct sockaddr_in *)&Rtp_source_address)->sin_addr));
-    } else if(Rtp_source_address.sa_family == AF_INET6){
-    }
-    if(Multicast_address.sa_family == AF_INET){
-      wprintw(net,"Dest    %s\n",inet_ntoa(((struct sockaddr_in *)&Multicast_address)->sin_addr));
-    } else if(Multicast_address.sa_family == AF_INET6){
-    }
+    char source[INET6_ADDRSTRLEN];
+    char dest[INET6_ADDRSTRLEN];
+    int sport,dport;
 
+    if(Input_source_address.sa_family == AF_INET){
+      inet_ntop(AF_INET,&((struct sockaddr_in *)&Input_source_address)->sin_addr,source,sizeof(source));
+      sport = ntohs(((struct sockaddr_in *)&Input_source_address)->sin_port);
+    } else if(Input_source_address.sa_family == AF_INET6){
+      inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&Input_source_address)->sin6_addr,source,sizeof(source));
+      sport = ntohs(((struct sockaddr_in6 *)&Input_source_address)->sin6_port);
+    }      
+    if(Input_mcast_sockaddr.sa_family == AF_INET){
+      inet_ntop(AF_INET,&((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr,dest,sizeof(dest));      
+      dport = ntohs(((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port);
+    } else if(Input_mcast_sockaddr.sa_family == AF_INET6){
+      inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
+      dport = ntohs(((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port);
+    }
+    wprintw(net,"Input %s:%d -> %s:%d\n",source,sport,dest,dport);
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
+    dest[0] = '\0';
+    sport = dport = -1;
+    if(PCM_mcast_sockaddr.sa_family == AF_INET){
+      inet_ntop(AF_INET,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
+      dport = ntohs(((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port);
+    } else if(PCM_mcast_sockaddr.sa_family == AF_INET6){
+      inet_ntop(AF_INET,&((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
+      dport = ntohs(((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_port);
+    }
+    wprintw(net,"PCM output %s:%d -> %s:%d\n",NULL,sport,dest,dport);
+
     wnoutrefresh(net);
 
-    wmove(aud,0,0);
-    wprintw(aud,"audio underrun %d\n",Audio.underrun);
-    snd_pcm_sframes_t delayp;
-    if(Audio.handle != NULL){
-      snd_pcm_delay(Audio.handle,&delayp);
-      wprintw(aud,"audio delay %.1f ms\n",1000.*(float)delayp/Audio.samprate);
-      wprintw(aud,"audio overflow %d\n",Audio.overflow);
-    }
-    wnoutrefresh(aud);
+    doupdate();
 
 
     double f;
@@ -217,11 +251,15 @@ void *display(void *arg){
       break;
     case 'q':   // Exit radio program
       goto done;
+    case 'l':
+      demod->frequency_lock = !demod->frequency_lock;
+      break;
+      
     case '\t':  // tab: cycle through tuning fields
-      tuneitem = (tuneitem + 1) % 7;
+      tuneitem = (tuneitem + 1) % 8;
       break;
     case KEY_BTAB: // Backtab, i.e., shifted tab: cycle backwards through tuning fields
-      tuneitem = (7 + tuneitem - 1) % 7;
+      tuneitem = (8 + tuneitem - 1) % 8;
       break;
     case KEY_HOME: // Go back to starting spot
       tuneitem = 0;
@@ -279,21 +317,26 @@ void *display(void *arg){
 	}
 	set_second_LO(demod,new_lo2,0);
 	break;
-      case 3: // Filter low edge
+      case 3: // Dial offset
+	demod->dial_offset += tunestep10;
+	break;
+      case 4: // Calibrate offset
+	set_cal(demod,get_cal(demod) + tunestep10 * 1e-6);
+	break;
+      case 5: // Filter low edge
 	get_filter(demod,&low,&high);
 	low += tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 4: // Filter high edge
+      case 6: // Filter high edge
 	get_filter(demod,&low,&high);
 	high += tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 5: // Dial offset
-	demod->dial_offset += tunestep10;
-	break;
-      case 6: // Calibrate offset
-	set_cal(demod,get_cal(demod) + tunestep10 * 1e-6);
+      case 7: // Kaiser beta
+	get_filter(demod,&low,&high);
+	Kaiser_beta += tunestep10;
+	set_filter(demod,low,high);
 	break;
       }
       break;
@@ -319,7 +362,7 @@ void *display(void *arg){
 	  set_second_LO(demod,new_lo2,0);	  
 	}
 	break;
-      case 2:  // Second LO
+      case 2:  // IF
 	if(demod->frequency_lock){
 	  if(tunestep10 < 1)
 	    break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
@@ -335,27 +378,41 @@ void *display(void *arg){
 	}
 	set_second_LO(demod,new_lo2,0);
 	break;
-      case 3:  // Filter low edge
+      case 3:  // Dial offset
+	demod->dial_offset -= tunestep10;
+	break;
+      case 4:  // Calibrate offset
+	set_cal(demod,get_cal(demod) - tunestep10 * 1e-6);
+	break;
+      case 5:  // Filter low edge
 	get_filter(demod,&low,&high);
 	low -= tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 4:  // Filter high edge
+      case 6:  // Filter high edge
 	get_filter(demod,&low,&high);
 	high -= tunestep10;
 	set_filter(demod,low,high);
 	break;
-      case 5:  // Dial offset
-	demod->dial_offset -= tunestep10;
-	break;
-      case 6:  // Calibrate offset
-	set_cal(demod,get_cal(demod) - tunestep10 * 1e-6);
+      case 7: // Kaiser beta
+	get_filter(demod,&low,&high);
+	Kaiser_beta -= tunestep10;
+	set_filter(demod,low,high);
 	break;
       }
       break;
     case '\f':  // Screen repaint
       clearok(curscr,TRUE);
       break;
+    case 'b':   // Blocksize - both data and impulse response-1
+      getentry("Enter blocksize in samples: ",str,sizeof(str));
+      if(strlen(str) > 0){
+	demod->L = atoi(str);
+	demod->M = demod->L + 1;
+	set_mode(demod,demod->mode); // Restart demod thread
+      }
+      break;
+      
     case 'c':   // TCXO calibration offset
       getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
       if(strlen(str) > 0){
@@ -389,6 +446,28 @@ void *display(void *arg){
 	f = atof(str);
 	if(f > 0)
 	set_freq(demod,f,0);
+      }
+      break;
+    case 'u': // Display update rate
+      getentry("Enter update interval, ms: ",str,sizeof(str));
+      if(strlen(str) > 0){
+	int u;
+
+	u = atoi(str);
+	if(u > 50 && u < 10000)
+	  Update_interval = u;
+      }
+      break;
+    case 'k': // Kaiser window beta parameter
+      getentry("Enter Kaiser window beta: ",str,sizeof(str));
+      if(strlen(str) > 0){
+	double b = atof(str);
+	double ob = Kaiser_beta;
+	if(b >= 0 && b < 100 && b != ob){
+	  Kaiser_beta = b;
+	  get_filter(demod,&low,&high);
+	  set_filter(demod,low,high);
+	}
       }
       break;
     default:

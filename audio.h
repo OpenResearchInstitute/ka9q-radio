@@ -1,17 +1,15 @@
-// $Id: audio.h,v 1.4 2017/06/04 10:54:38 karn Exp karn $
+// $Id: audio.h,v 1.5 2017/06/05 06:09:17 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <alsa/asoundlib.h>
 
 struct audio {
-  char *name;
-  snd_pcm_t *handle;
-  int samprate;
-  int channels; // Number of channels in current buffer
-  int underrun;
-  int overflow;
-  int echo;     // If set, echo to standard output
   int stereo_input;
   int mono_input;
 };
@@ -22,7 +20,16 @@ extern int Audio_stereo_sock;
 int audio_change_parms(unsigned samplerate,int channels,int L);
 int audio_out_done();
 void *audio_thread(void *);
+void *stream_thread(void *);
 pthread_t Audio_thread;
+pthread_t Stream_thread;
+extern int Stream_write,Stream_read;
+int send_mono_audio(float *,int);
+int send_stereo_audio(complex float *,int);
+int setup_audio(void);
+
+extern struct sockaddr PCM_mcast_sockaddr;
+
 
 #endif
 

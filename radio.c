@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.25 2017/06/07 07:46:49 karn Exp karn $
+// $Id: radio.c,v 1.26 2017/06/07 09:45:51 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -21,7 +21,7 @@
 #include "dsp.h"
 
 
-extern int Ctl_sock;
+extern int Ctl_fd;
 struct demod Demod;
 
 const float Headroom = .316227766; // sqrt(0.10) = -10 dB
@@ -104,8 +104,8 @@ double set_first_LO(struct demod *demod,const double first_LO,const int force){
   requested_status.if_gain = 0xff;    
 
   // Send commands to source address of last RTP packet from front end
-  if(sendto(Ctl_sock,&requested_status,sizeof(requested_status),0,&Rtp_source_address,
-	    sizeof(Rtp_source_address)) == -1)
+  if(sendto(Ctl_fd,&requested_status,sizeof(requested_status),0,&Input_source_address,
+	    sizeof(Input_source_address)) == -1)
     perror("sendto control socket");
 
   // Return new true frequency
@@ -188,27 +188,22 @@ int set_mode(struct demod *demod,const enum mode mode){
   switch(mode){
   case NFM:
   case FM:
-    demod->output = Audio_mono_sock;
     pthread_create(&demod->demod_thread,NULL,demod_fm,&Demod);
     break;
   case USB:
   case LSB:
   case CWU:
   case CWL:
-    demod->output = Audio_mono_sock;    
     pthread_create(&demod->demod_thread,NULL,demod_ssb,&Demod);
     break;
   case CAM:
-    demod->output = Audio_mono_sock;
     pthread_create(&demod->demod_thread,NULL,demod_cam,&Demod);
     break;
   case AM:
-    demod->output = Audio_mono_sock;
     pthread_create(&demod->demod_thread,NULL,demod_am,&Demod);
     break;
   case IQ:
   case ISB:
-    demod->output = Audio_stereo_sock;
     pthread_create(&demod->demod_thread,NULL,demod_iq,&Demod);
     break;
   case WFM:

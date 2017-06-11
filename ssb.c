@@ -67,9 +67,9 @@ void *demod_ssb(void *arg){
     for(n=0;n<demod->filter->blocksize_out;n++)
       demod->filter->output.r[n] *= demod->gain;
 
-    write(demod->output,demod->filter->output.r,
-	  demod->filter->blocksize_out*sizeof(*demod->filter->output.r));
+    send_mono_audio(demod->filter->output.r,n);
   }
+
   pthread_cleanup_pop(1);
   pthread_exit(NULL);
 }

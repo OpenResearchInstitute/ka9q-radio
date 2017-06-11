@@ -56,10 +56,10 @@ extern struct modetab Modes[];
 extern const int Nmodes;
 
 extern int Rtpsock;
-extern struct sockaddr Rtp_source_address;
+extern struct sockaddr Input_source_address;
 extern socklen_t Rtpaddrlen;
 
-extern struct sockaddr Multicast_address;  
+extern struct sockaddr Input_mcast_sockaddr;  
 
 
 

@@ -1,3 +1,6 @@
+# $Id$
+# Ham bandplans, for frequench checking
+# bot   top     classes modes   name   power_limit
 0.1357	0.1378	EAG	VCID	2200m
 
 0.472	0.479	EAG	VCID	630m

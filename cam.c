@@ -75,22 +75,12 @@ void *demod_cam(void *arg){
     // Remove carrier DC
     // AM AGC is carrier-driven
     demod->gain = Headroom / demod->amplitude;
-#if 1
-    float audio[demod->filter->blocksize_out];
-    for(n=0; n < demod->filter->blocksize_out; n++){
-      audio[n] = demod->gain * (creal(demod->filter->output.c[n]) - demod->amplitude);
-    }
-    write(demod->output,audio,sizeof(audio));
-#else
-    // Experimental stereo write, AM signal (ideally) on I (left) channel, noise on Q (right) channel
-    for(n=0; n < demod->filter->blocksize_out; n++){
-      demod->filter->output.c[n] = demod->gain * CMPLXF(creal(demod->filter->output.c[n]) - demod->amplitude,
-					   cimag(demod->filter->output.c[n]));
-    }
-    write(Audio_stereo_sock,demod->filter->output.c,
-	  demod->filter->blocksize_out * sizeof(complex float));
-#endif
 
+    float audio[demod->filter->blocksize_out];
+    for(n=0; n < demod->filter->blocksize_out; n++)
+      audio[n] = demod->gain * (creal(demod->filter->output.c[n]) - demod->amplitude);
+
+    send_mono_audio(audio,n);
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);
