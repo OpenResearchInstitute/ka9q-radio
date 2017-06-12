@@ -1,8 +1,9 @@
-// $Id$
+// $Id: pcm_monitor.c,v 1.1 2017/06/11 05:01:13 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
+#include <signal.h>
 #include <alsa/asoundlib.h>
 #include <limits.h>
 #include <string.h>
@@ -14,6 +15,13 @@
 #include "rtp.h"
 #include "dsp.h"
 
+// Maximum samples/words per packet
+// Bigger than Ethernet MTU because of network device fragmentation/reassembly
+const int Bufsize = 8192;
+struct sockaddr PCM_mcast_sockaddr,PCM_sender;
+int Mcast_fd;
+OpusDecoder *Opus;
+
 struct {
   char *name;
   snd_pcm_t *handle;
@@ -22,11 +30,12 @@ struct {
   int overrun;
 } Audio;
 
-int audio_out_done(){
+void closedown(){
+  close(Mcast_fd);
   snd_pcm_drop(Audio.handle);
   snd_pcm_close(Audio.handle);
   Audio.handle = NULL;
-  return 0;
+  exit(0);
 }
 
 // Set up or change ALSA for demodulated sound output
@@ -120,8 +129,6 @@ int audio_change_parms(unsigned samprate,int channels,int L){
   return 0;
 }
 
-struct sockaddr PCM_mcast_sockaddr,PCM_sender;
-int PCM_fd;
 
 int main(int argc,char *argv[]){
   const int L=2048;
@@ -129,38 +136,62 @@ int main(int argc,char *argv[]){
   struct rtp_header rtp;
   uint16_t data[2*L];
   struct sockaddr sender;
+  int c;
 
   Audio.name = "default";
   Audio.samprate = 48000;
+  char *mcast_address_string = "239.1.2.6"; // Opus broadcast
+  int mcast_port = 5004;
+
+  while((c = getopt(argc,argv,"S:R:P:")) != EOF){
+    switch(c){
+    case 'S':
+      Audio.name = optarg;
+      break;
+    case 'R':
+      mcast_address_string = optarg;
+      break;
+    case 'P':
+      mcast_port = atoi(optarg);
+      break;
+    }
+  }
+  // Graceful signal catch
+  signal(SIGPIPE,closedown);
+  signal(SIGINT,closedown);
+  signal(SIGKILL,closedown);
+  signal(SIGQUIT,closedown);
+  signal(SIGTERM,closedown);
+  signal(SIGPIPE,SIG_IGN);
   
   audio_change_parms(Audio.samprate,2,L);
 
   // Make this configurable!
-  PCM_fd = socket(AF_INET,SOCK_DGRAM,0);
+  Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
   PCM_mcast_sockaddr.sa_family = AF_INET;
-  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(54312);
-  inet_pton(AF_INET,"239.1.2.5",&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
+  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(mcast_port);
+  inet_pton(AF_INET,mcast_address_string,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
 
   struct group_req group_req;
   group_req.gr_interface = 0;
   memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
-  if(setsockopt(PCM_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+  if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
     perror("setsockopt ipv4 multicast join");
   // Apparently works for both IPv4 and IPv6
   u_char loop = 1;
-  if(setsockopt(PCM_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
+  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
     perror("setsockopt multicast loop failed");
 
   u_char ttl = 1;
-  if(setsockopt(PCM_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
+  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
     perror("setsockopt multicast ttl failed");
 
-  if(bind(PCM_fd,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr)) == -1){
+  if(bind(Mcast_fd,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr)) == -1){
     perror("bind");
     exit(1);
   }
   u_char reuse = 1;
-  if(setsockopt(PCM_fd,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
+  if(setsockopt(Mcast_fd,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
     perror("ipv4 so_reuseaddr failed");
 
   char dest[INET6_ADDRSTRLEN];
@@ -171,6 +202,11 @@ int main(int argc,char *argv[]){
   } else if(PCM_mcast_sockaddr.sa_family == AF_INET6){
     inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
     dport = ntohs(((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_port);
+  }
+  int error;
+  Opus = opus_decoder_create(Audio.samprate,2,&error);
+  if(Opus == NULL){
+    fprintf(stderr,"Opus decoder error %d\n",error);
   }
 
   fprintf(stderr,"Listening on %s:%d\n",dest,dport);
@@ -190,16 +226,20 @@ int main(int argc,char *argv[]){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
+  int oseq = -1;
   while(1){
     ssize_t size;
     int i,r;
-    uint16_t outsamps[8192],*sp;
+    uint16_t outsamps[Bufsize],*sp;
 
-    size = recvmsg(PCM_fd,&message,0);
-
-    if(size < sizeof(rtp))
+    if((size = recvmsg(Mcast_fd,&message,0)) < sizeof(rtp))
       continue;
 
+    rtp.seq = ntohs(rtp.seq);
+    if(oseq != -1 && rtp.seq != oseq)
+      fprintf(stderr,"expected %d got %d\n",oseq,rtp.seq);
+
+    oseq = (rtp.seq + 1) & 0xffff;
 
     size -= sizeof(rtp); // Bytes in data
     size /= 2;           // 16-bit words in data; equal to # mono samples or 2x # stereo samples
@@ -213,8 +253,10 @@ int main(int argc,char *argv[]){
       for(i=0;i<size;i++)
 	outsamps[2*i] = outsamps[2*i+1] = ntohs(data[i]);
       break;
+    case 100: // Opus codec decode
+      size = opus_decode(Opus,(unsigned char *)data,2*size,(opus_int16 *)outsamps,sizeof(outsamps),0);
+      break;
     }
-
     sp = outsamps;
     while(size > 0){
       snd_pcm_state_t state;
@@ -256,7 +298,5 @@ int main(int argc,char *argv[]){
       fprintf(stderr,"Receiving from %s:%d\n",src,dport);
     }
   }
-  audio_out_done();
-  close(PCM_fd);
   exit(0);
 }

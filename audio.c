@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.10 2017/06/05 06:40:25 karn Exp karn $
+// $Id: audio.c,v 1.11 2017/06/11 05:01:13 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -7,12 +7,14 @@
 #include <string.h>
 #include <complex.h>
 #include <stdint.h>
+#include <time.h>
 #undef I
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <opus/opus.h>
 
 #include "rtp.h"
 #include "dsp.h"
@@ -20,65 +22,114 @@
 
 struct audio Audio;
 
-int PCM_fd;
-long Ssrc;
+int Mcast_fd;
+
 struct sockaddr PCM_mcast_sockaddr;
-int Timestamp = 0;
-int Seq = 0;
+long PCM_ssrc;
+int PCM_timestamp = 0;
+int PCM_seq = 0;
 
-int setup_audio(){
-  PCM_fd = socket(AF_INET,SOCK_DGRAM,0);
+struct OpusEncoder *Opus;
+struct sockaddr OPUS_mcast_sockaddr;
+const int Opusbitrate = 32000;
+// Must correspond to 2.5, 5, 10, 20, 40, 80 ms
+// i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
+#define OPUSBUFSIZE 960
+complex float Opusbuf[OPUSBUFSIZE];
+int Opuswriteptr = 0;
+long OPUS_ssrc;
+int OPUS_timestamp = 0;
+int OPUS_seq = 0;
 
-  // Make this configurable
-  PCM_mcast_sockaddr.sa_family = AF_INET;
-  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(54312);
-  inet_pton(AF_INET,"239.1.2.5",&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
 
-  struct group_req group_req;
-  group_req.gr_interface = 0;
-  memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
-  if(setsockopt(PCM_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,
-		sizeof(group_req)) != 0)
-    perror("setsockopt ipv4 multicast join");
-  // Apparently works for both IPv4 and IPv6
-  u_char loop = 1;
-  if(setsockopt(PCM_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
-    perror("setsockopt multicast loop failed");
+// Send floating point linear PCM as OPUS compressed multicast
+// size = # of stereo samples (half number of floats)
+int send_stereo_opus(const complex float *buffer,int size){
+  int i,space,chunk;
 
-  u_char ttl = 1;
-  if(setsockopt(PCM_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
-    perror("setsockopt multicast ttl failed");
+  i = 0;
+  while(size > 0){
+    space = OPUSBUFSIZE - Opuswriteptr;
+    chunk = min(space,size);
+    memcpy(&Opusbuf[Opuswriteptr],&buffer[i],chunk*sizeof(complex float));
+    Opuswriteptr += chunk;
+    i += chunk;
+    size -= chunk;
 
-  time_t tt;
-  time(&tt);
-  Ssrc = tt & 0xffffffff; // low 32 bits of clock time
+    if(Opuswriteptr == OPUSBUFSIZE){
+      // Full, send it
+      
+      unsigned char data[1024];
+      int dlen;
+      struct rtp_header rtp;
+      struct iovec iovec[2];
+      struct msghdr message;
+      
+      // We do assume a complex consists of a real followed by imaginary
+      dlen = opus_encode_float(Opus,(float *)Opusbuf,OPUSBUFSIZE,data,sizeof(data));
+      rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+      rtp.ssrc = htonl(OPUS_ssrc);
+      rtp.mpt = 100;         // arbitrary choice
+      rtp.seq = htons(OPUS_seq++);
+      rtp.timestamp = htonl(OPUS_timestamp);
+      OPUS_timestamp += OPUSBUFSIZE;
+      
+      iovec[0].iov_base = &rtp;
+      iovec[0].iov_len = sizeof(rtp);
+      iovec[1].iov_base = data;
+      iovec[1].iov_len = dlen;
+      
+      message.msg_name = &OPUS_mcast_sockaddr;
+      message.msg_namelen = sizeof(OPUS_mcast_sockaddr);
+      message.msg_iov = &iovec[0];
+      message.msg_iovlen = 2;
+      message.msg_control = NULL;
+      message.msg_controllen = 0;
+      message.msg_flags = 0;
+      sendmsg(Mcast_fd,&message,0);
+      Opuswriteptr = 0;
+    }
+  }
   return 0;
 }
 
 
+int send_mono_opus(const float *buffer,int size){
+  complex float cbuffer[size];
+  int i;
+
+  for(i=0;i<size;i++)
+    cbuffer[i] = CMPLXF(buffer[i],buffer[i]);
+
+  send_stereo_opus(cbuffer,size);
+  return 0;
+}
+
 int send_mono_audio(float *buffer,int size){
   const int L = 512;
-  struct iovec iovec[2];
-  struct msghdr message;
-  signed short outsamps[L];
-  struct rtp_header rtp;
   int i,chunk;
   float *sp;
 
-  // Actual number of samples read
+  send_mono_opus(buffer,size);
+
   sp = buffer;
   while(size > 0){
+    struct rtp_header rtp;
+    struct iovec iovec[2];
+    struct msghdr message;
+    signed short outsamps[L];
+
     chunk = min(size,L);
 
     for(i=0;i<chunk;i++)
       outsamps[i] = htons(CLIP(SHRT_MAX * sp[i])); // Scale, clip and byte swap
   
     rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-    rtp.ssrc = htonl(Ssrc);
+    rtp.ssrc = htonl(PCM_ssrc);
     rtp.mpt = 11;         // Mono linear 16-bit pcm 48 kHz
-    rtp.seq = htons(Seq++);
-    rtp.timestamp = htonl(Timestamp);
-    Timestamp += chunk;
+    rtp.seq = htons(PCM_seq++);
+    rtp.timestamp = htonl(PCM_timestamp);
+    PCM_timestamp += chunk;
     
     iovec[0].iov_base = &rtp;
     iovec[0].iov_len = sizeof(rtp);
@@ -92,7 +143,7 @@ int send_mono_audio(float *buffer,int size){
     message.msg_control = NULL;
     message.msg_controllen = 0;
     message.msg_flags = 0;
-    sendmsg(PCM_fd,&message,0);
+    sendmsg(Mcast_fd,&message,0);
     
     size -= chunk;
     sp += chunk;
@@ -101,29 +152,29 @@ int send_mono_audio(float *buffer,int size){
 }
 int send_stereo_audio(complex float *buffer,int size){
   const int L = 256;
-  struct iovec iovec[2];
-  struct msghdr message;
-  signed short outsamps[2*L];
-  struct rtp_header rtp;
   int i,chunk;
-  complex float *sp;
+
+  send_stereo_opus(buffer,size);
 
   // Actual number of samples read
-  sp = buffer;
   while(size > 0){
+    struct iovec iovec[2];
+    struct msghdr message;
+    signed short outsamps[2*L];
+    struct rtp_header rtp;
+
     chunk = min(size,L);
 
     for(i=0;i<chunk;i++){
-      outsamps[2*i] = htons(CLIP(SHRT_MAX * crealf(sp[i]))); // Scale, clip and byte swap
-      outsamps[2*i+1] = htons(CLIP(SHRT_MAX * cimagf(sp[i]))); // Scale, clip and byte swap
+      outsamps[2*i] = htons(CLIP(SHRT_MAX * crealf(buffer[i]))); // Scale, clip and byte swap
+      outsamps[2*i+1] = htons(CLIP(SHRT_MAX * cimagf(buffer[i]))); // Scale, clip and byte swap
     }
-  
     rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-    rtp.ssrc = htonl(Ssrc);
+    rtp.ssrc = htonl(PCM_ssrc);
     rtp.mpt = 10;         // Stereo linear 16-bit pcm 48 kHz
-    rtp.seq = htons(Seq++);
-    rtp.timestamp = htonl(Timestamp);
-    Timestamp += chunk;
+    rtp.seq = htons(PCM_seq++);
+    rtp.timestamp = htonl(PCM_timestamp);
+    PCM_timestamp += chunk;
     
     iovec[0].iov_base = &rtp;
     iovec[0].iov_len = sizeof(rtp);
@@ -137,10 +188,56 @@ int send_stereo_audio(complex float *buffer,int size){
     message.msg_control = NULL;
     message.msg_controllen = 0;
     message.msg_flags = 0;
-    sendmsg(PCM_fd,&message,0);
+    sendmsg(Mcast_fd,&message,0);
     
     size -= chunk;
-    sp += chunk;
+    buffer += chunk;
   }
+  return 0;
+}
+
+
+int setup_audio(){
+  struct group_req group_req;
+  int error;
+  
+  Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
+
+  // Make this configurable!!
+  PCM_mcast_sockaddr.sa_family = AF_INET;
+  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(5004);
+  inet_pton(AF_INET,"239.1.2.5",&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
+
+  group_req.gr_interface = 0;
+  memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
+  if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+    perror("setsockopt ipv4 multicast join");
+
+    // Make this configurable!!
+  OPUS_mcast_sockaddr.sa_family = AF_INET;
+  ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(5004);
+  inet_pton(AF_INET,"239.1.2.6",&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
+
+  group_req.gr_interface = 0;
+  memcpy(&group_req.gr_group,&OPUS_mcast_sockaddr,sizeof(OPUS_mcast_sockaddr));
+  if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+    perror("setsockopt ipv4 multicast join");
+
+  // Apparently works for both IPv4 and IPv6
+  u_char loop = 1;
+  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
+    perror("setsockopt multicast loop failed");
+
+  u_char ttl = 1;
+  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
+    perror("setsockopt multicast ttl failed");
+
+  time_t tt;
+  time(&tt);
+  PCM_ssrc = tt & 0xffffffff; // low 32 bits of clock time
+
+  OPUS_ssrc = (tt+1) & 0xffffffff; // low 32 bits of clock time
+  Opus = opus_encoder_create(48000,2,OPUS_APPLICATION_AUDIO,&error);
+  opus_encoder_ctl(Opus,OPUS_SET_BITRATE(Opusbitrate));
   return 0;
 }

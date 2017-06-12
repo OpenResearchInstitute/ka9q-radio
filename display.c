@@ -1,5 +1,8 @@
-// $Id: display.c,v 1.27 2017/06/11 05:01:13 karn Exp karn $
+// $Id: display.c,v 1.28 2017/06/12 04:05:53 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
@@ -7,11 +10,12 @@
 #include <math.h>
 #include <complex.h>
 #undef I
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <ncurses.h>
 #include <ctype.h>
 // We need some of these definitions for the Griffin dial, but some conflict

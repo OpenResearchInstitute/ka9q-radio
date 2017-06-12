@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.15 2017/06/07 09:45:50 karn Exp karn $
+// $Id: fm.c,v 1.16 2017/06/11 05:01:13 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -85,7 +85,7 @@ void *demod_fm(void *arg){
   while(1){
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
-    demod->gain = (Headroom * N / M_PI) / (demod->decimate * N*abs(demod->low - demod->high)/demod->samprate);
+    demod->gain = (Headroom * N / M_PI) / (demod->decimate * N*fabsf(demod->low - demod->high)/demod->samprate);
 
     fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
@@ -100,8 +100,8 @@ void *demod_fm(void *arg){
       if(demod->snr > 2){
 	for(n=0;n<demod->filter->blocksize_out;n++){
 	  demod->foffset += 0.00005 * (audio[n] - demod->foffset);
-	  if(devhold == 0 || (fabs(audio[n] - demod->foffset)) > demod->pdeviation){
-	    demod->pdeviation = fabs(audio[n] - demod->foffset);
+	  if(devhold == 0 || (fabsf(audio[n] - demod->foffset)) > demod->pdeviation){
+	    demod->pdeviation = fabsf(audio[n] - demod->foffset);
 	    devhold = 0.5 * demod->samprate/demod->decimate;
 	  } else {
 	    devhold--;

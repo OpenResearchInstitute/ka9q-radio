@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.5 2017/06/05 06:09:17 karn Exp karn $
+// $Id: audio.h,v 1.6 2017/06/11 05:01:07 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -6,8 +6,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#include <alsa/asoundlib.h>
 
 struct audio {
   int stereo_input;

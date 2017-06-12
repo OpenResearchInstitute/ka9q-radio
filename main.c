@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.24 2017/06/07 09:45:51 karn Exp karn $
+// $Id: main.c,v 1.25 2017/06/11 05:01:13 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -12,6 +12,8 @@
 #undef I
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
 #include <sys/socket.h>
