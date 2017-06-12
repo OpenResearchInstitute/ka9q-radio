@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.26 2017/06/07 09:45:49 karn Exp karn $
+// $Id: display.c,v 1.27 2017/06/11 05:01:13 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <assert.h>
 #include <limits.h>
@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ncurses.h>
+#include <ctype.h>
 // We need some of these definitions for the Griffin dial, but some conflict
 // with definitions in ncurses.h !!arrrrggggh!!
 // So we'll declare ourselves the small parts we need later
@@ -28,10 +29,42 @@
 
 int Update_interval = 100;
 
+// Parse a frequency entry in the form
+// 12345 (12345 Hz)
+// 12k345 (12.345 kHz)
+// 12m345 (12.345 MHz)
+// 12g345 (12.345 GHz)
+
+const double parse_frequency(const char *s){
+  char *ss = alloca(strlen(s));
+  char *sp;
+  int i;
+  double mult;
+
+  for(i=0;i<strlen(s);i++)
+    ss[i] = tolower(s[i]);
+
+  if((sp = strchr(ss,'g')) != NULL){
+    mult = 1e9;
+    *sp = '.';
+  } else if((sp = strchr(ss,'m')) != NULL){
+    mult = 1e6;
+    *sp = '.';
+  } else if((sp = strchr(ss,'k')) != NULL){
+    mult = 1e3;
+    *sp = '.';
+  } else
+    mult = 1;
+
+  return mult * atof(ss);
+}
+
+
 // Pop up a dialog box, issue a prompt and get a response
 void getentry(char *prompt,char *response,int len){
   WINDOW *pwin;
-
+  char *cp;
+  
   pwin = newwin(3,70,20,0);
   box(pwin,0,0);
   mvwprintw(pwin,1,1,prompt);
@@ -39,6 +72,10 @@ void getentry(char *prompt,char *response,int len){
   echo();
   timeout(0);
   wgetnstr(pwin,response,len);
+  if((cp = strchr(response,'\r')) != NULL)
+    *cp = '\0';
+  if((cp = strchr(response,'\n')) != NULL)
+    *cp = '\0';
   timeout(Update_interval);
   noecho();
   werase(pwin);
@@ -62,10 +99,7 @@ void *display(void *arg){
   double tunestep10 = 1;
   int tuneitem = 0;
   int dial_fd;
-  WINDOW *fw;
-  WINDOW *sig;
-  WINDOW *sdr;
-  WINDOW *net;
+  WINDOW *fw,*sig,*sdr,*net;
 
   pthread_cleanup_push(display_cleanup,demod);
 
@@ -441,11 +475,11 @@ void *display(void *arg){
       }
       break;
     case 'f':   // Tune to new frequency
-      getentry("Enter frequency in Hz: ",str,sizeof(str));
+      getentry("Enter frequency: ",str,sizeof(str));
       if(strlen(str) > 0){
-	f = atof(str);
+	f = parse_frequency(str);
 	if(f > 0)
-	set_freq(demod,f,0);
+	  set_freq(demod,f,0);
       }
       break;
     case 'u': // Display update rate
@@ -454,8 +488,10 @@ void *display(void *arg){
 	int u;
 
 	u = atoi(str);
-	if(u > 50 && u < 10000)
+	if(u > 50 && u < 10000){
 	  Update_interval = u;
+	  timeout(u);
+	}
       }
       break;
     case 'k': // Kaiser window beta parameter
