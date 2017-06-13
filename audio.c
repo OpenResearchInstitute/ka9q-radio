@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.12 2017/06/12 18:20:39 karn Exp karn $
+// $Id: audio.c,v 1.13 2017/06/13 02:51:31 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -199,8 +199,14 @@ int send_stereo_audio(complex float *buffer,int size){
 int setup_audio(){
   struct group_req group_req;
   int error;
+  struct sockaddr_in lsock;
   
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
+  lsock.sin_family = AF_INET;
+  lsock.sin_addr.s_addr = INADDR_ANY;
+  lsock.sin_port = 0;
+  if(bind(Mcast_fd,&lsock,sizeof(lsock)) == -1)
+    perror("bind");
 
   // Make this configurable!!
   PCM_mcast_sockaddr.ss_family = AF_INET;

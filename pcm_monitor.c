@@ -41,18 +41,17 @@ struct audio {
 } Audio[NSESSIONS];
 
 
-
 void close_audio(struct audio *ap){
-  if(ap->opus != NULL)
+  if(ap->opus != NULL){
     opus_decoder_destroy(ap->opus);
-  ap->opus = NULL;
-  ap->eseq = -1;
+    ap->opus = NULL;
+  }
   if(ap->handle){
     snd_pcm_drop(ap->handle);
     snd_pcm_close(ap->handle);
     ap->handle = NULL;
   }
-  memset(&ap->pcm_sender,0,sizeof(ap->pcm_sender));
+
 }
 
 void closedown(){
@@ -66,7 +65,7 @@ void closedown(){
 
 
 // Set up or change ALSA for demodulated sound output
-int audio_change_parms(struct audio *ap,unsigned samprate,int channels,int L){
+int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
   snd_pcm_uframes_t buffer_size;
   unsigned actual_rate;
   snd_pcm_hw_params_t *hw_params;
@@ -74,7 +73,7 @@ int audio_change_parms(struct audio *ap,unsigned samprate,int channels,int L){
 
 #if 0
   // This is a nice informative message, but it gets called every time we change modes
-  fprintf(stderr,"audio_change_parms(%s,rate=%u,blksize=%d,chans=%d)\n",ap->name,samprate,L,channels);
+  fprintf(stderr,"audio_init(%s,rate=%u,blksize=%d,chans=%d)\n",ap->name,samprate,L,channels);
 #endif
   int error;
   if(ap->opus != NULL)
@@ -162,6 +161,9 @@ int audio_change_parms(struct audio *ap,unsigned samprate,int channels,int L){
   if(snd_pcm_sw_params(ap->handle,sw_params) < 0){
     fprintf(stderr,"Can not set sw params %s\n",ap->name);
   }
+  ap->samprate = 0;
+  ap->underrun = 0;
+  ap->overrun = 0;
   return 0;
 }
 
@@ -327,6 +329,12 @@ int main(int argc,char *argv[]){
 	    fprintf(stderr,"Closing old session %d\n",i);
 	    close_audio(ap);
 	  }
+	  // Initialize entry
+	  memset(&ap->pcm_sender,0,sizeof(ap->pcm_sender));
+	  ap->name = Audioname;
+	  audio_init(ap,Samprate,2,L);
+	  ap->ssrc = rtp.ssrc;
+	  ap->eseq = rtp.seq;
 	  break;
 	}
       }
@@ -345,15 +353,9 @@ int main(int argc,char *argv[]){
       }
       fprintf(stderr,"No slots available for ssrc 0x%x from %s:%d\n",(unsigned int)rtp.ssrc,src,dport);
       continue; // Drop packet
-    } else if(ap->handle == NULL){
-      // Create new entry
-      ap->name = Audioname;
-      audio_change_parms(ap,Samprate,2,L);
-      ap->ssrc = rtp.ssrc;
-      ap->eseq = -1;
     }
     ap->lastused = time(NULL);
-    if(ap->eseq != -1 && rtp.seq != ap->eseq){
+    if(rtp.seq != ap->eseq){
       fprintf(stderr,"expected %d got %d\n",ap->eseq,rtp.seq);
       if((int16_t)(rtp.seq - ap->eseq) < 0){
 	ap->eseq = (rtp.seq + 1) & 0xffff;

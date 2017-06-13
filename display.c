@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.29 2017/06/12 18:19:49 karn Exp karn $
+// $Id: display.c,v 1.30 2017/06/13 02:51:33 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,8 +180,8 @@ void *display(void *arg){
     wmove(sig,0,0);
 
     wprintw(sig,"Mode         %3s\n",Modes[demod->mode].name);
-    wprintw(sig,"IF1     %7.1f dBFS\n",power2dB(demod->power_i + demod->power_q));
-    wprintw(sig,"IF2     %7.1f dBFS\n",voltage2dB(demod->amplitude));
+    wprintw(sig,"IF      %7.1f dBFS\n",power2dB(demod->power_i + demod->power_q));
+    wprintw(sig,"Baseband%7.1f dBFS\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(demod->gain));
     if(!isnan(demod->snr) && demod->snr != 0)
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
@@ -223,12 +223,37 @@ void *display(void *arg){
       inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
       dport = ntohs(((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port);
     }
-    wprintw(net,"Input %s:%d -> %s:%d\n",source,sport,dest,dport);
+    wprintw(net,"IQ in %s:%d -> %s:%d\n",source,sport,dest,dport);
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
 
+    extern int Mcast_fd;
+    
     dest[0] = '\0';
+    source[0] = '\0';
     sport = dport = -1;
+    if(OPUS_mcast_sockaddr.ss_family == AF_INET){
+      struct sockaddr_in local_sockaddr;
+      socklen_t addrlen = sizeof(local_sockaddr);
+      inet_ntop(AF_INET,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
+      dport = ntohs(((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port);
+      if(getsockname(Mcast_fd,(struct sockaddr *)&local_sockaddr,&addrlen) == -1)
+	perror("getsockname");
+      inet_ntop(AF_INET,&local_sockaddr.sin_addr,source,sizeof(source));
+      sport = ntohs(local_sockaddr.sin_port);
+    } else if(OPUS_mcast_sockaddr.ss_family == AF_INET6){
+      struct sockaddr_in6 local_sockaddr;
+      socklen_t addrlen = sizeof(local_sockaddr);
+      inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
+      dport = ntohs(((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_port);
+      getsockname(Mcast_fd,(struct sockaddr *)&local_sockaddr,&addrlen);
+      inet_ntop(AF_INET6,&local_sockaddr.sin6_addr,source,sizeof(source));
+      sport = ntohs(local_sockaddr.sin6_port);
+    }
+    wprintw(net,"OPUS out %s:%d -> %s:%d\n",source,sport,dest,dport);
+
+    dest[0] = '\0';
+    dport = -1;
     if(PCM_mcast_sockaddr.ss_family == AF_INET){
       inet_ntop(AF_INET,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
       dport = ntohs(((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port);
@@ -237,21 +262,9 @@ void *display(void *arg){
       dport = ntohs(((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_port);
     }
 
-    wprintw(net,"PCM output %s:%d -> %s:%d\n",NULL,sport,dest,dport);
-
-    dest[0] = '\0';
-    sport = dport = -1;
-    if(OPUS_mcast_sockaddr.ss_family == AF_INET){
-      inet_ntop(AF_INET,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
-      dport = ntohs(((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port);
-    } else if(OPUS_mcast_sockaddr.ss_family == AF_INET6){
-      inet_ntop(AF_INET,&((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
-      dport = ntohs(((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_port);
-    }
-    wprintw(net,"OPUS output %s:%d -> %s:%d\n",NULL,sport,dest,dport);
+    wprintw(net,"PCM out  %s:%d -> %s:%d\n",source,sport,dest,dport);
 
     wnoutrefresh(net);
-
     doupdate();
 
 
