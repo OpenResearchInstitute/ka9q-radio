@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.6 2017/06/11 05:01:07 karn Exp karn $
+// $Id: audio.h,v 1.7 2017/06/12 18:20:27 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -26,7 +26,8 @@ int send_mono_audio(float *,int);
 int send_stereo_audio(complex float *,int);
 int setup_audio(void);
 
-extern struct sockaddr PCM_mcast_sockaddr;
+extern struct sockaddr_storage PCM_mcast_sockaddr;
+extern struct sockaddr_storage OPUS_mcast_sockaddr;
 
 
 #endif

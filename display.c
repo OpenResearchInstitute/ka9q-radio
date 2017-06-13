@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.28 2017/06/12 04:05:53 karn Exp karn $
+// $Id: display.c,v 1.29 2017/06/12 18:19:49 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,8 +112,10 @@ void *display(void *arg){
   timeout(Update_interval); // This sets the update interval when nothing is typed
   cbreak();
   noecho();
+#if 0
   deb = newwin(5,40,14,40);
   scrollok(deb,1);
+#endif
   fw = newwin(9,70,0,0);
   sig = newwin(7,25,10,0);
   sdr = newwin(7,30,10,25);
@@ -128,7 +130,7 @@ void *display(void *arg){
     
     wmove(fw,0,0);
     get_filter(demod,&low,&high);
-    wprintw(fw,"Frequency   %'17.2f Hz%s",get_freq(demod));
+    wprintw(fw,"Frequency   %'17.2f Hz",get_freq(demod));
     if(demod->frequency_lock)
       wprintw(fw," LOCK");
     if((bp = lookup_frequency(get_freq(demod))) != NULL){
@@ -207,33 +209,46 @@ void *display(void *arg){
     char dest[INET6_ADDRSTRLEN];
     int sport,dport;
 
-    if(Input_source_address.sa_family == AF_INET){
+    if(Input_source_address.ss_family == AF_INET){
       inet_ntop(AF_INET,&((struct sockaddr_in *)&Input_source_address)->sin_addr,source,sizeof(source));
       sport = ntohs(((struct sockaddr_in *)&Input_source_address)->sin_port);
-    } else if(Input_source_address.sa_family == AF_INET6){
+    } else if(Input_source_address.ss_family == AF_INET6){
       inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&Input_source_address)->sin6_addr,source,sizeof(source));
       sport = ntohs(((struct sockaddr_in6 *)&Input_source_address)->sin6_port);
     }      
-    if(Input_mcast_sockaddr.sa_family == AF_INET){
+    if(Input_mcast_sockaddr.ss_family == AF_INET){
       inet_ntop(AF_INET,&((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr,dest,sizeof(dest));      
       dport = ntohs(((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port);
-    } else if(Input_mcast_sockaddr.sa_family == AF_INET6){
+    } else if(Input_mcast_sockaddr.ss_family == AF_INET6){
       inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
       dport = ntohs(((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port);
     }
     wprintw(net,"Input %s:%d -> %s:%d\n",source,sport,dest,dport);
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
+
     dest[0] = '\0';
     sport = dport = -1;
-    if(PCM_mcast_sockaddr.sa_family == AF_INET){
+    if(PCM_mcast_sockaddr.ss_family == AF_INET){
       inet_ntop(AF_INET,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
       dport = ntohs(((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port);
-    } else if(PCM_mcast_sockaddr.sa_family == AF_INET6){
+    } else if(PCM_mcast_sockaddr.ss_family == AF_INET6){
       inet_ntop(AF_INET,&((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
       dport = ntohs(((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_port);
     }
+
     wprintw(net,"PCM output %s:%d -> %s:%d\n",NULL,sport,dest,dport);
+
+    dest[0] = '\0';
+    sport = dport = -1;
+    if(OPUS_mcast_sockaddr.ss_family == AF_INET){
+      inet_ntop(AF_INET,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
+      dport = ntohs(((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port);
+    } else if(OPUS_mcast_sockaddr.ss_family == AF_INET6){
+      inet_ntop(AF_INET,&((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
+      dport = ntohs(((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_port);
+    }
+    wprintw(net,"OPUS output %s:%d -> %s:%d\n",NULL,sport,dest,dport);
 
     wnoutrefresh(net);
 

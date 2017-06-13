@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.11 2017/06/11 05:01:13 karn Exp karn $
+// $Id: audio.c,v 1.12 2017/06/12 18:20:39 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -24,36 +24,35 @@ struct audio Audio;
 
 int Mcast_fd;
 
-struct sockaddr PCM_mcast_sockaddr;
-long PCM_ssrc;
-int PCM_timestamp = 0;
-int PCM_seq = 0;
+struct sockaddr_storage PCM_mcast_sockaddr;
+uint32_t PCM_ssrc;
+uint32_t PCM_timestamp = 0;
+uint16_t PCM_seq = 0;
 
 struct OpusEncoder *Opus;
-struct sockaddr OPUS_mcast_sockaddr;
+struct sockaddr_storage OPUS_mcast_sockaddr;
 const int Opusbitrate = 32000;
-// Must correspond to 2.5, 5, 10, 20, 40, 80 ms
+// Must correspond to 2.5, 5, 10, 20, 40, 60 ms
 // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
 #define OPUSBUFSIZE 960
 complex float Opusbuf[OPUSBUFSIZE];
 int Opuswriteptr = 0;
-long OPUS_ssrc;
-int OPUS_timestamp = 0;
-int OPUS_seq = 0;
+uint32_t OPUS_ssrc;
+uint32_t OPUS_timestamp = 0;
+uint16_t OPUS_seq = 0;
 
 
 // Send floating point linear PCM as OPUS compressed multicast
 // size = # of stereo samples (half number of floats)
-int send_stereo_opus(const complex float *buffer,int size){
-  int i,space,chunk;
+int send_stereo_opus(complex float *buffer,int size){
+  int space,chunk;
 
-  i = 0;
   while(size > 0){
     space = OPUSBUFSIZE - Opuswriteptr;
     chunk = min(space,size);
-    memcpy(&Opusbuf[Opuswriteptr],&buffer[i],chunk*sizeof(complex float));
+    memcpy(&Opusbuf[Opuswriteptr],buffer,chunk*sizeof(complex float));
     Opuswriteptr += chunk;
-    i += chunk;
+    buffer += chunk;
     size -= chunk;
 
     if(Opuswriteptr == OPUSBUFSIZE){
@@ -69,7 +68,7 @@ int send_stereo_opus(const complex float *buffer,int size){
       dlen = opus_encode_float(Opus,(float *)Opusbuf,OPUSBUFSIZE,data,sizeof(data));
       rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
       rtp.ssrc = htonl(OPUS_ssrc);
-      rtp.mpt = 100;         // arbitrary choice
+      rtp.mpt = 20;         // arbitrary choice
       rtp.seq = htons(OPUS_seq++);
       rtp.timestamp = htonl(OPUS_timestamp);
       OPUS_timestamp += OPUSBUFSIZE;
@@ -134,7 +133,7 @@ int send_mono_audio(float *buffer,int size){
     iovec[0].iov_base = &rtp;
     iovec[0].iov_len = sizeof(rtp);
     iovec[1].iov_base = outsamps;
-    iovec[1].iov_len = 2*chunk; // 2 bytes/sample
+    iovec[1].iov_len = chunk * sizeof(outsamps[0]); // 2 bytes/sample
     
     message.msg_name = &PCM_mcast_sockaddr;
     message.msg_namelen = sizeof(PCM_mcast_sockaddr);
@@ -179,7 +178,7 @@ int send_stereo_audio(complex float *buffer,int size){
     iovec[0].iov_base = &rtp;
     iovec[0].iov_len = sizeof(rtp);
     iovec[1].iov_base = outsamps;
-    iovec[1].iov_len = 4*chunk; // 2 bytes/sample
+    iovec[1].iov_len = 2*sizeof(outsamps[0])*chunk; // 2 bytes/sample * stereo
     
     message.msg_name = &PCM_mcast_sockaddr;
     message.msg_namelen = sizeof(PCM_mcast_sockaddr);
@@ -204,7 +203,7 @@ int setup_audio(){
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
 
   // Make this configurable!!
-  PCM_mcast_sockaddr.sa_family = AF_INET;
+  PCM_mcast_sockaddr.ss_family = AF_INET;
   ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(5004);
   inet_pton(AF_INET,"239.1.2.5",&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
 
@@ -214,7 +213,7 @@ int setup_audio(){
     perror("setsockopt ipv4 multicast join");
 
     // Make this configurable!!
-  OPUS_mcast_sockaddr.sa_family = AF_INET;
+  OPUS_mcast_sockaddr.ss_family = AF_INET;
   ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(5004);
   inet_pton(AF_INET,"239.1.2.6",&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
 

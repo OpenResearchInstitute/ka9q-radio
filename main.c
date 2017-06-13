@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.25 2017/06/11 05:01:13 karn Exp karn $
+// $Id: main.c,v 1.26 2017/06/12 18:20:04 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -44,8 +44,8 @@ int Quiet;
 int Ctl_port = 4159;
 
 struct sockaddr_in6 Ctl_address;
-struct sockaddr Input_source_address;
-struct sockaddr Input_mcast_sockaddr;
+struct sockaddr_storage Input_source_address;
+struct sockaddr_storage Input_mcast_sockaddr;
 
 
 int Input_fd;
@@ -184,7 +184,7 @@ int main(int argc,char *argv[]){
       perror("can't create IPv4 input socket");
       exit(1);
     }
-    Input_mcast_sockaddr.sa_family = AF_INET;
+    Input_mcast_sockaddr.ss_family = AF_INET;
     ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port = htons(mcast_dest_port);
 
     struct group_req group_req;
@@ -198,7 +198,7 @@ int main(int argc,char *argv[]){
     if(setsockopt(Input_fd,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0){
       perror("ipv4 so_reuseaddr failed");
     }
-    if(bind(Input_fd,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
+    if(bind(Input_fd,(struct sockaddr_in *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
       perror("ipv4 bind on input socket failed");
       exit(1);
     }
@@ -208,7 +208,7 @@ int main(int argc,char *argv[]){
       perror("funcube: can't create IPv6 output socket");
       exit(1);
     }
-    Input_mcast_sockaddr.sa_family = AF_INET6;
+    Input_mcast_sockaddr.ss_family = AF_INET6;
     ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port = htons(mcast_dest_port);
     ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_flowinfo = 0;
     ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_scope_id = 0;
@@ -222,7 +222,7 @@ int main(int argc,char *argv[]){
     }
     u_char reuse = 1;
     setsockopt(Input_fd,IPPROTO_IPV6,SO_REUSEADDR,&reuse,sizeof(reuse));
-    if(bind(Input_fd,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
+    if(bind(Input_fd,(struct sockaddr_in6 *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
       perror("bind to IPv6 multicast address failed");
       exit(1);
     }
