@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.13 2017/06/13 02:51:31 karn Exp karn $
+// $Id: audio.c,v 1.14 2017/06/13 08:58:48 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -200,6 +200,8 @@ int setup_audio(){
   struct group_req group_req;
   int error;
   struct sockaddr_in lsock;
+  extern char *OPUS_mcast_address_text;
+  extern char *PCM_mcast_address_text;
   
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
   lsock.sin_family = AF_INET;
@@ -210,8 +212,8 @@ int setup_audio(){
 
   // Make this configurable!!
   PCM_mcast_sockaddr.ss_family = AF_INET;
-  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(5004);
-  inet_pton(AF_INET,"239.1.2.5",&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
+  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
+  inet_pton(AF_INET,PCM_mcast_address_text,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
 
   group_req.gr_interface = 0;
   memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
@@ -220,8 +222,8 @@ int setup_audio(){
 
     // Make this configurable!!
   OPUS_mcast_sockaddr.ss_family = AF_INET;
-  ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(5004);
-  inet_pton(AF_INET,"239.1.2.6",&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
+  ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
+  inet_pton(AF_INET,OPUS_mcast_address_text,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
 
   group_req.gr_interface = 0;
   memcpy(&group_req.gr_group,&OPUS_mcast_sockaddr,sizeof(OPUS_mcast_sockaddr));

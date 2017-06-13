@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.26 2017/06/12 18:20:04 karn Exp karn $
+// $Id: main.c,v 1.27 2017/06/13 02:51:33 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -47,10 +47,13 @@ struct sockaddr_in6 Ctl_address;
 struct sockaddr_storage Input_source_address;
 struct sockaddr_storage Input_mcast_sockaddr;
 
+char *OPUS_mcast_address_text = "239.1.2.6";
+char *PCM_mcast_address_text = "239.1.2.5";
 
 int Input_fd;
 int Ctl_fd;
 int Demod_sock;
+int Mcast_dest_port = 5004;     // Default for testing; recommended default RTP port
 
 int Skips;
 int Delayed;
@@ -58,8 +61,8 @@ int Delayed;
 int main(int argc,char *argv[]){
   int c,N;
   char *locale;
-  char *mcast_address_text = "239.1.2.3"; // Default for testing
-  int mcast_dest_port = 5004;     // Default for testing; recommended default RTP port
+  char *iq_mcast_address_text = "239.1.2.3"; // Default for testing
+
   enum mode mode;
   double second_IF;
   struct demod *demod = &Demod;
@@ -79,33 +82,24 @@ int main(int argc,char *argv[]){
   mode = FM;
   second_IF = 48000;
 
-  while((c = getopt(argc,argv,"qb:m:l:d:L:M:x:h:r:t:c:T:p:R:P:i:")) != EOF){
+  while((c = getopt(argc,argv,"b:i:I:l:L:m:M:O:p:P:qr:t:")) != EOF){
     int i;
 
     switch(c){
-    case 'R':
-      mcast_address_text = optarg;
-      break;
-    case 'P':
-      mcast_dest_port = atoi(optarg);
-      break;
-    case 'p':
-      Ctl_port = atoi(optarg);
-      break;
-    case 'q':
-      Quiet++; // Suppress display
-      break;
     case 'b':
       Kaiser_beta = atof(optarg);
       break;
+    case 'i':
+      second_IF = atof(optarg);
+      break;
+    case 'I':
+      iq_mcast_address_text = optarg;
+      break;
+    case 'l':
+      locale = optarg;
+      break;
     case 'L':
       demod->L = atoi(optarg);
-      break;
-    case 'M':
-      demod->M = atoi(optarg);
-      break;
-    case 'r':
-      DAC_samprate = atof(optarg);
       break;
     case 'm':
       for(i = 1; i < Nmodes;i++){
@@ -115,8 +109,23 @@ int main(int argc,char *argv[]){
 	}
       }
       break;
-    case 'l':
-      locale = optarg;
+    case 'M':
+      demod->M = atoi(optarg);
+      break;
+    case 'O':
+      OPUS_mcast_address_text = optarg;
+      break;
+    case 'p':
+      Ctl_port = atoi(optarg);
+      break;
+    case 'P':
+      PCM_mcast_address_text = optarg;
+      break;
+    case 'q':
+      Quiet++; // Suppress display
+      break;
+    case 'r':
+      DAC_samprate = atof(optarg);
       break;
     case 't':
       Nthreads = atoi(optarg);
@@ -124,19 +133,17 @@ int main(int argc,char *argv[]){
       fftwf_plan_with_nthreads(Nthreads);
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
-    case 'i':
-      second_IF = atof(optarg);
-      break;
     default:
-      fprintf(stderr,"Usage: %s [-r DAC sample rate] [-m mode] [-l locale] [-S sound output device] [-L samplepoints] [-M impulsepoints] [-h zeroIFhole] [-t threads] [-R multicast_address] [-P port]\n",argv[0]);
-      fprintf(stderr,"Default: %s -r %u -m %s -l %s -L %d -M %d -R %s -P %d\n",
-	      argv[0],DAC_samprate,Modes[mode].name,locale,demod->L,demod->M,
-	      mcast_address_text,mcast_dest_port);
+      fprintf(stderr,"Usage: %s [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r DAC sample rate] [-t threads]\n",argv[0]);
+      fprintf(stderr,"Default: %s -I %s -l %s -L %d -m %s -M %d -O %s -P %s -r %d -t %d\n",
+	      argv[0],iq_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
+	      OPUS_mcast_address_text,PCM_mcast_address_text,DAC_samprate,Nthreads);
+      exit(1);
       break;
     }
   }
-  if(mcast_address_text == NULL || mcast_dest_port == -1){
-    fprintf(stderr,"Specify -R mcast_address_text_address -P port\n");
+  if(iq_mcast_address_text == NULL){
+    fprintf(stderr,"Specify -R iq_mcast_address_text_address -P port\n");
     exit(1);
   }
   setlocale(LC_ALL,locale);
@@ -179,13 +186,13 @@ int main(int argc,char *argv[]){
   signal(SIGPIPE,SIG_IGN);
 
   // Set up input socket for multicast data stream from front end
-  if(inet_pton(AF_INET,mcast_address_text,&((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr) == 1){
+  if(inet_pton(AF_INET,iq_mcast_address_text,&((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr) == 1){
     if((Input_fd = socket(PF_INET,SOCK_DGRAM,0)) == -1){
       perror("can't create IPv4 input socket");
       exit(1);
     }
     Input_mcast_sockaddr.ss_family = AF_INET;
-    ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port = htons(mcast_dest_port);
+    ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
 
     struct group_req group_req;
     group_req.gr_interface = 0;
@@ -203,13 +210,13 @@ int main(int argc,char *argv[]){
       exit(1);
     }
 
-  } else if(inet_pton(AF_INET6,mcast_address_text,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr) == 1){
+  } else if(inet_pton(AF_INET6,iq_mcast_address_text,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr) == 1){
     if((Input_fd = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
       perror("funcube: can't create IPv6 output socket");
       exit(1);
     }
     Input_mcast_sockaddr.ss_family = AF_INET6;
-    ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port = htons(mcast_dest_port);
+    ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port = htons(Mcast_dest_port);
     ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_flowinfo = 0;
     ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_scope_id = 0;
 
@@ -227,7 +234,7 @@ int main(int argc,char *argv[]){
       exit(1);
     }
   } else {
-    fprintf(stderr,"Can't parse RTP source address %s\n",mcast_address_text);
+    fprintf(stderr,"Can't parse RTP source address %s\n",iq_mcast_address_text);
     exit(1);
   }
   u_char loop,ttl;
