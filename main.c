@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.29 2017/06/14 03:09:12 karn Exp karn $
+// $Id: main.c,v 1.30 2017/06/14 05:32:38 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -203,7 +203,7 @@ int main(int argc,char *argv[]){
 
     Input_mcast_sockaddr.ss_family = AF_INET;
     ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
-    if(bind(Input_fd,(struct sockaddr_in *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
+    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
       perror("bind on IPv4 input socket");
       exit(1);
     }
@@ -228,7 +228,7 @@ int main(int argc,char *argv[]){
     Input_mcast_sockaddr.ss_family = AF_INET6;
     ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port = htons(Mcast_dest_port);
 
-    if(bind(Input_fd,(struct sockaddr_in6 *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
+    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
       perror("bind on IPv6 input socket");
       exit(1);
     }
@@ -240,7 +240,7 @@ int main(int argc,char *argv[]){
       perror("ipv4 multicast join failed");
       exit(1);
     }
-    if(bind(Input_fd,(struct sockaddr_in6 *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
+    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
       perror("bind on IPv6 input socket");
       exit(1);
     }
@@ -261,7 +261,7 @@ int main(int argc,char *argv[]){
     perror("can't open control socket");
     exit(1);
   }
-  if(bind(Ctl_fd,&Ctl_address,sizeof(Ctl_address)) != 0)
+  if(bind(Ctl_fd,(struct sockaddr *)&Ctl_address,sizeof(Ctl_address)) != 0)
     perror("control bind failed");
 
   fcntl(Ctl_fd,F_SETFL,O_NONBLOCK);
@@ -291,6 +291,7 @@ int main(int argc,char *argv[]){
   pipe(sv);
   Demod_sock = sv[1]; // write end
   demod->input = sv[0]; // read end
+#ifdef F_SETPIPE_SZ // Linux only
   int sz;
   sz = fcntl(Demod_sock,F_SETPIPE_SZ,demod->L * sizeof(complex float));
 #if 0
@@ -298,7 +299,7 @@ int main(int argc,char *argv[]){
 #endif
   if(sz == -1)
     perror("F_SETPIPE_SZ");
-
+#endif // F_SETPIPE_SZ
   if(setup_audio(opus_blockms,OPUS_bitrate) != 0){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
