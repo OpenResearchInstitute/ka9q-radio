@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.30 2017/06/13 02:51:33 karn Exp karn $
+// $Id: display.c,v 1.31 2017/06/13 08:58:48 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -227,42 +227,11 @@ void *display(void *arg){
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
 
-    extern int Mcast_fd;
-    
-    dest[0] = '\0';
-    source[0] = '\0';
-    sport = dport = -1;
-    if(OPUS_mcast_sockaddr.ss_family == AF_INET){
-      struct sockaddr_in local_sockaddr;
-      socklen_t addrlen = sizeof(local_sockaddr);
-      inet_ntop(AF_INET,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
-      dport = ntohs(((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port);
-      if(getsockname(Mcast_fd,(struct sockaddr *)&local_sockaddr,&addrlen) == -1)
-	perror("getsockname");
-      inet_ntop(AF_INET,&local_sockaddr.sin_addr,source,sizeof(source));
-      sport = ntohs(local_sockaddr.sin_port);
-    } else if(OPUS_mcast_sockaddr.ss_family == AF_INET6){
-      struct sockaddr_in6 local_sockaddr;
-      socklen_t addrlen = sizeof(local_sockaddr);
-      inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
-      dport = ntohs(((struct sockaddr_in6 *)&OPUS_mcast_sockaddr)->sin6_port);
-      getsockname(Mcast_fd,(struct sockaddr *)&local_sockaddr,&addrlen);
-      inet_ntop(AF_INET6,&local_sockaddr.sin6_addr,source,sizeof(source));
-      sport = ntohs(local_sockaddr.sin6_port);
-    }
-    wprintw(net,"OPUS out %s:%d -> %s:%d\n",source,sport,dest,dport);
+    if(OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0)
+      wprintw(net,"OPUS out %s:%d\n",OPUS_mcast_address_text,Mcast_dest_port);
 
-    dest[0] = '\0';
-    dport = -1;
-    if(PCM_mcast_sockaddr.ss_family == AF_INET){
-      inet_ntop(AF_INET,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr,dest,sizeof(dest));
-      dport = ntohs(((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port);
-    } else if(PCM_mcast_sockaddr.ss_family == AF_INET6){
-      inet_ntop(AF_INET,&((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
-      dport = ntohs(((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_port);
-    }
-
-    wprintw(net,"PCM out  %s:%d -> %s:%d\n",source,sport,dest,dport);
+    if(PCM_mcast_address_text != NULL && strlen(PCM_mcast_address_text) > 0)
+      wprintw(net,"PCM out  %s:%d\n",PCM_mcast_address_text,Mcast_dest_port);
 
     wnoutrefresh(net);
     doupdate();

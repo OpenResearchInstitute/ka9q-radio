@@ -1,4 +1,4 @@
-// $Id: pcm_monitor.c,v 1.5 2017/06/13 08:59:08 karn Exp karn $
+// $Id: pcm_monitor.c,v 1.6 2017/06/13 09:27:17 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -30,12 +30,13 @@ char *Audioname = "default";
 struct audio {
   uint32_t ssrc;
   int eseq; // Next expected sequence number
+  int etime; // Next expected timestamp
   time_t lastused;
   struct sockaddr_storage pcm_sender;
   OpusDecoder *opus;
   char *name;
   snd_pcm_t *handle;
-  int samprate;
+  unsigned int samprate;
   int underrun;
   int overrun;
 } Audio[NSESSIONS];
@@ -51,14 +52,15 @@ void close_audio(struct audio *ap){
     snd_pcm_close(ap->handle);
     ap->handle = NULL;
   }
-
 }
 
 void closedown(){
   int i;
-  for(i=0;i<NSESSIONS;i++){
+  for(i=0;i<NSESSIONS;i++)
     close_audio(&Audio[i]);
-  }
+
+  if(Mcast_fd != -1)
+    close(Mcast_fd);
   exit(0);
 }
 
@@ -67,7 +69,6 @@ void closedown(){
 // Set up or change ALSA for demodulated sound output
 int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
   snd_pcm_uframes_t buffer_size;
-  unsigned actual_rate;
   snd_pcm_hw_params_t *hw_params;
   snd_pcm_sw_params_t *sw_params;
 
@@ -75,14 +76,14 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
   // This is a nice informative message, but it gets called every time we change modes
   fprintf(stderr,"audio_init(%s,rate=%u,blksize=%d,chans=%d)\n",ap->name,samprate,L,channels);
 #endif
-  int error;
+
   if(ap->opus != NULL)
     opus_decoder_destroy(ap->opus);
 
+  int error;
   ap->opus = opus_decoder_create(samprate,2,&error);
-  if(ap->opus == NULL){
+  if(ap->opus == NULL)
     fprintf(stderr,"Opus decoder error %d\n",error);
-  }
 
   if(ap->handle != NULL){
     snd_pcm_drop(ap->handle);
@@ -108,15 +109,14 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
     fprintf(stderr,"Error setting D/A format on %s\n",ap->name);
     return -1;
   }
-  actual_rate = samprate;
-  if(snd_pcm_hw_params_set_rate_near(ap->handle,hw_params,&actual_rate,0)<0){
+  ap->samprate = samprate;
+  if(snd_pcm_hw_params_set_rate_near(ap->handle,hw_params,&ap->samprate,0)<0){
     fprintf(stderr,"Error setting D/A sample rate on %s\n",ap->name);
     return -1;
   }
-  if(actual_rate != samprate)
-    fprintf(stderr,"Warning: actual D/A sample rate is %u\n",actual_rate);
+  if(ap->samprate != samprate)
+    fprintf(stderr,"Warning: actual D/A sample rate is %u\n",ap->samprate);
 
-  ap->samprate = actual_rate;
   if(snd_pcm_hw_params_set_channels(ap->handle,hw_params,channels)<0){ // stereo
     fprintf(stderr,"Error setting D/A channels on %s\n",ap->name);
     return -1;
@@ -161,7 +161,6 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
   if(snd_pcm_sw_params(ap->handle,sw_params) < 0){
     fprintf(stderr,"Can not set sw params %s\n",ap->name);
   }
-  ap->samprate = 0;
   ap->underrun = 0;
   ap->overrun = 0;
   return 0;
@@ -169,55 +168,59 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
 int play_stereo_pcm(struct audio *ap,int16_t *outsamps,int size){
-    while(size > 0){
-      int chunk,r;
-
-      snd_pcm_state_t state;
-      state = snd_pcm_state(ap->handle);
-      // Underruns can deliberately happen when the demodulator thread simply
-      // stops sending data, e.g., when a FM squelch is closed
-      if(state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED){
-	ap->underrun++;
-	snd_pcm_prepare(ap->handle);
-      }
-      chunk = snd_pcm_avail(ap->handle); // stereo samples available in sound buffer
-      if(chunk == 0){
-	ap->overrun++;
-	usleep(L * 1000000 / ap->samprate); // Wait one buffer time for some room
-	continue;
-      }
-      // Size of the buffer, or the max available in the device, whichever is less
-      chunk = min(chunk,size);
-      if((r = snd_pcm_writei(ap->handle,outsamps,chunk)) != chunk){
-#if 0
-	fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
-#endif
-      }
-      size -= r; // stereo samples left (2 16 bit words, 4 bytes)
-      outsamps += 2*r; // Each stereo sample is 2 16-bit words
+  while(size > 0){
+    int chunk,r;
+    
+    snd_pcm_state_t state;
+    state = snd_pcm_state(ap->handle);
+    // Underruns can deliberately happen when the demodulator thread simply
+    // stops sending data, e.g., when a FM squelch is closed
+    if(state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED){
+      ap->underrun++;
+      snd_pcm_prepare(ap->handle);
     }
-    return 0;
+    chunk = snd_pcm_avail(ap->handle); // stereo samples available in sound buffer
+    if(chunk == 0){
+      ap->overrun++;
+      usleep(L * 1000000 / ap->samprate); // Wait one buffer time for some room
+      continue;
+    }
+    // Size of the buffer, or the max available in the device, whichever is less
+    chunk = min(chunk,size);
+    if((r = snd_pcm_writei(ap->handle,outsamps,chunk)) != chunk){
+      // What errors could occur here? Discard buffer to catch up
+#if 1
+      fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
+#endif
+    }
+    size -= r; // stereo samples left (2 16 bit words, 4 bytes)
+    outsamps += 2*r; // Each stereo sample is 2 16-bit words
+  }
+  return 0;
 }
 
 
 int main(int argc,char *argv[]){
   const int L=2048;
+  char *mcast_address_string = "239.1.2.6"; // Opus broadcast
+  int dport = 5004;
 
   int c;
-  char *mcast_address_string = "239.1.2.6"; // Opus broadcast
-  int mcast_port = 5004;
-
-  while((c = getopt(argc,argv,"S:R:P:")) != EOF){
+  while((c = getopt(argc,argv,"S:I:P:")) != EOF){
     switch(c){
     case 'S':
       Audioname = optarg;
       break;
-    case 'R':
+    case 'I':
       mcast_address_string = optarg;
       break;
     case 'P':
-      mcast_port = atoi(optarg);
+      dport = atoi(optarg);
       break;
+    default:
+      fprintf(stderr,"Usage: %s [-S audioname] [-I mcast_address] [-P dport]\n",argv[0]);
+      fprintf(stderr,"Defaults: %s -S %s -I %s -P %d\n",argv[0],Audioname,mcast_address_string,dport);
+      exit(1);
     }
   }
   // Graceful signal catch
@@ -228,55 +231,30 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);
   signal(SIGPIPE,SIG_IGN);
 
-  // Set up and join multicast group
+  // Set up socket, bind to port
+  // Add full IPv6 support!
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
-  PCM_mcast_sockaddr.ss_family = AF_INET;
-  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(mcast_port);
   inet_pton(AF_INET,mcast_address_string,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
+  PCM_mcast_sockaddr.ss_family = AF_INET;
+  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(dport);
 
   struct group_req group_req;
   group_req.gr_interface = 0;
   memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
   if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
     perror("setsockopt ipv4 multicast join");
-#if 0 // We're only listening
-  // Apparently works for both IPv4 and IPv6
-  u_char loop = 1;
-  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
-    perror("setsockopt multicast loop failed");
 
-  u_char ttl = 1;
-  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
-    perror("setsockopt multicast ttl failed");
-#endif
-
-  char dest[INET6_ADDRSTRLEN];
-  int dport = -1;
-
-  if(PCM_mcast_sockaddr.ss_family == AF_INET){
-    if(bind(Mcast_fd,(struct sockaddr_in *)&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr)) == -1){
-      perror("bind");
-      exit(1);
-    }
-    inet_ntop(AF_INET,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr,dest,sizeof(dest));      
-    dport = ntohs(((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port);
-  } else if(PCM_mcast_sockaddr.ss_family == AF_INET6){
-    if(bind(Mcast_fd,(struct sockaddr_in6 *)&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr)) == -1){
-      perror("bind");
-      exit(1);
-    }
-    inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
-    dport = ntohs(((struct sockaddr_in6 *)&PCM_mcast_sockaddr)->sin6_port);
-  } else {
-    fprintf(stderr,"Unknown multicast address family %d\n",PCM_mcast_sockaddr.ss_family);
-    exit(1);
-  }
   // Let other processes also bind to this port
-  u_char reuse = 1;
-  if(setsockopt(Mcast_fd,IPPROTO_IP,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
+  int reuse = 1;
+  if(setsockopt(Mcast_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
     perror("so_reuseaddr");
 
-  fprintf(stderr,"Listening on %s:%d\n",dest,dport);
+  if(bind(Mcast_fd,(struct sockaddr_in *)&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr)) == -1){
+    perror("bind");
+    exit(1);
+  }
+
+  fprintf(stderr,"Listening on %s:%d\n",mcast_address_string,dport);
 
   struct iovec iovec[2];
   struct rtp_header rtp;
@@ -299,11 +277,11 @@ int main(int argc,char *argv[]){
 
   while(1){
     ssize_t size;
-    int16_t outsamps[Bufsize];
+
     int drop;
 
     if((size = recvmsg(Mcast_fd,&message,0)) < sizeof(rtp))
-      continue;
+      continue; // Too small to be valid RTP
 
     // To host order
     rtp.ssrc = ntohl(rtp.ssrc);
@@ -335,23 +313,24 @@ int main(int argc,char *argv[]){
 	  audio_init(ap,Samprate,2,L);
 	  ap->ssrc = rtp.ssrc;
 	  ap->eseq = rtp.seq;
+	  ap->etime = rtp.timestamp;
 	  break;
 	}
       }
     }
     if(ap == NULL){
       char src[INET6_ADDRSTRLEN];
-      int dport = -1;
+      int sport = -1;
       if(sender.ss_family == AF_INET){
 	inet_ntop(AF_INET,&((struct sockaddr_in *)&sender)->sin_addr,src,sizeof(src));      
-	dport = ntohs(((struct sockaddr_in *)&sender)->sin_port);
+	sport = ntohs(((struct sockaddr_in *)&sender)->sin_port);
       } else if(sender.ss_family == AF_INET6){
 	inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&sender)->sin6_addr,src,sizeof(src));
-	dport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
+	sport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
       } else {
 	strcpy(src,"unknown");
       }
-      fprintf(stderr,"No slots available for ssrc 0x%x from %s:%d\n",(unsigned int)rtp.ssrc,src,dport);
+      fprintf(stderr,"No slots available for ssrc 0x%x from %s:%d\n",(unsigned int)rtp.ssrc,src,sport);
       continue; // Drop packet
     }
     ap->lastused = time(NULL);
@@ -365,36 +344,41 @@ int main(int argc,char *argv[]){
     } else
       drop = 0;
     ap->eseq = (rtp.seq + 1) & 0xffff;
+    // How do we compute next expected timestamp?
 
     // Show sending address & source port, if it has changed
     if(memcmp(&ap->pcm_sender,&sender,sizeof(sender)) != 0){
       memcpy(&ap->pcm_sender,&sender,sizeof(sender));
       char src[INET6_ADDRSTRLEN];
-      int dport = -1;
+      int sport = -1;
       if(sender.ss_family == AF_INET){
 	inet_ntop(AF_INET,&((struct sockaddr_in *)&sender)->sin_addr,src,sizeof(src));      
-	dport = ntohs(((struct sockaddr_in *)&sender)->sin_port);
+	sport = ntohs(((struct sockaddr_in *)&sender)->sin_port);
       } else if(PCM_mcast_sockaddr.ss_family == AF_INET6){
 	inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&sender)->sin6_addr,src,sizeof(src));
-	dport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
+	sport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
       }
-      fprintf(stderr,"Session %ld receiving ssrc %x from %s:%d\n",(long int)(ap - Audio),ap->ssrc,src,dport);
+      fprintf(stderr,"Session %ld receiving ssrc %x from %s:%d\n",(long int)(ap - Audio),ap->ssrc,src,sport);
     }
 
     size -= sizeof(rtp); // Bytes in data
+    int16_t outsamps[Bufsize];
     switch(rtp.mpt){
     case 10: // Stereo
-      size /= 2;           // # stereo samples
+      size /= 2;           // # 16-bit word samples
       for(i=0;i<size;i++)
-	outsamps[i] = ntohs(data[i]);
+	outsamps[i] = ntohs(data[i]); // RTP profile specifies big-endian samples
+      size /= 2;           // # 32-bit stereo samples
       break;
-    case 11: // Mono; convert to stereo
-      for(i=0;i<size/2;i++)
+    case 11: // Mono; send to both stereo channels
+      size /= 2;
+      for(i=0;i<size;i++)
 	outsamps[2*i] = outsamps[2*i+1] = ntohs(data[i]);
       break;
     case 20: // Opus codec decode - arbitrary choice
       if(drop != 0){
 	// packet dropped; conceal
+	// Should give # samples in missing packet, but how?
 	size = opus_decode(ap->opus,NULL,0,(opus_int16 *)outsamps,sizeof(outsamps),0);
 	play_stereo_pcm(ap,outsamps,size);
       }

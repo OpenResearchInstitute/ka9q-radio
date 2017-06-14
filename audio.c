@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.14 2017/06/13 08:58:48 karn Exp karn $
+// $Id: audio.c,v 1.15 2017/06/13 09:27:17 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -20,14 +20,16 @@
 #include "dsp.h"
 #include "audio.h"
 
-struct audio Audio;
-
 int Mcast_fd;
 
 struct sockaddr_storage PCM_mcast_sockaddr;
 uint32_t PCM_ssrc;
 uint32_t PCM_timestamp = 0;
 uint16_t PCM_seq = 0;
+#define PCM_BUFSIZE 700        // 16-bit word count; must fit in Ethernet MTU
+int16_t PCM_buf[PCM_BUFSIZE];
+int PCM_writeptr = 0;
+
 
 struct OpusEncoder *Opus;
 struct sockaddr_storage OPUS_mcast_sockaddr;
@@ -47,6 +49,8 @@ uint16_t OPUS_seq = 0;
 int send_stereo_opus(complex float *buffer,int size){
   int space,chunk;
 
+  if(OPUS_mcast_sockaddr.ss_family != AF_INET && OPUS_mcast_sockaddr.ss_family != AF_INET6)
+     return 0;
   while(size > 0){
     space = OPUSBUFSIZE - Opuswriteptr;
     chunk = min(space,size);
@@ -58,13 +62,12 @@ int send_stereo_opus(complex float *buffer,int size){
     if(Opuswriteptr == OPUSBUFSIZE){
       // Full, send it
       
-      unsigned char data[1024];
       int dlen;
+      unsigned char data[2048]; // Larger than Ethernet MTU
       struct rtp_header rtp;
       struct iovec iovec[2];
       struct msghdr message;
       
-      // We do assume a complex consists of a real followed by imaginary
       dlen = opus_encode_float(Opus,(float *)Opusbuf,OPUSBUFSIZE,data,sizeof(data));
       rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
       rtp.ssrc = htonl(OPUS_ssrc);
@@ -97,6 +100,9 @@ int send_mono_opus(const float *buffer,int size){
   complex float cbuffer[size];
   int i;
 
+  if(OPUS_mcast_sockaddr.ss_family != AF_INET && OPUS_mcast_sockaddr.ss_family != AF_INET6)
+     return 0;
+
   for(i=0;i<size;i++)
     cbuffer[i] = CMPLXF(buffer[i],buffer[i]);
 
@@ -105,146 +111,110 @@ int send_mono_opus(const float *buffer,int size){
 }
 
 int send_mono_audio(float *buffer,int size){
-  const int L = 512;
-  int i,chunk;
-  float *sp;
-
   send_mono_opus(buffer,size);
 
-  sp = buffer;
+  if(PCM_mcast_sockaddr.ss_family != AF_INET && PCM_mcast_sockaddr.ss_family != AF_INET6)
+     return 0;
+
   while(size > 0){
-    struct rtp_header rtp;
-    struct iovec iovec[2];
-    struct msghdr message;
-    signed short outsamps[L];
-
-    chunk = min(size,L);
-
+    int chunk = PCM_BUFSIZE - PCM_writeptr;
+    chunk = min(chunk,size);
+    int i;
     for(i=0;i<chunk;i++)
-      outsamps[i] = htons(CLIP(SHRT_MAX * sp[i])); // Scale, clip and byte swap
-  
-    rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-    rtp.ssrc = htonl(PCM_ssrc);
-    rtp.mpt = 11;         // Mono linear 16-bit pcm 48 kHz
-    rtp.seq = htons(PCM_seq++);
-    rtp.timestamp = htonl(PCM_timestamp);
-    PCM_timestamp += chunk;
-    
-    iovec[0].iov_base = &rtp;
-    iovec[0].iov_len = sizeof(rtp);
-    iovec[1].iov_base = outsamps;
-    iovec[1].iov_len = chunk * sizeof(outsamps[0]); // 2 bytes/sample
-    
-    message.msg_name = &PCM_mcast_sockaddr;
-    message.msg_namelen = sizeof(PCM_mcast_sockaddr);
-    message.msg_iov = &iovec[0];
-    message.msg_iovlen = 2;
-    message.msg_control = NULL;
-    message.msg_controllen = 0;
-    message.msg_flags = 0;
-    sendmsg(Mcast_fd,&message,0);
-    
+      PCM_buf[PCM_writeptr+i] = htons(CLIP(SHRT_MAX * buffer[i]));
+
+    PCM_writeptr += chunk;
+    buffer += chunk;
     size -= chunk;
-    sp += chunk;
+
+    assert(PCM_writeptr <= PCM_BUFSIZE);
+    if(PCM_writeptr == PCM_BUFSIZE){
+      // Full, send it
+
+      struct rtp_header rtp;      
+      rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+      rtp.ssrc = htonl(PCM_ssrc);
+      rtp.mpt = 11;         // 16 bit linear, big endian, mono
+      rtp.seq = htons(PCM_seq++);
+      rtp.timestamp = htonl(PCM_timestamp);
+      PCM_timestamp += PCM_BUFSIZE; // Increase by mono sample count
+      struct iovec iovec[2];      
+      iovec[0].iov_base = &rtp;
+      iovec[0].iov_len = sizeof(rtp);
+      iovec[1].iov_base = PCM_buf;
+      iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count
+      struct msghdr message;      
+      message.msg_name = &PCM_mcast_sockaddr;
+      message.msg_namelen = sizeof(PCM_mcast_sockaddr);
+      message.msg_iov = &iovec[0];
+      message.msg_iovlen = 2;
+      message.msg_control = NULL;
+      message.msg_controllen = 0;
+      message.msg_flags = 0;
+      sendmsg(Mcast_fd,&message,0);
+      PCM_writeptr = 0;
+    }
   }
   return 0;
 }
 int send_stereo_audio(complex float *buffer,int size){
-  const int L = 256;
-  int i,chunk;
-
   send_stereo_opus(buffer,size);
 
-  // Actual number of samples read
+  if(PCM_mcast_sockaddr.ss_family != AF_INET && PCM_mcast_sockaddr.ss_family != AF_INET6)
+     return 0;
+
   while(size > 0){
-    struct iovec iovec[2];
-    struct msghdr message;
-    signed short outsamps[2*L];
-    struct rtp_header rtp;
-
-    chunk = min(size,L);
-
+    int chunk = PCM_BUFSIZE - PCM_writeptr;
+    chunk = min(chunk/2,size); // count of stereo samples (4 bytes, 2 16-bit words)
+    int i;
     for(i=0;i<chunk;i++){
-      outsamps[2*i] = htons(CLIP(SHRT_MAX * crealf(buffer[i]))); // Scale, clip and byte swap
-      outsamps[2*i+1] = htons(CLIP(SHRT_MAX * cimagf(buffer[i]))); // Scale, clip and byte swap
+      PCM_buf[PCM_writeptr+2*i] = htons(CLIP(SHRT_MAX * crealf(buffer[i])));
+      PCM_buf[PCM_writeptr+2*i+1] = htons(CLIP(SHRT_MAX * cimagf(buffer[i])));
     }
-    rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-    rtp.ssrc = htonl(PCM_ssrc);
-    rtp.mpt = 10;         // Stereo linear 16-bit pcm 48 kHz
-    rtp.seq = htons(PCM_seq++);
-    rtp.timestamp = htonl(PCM_timestamp);
-    PCM_timestamp += chunk;
-    
-    iovec[0].iov_base = &rtp;
-    iovec[0].iov_len = sizeof(rtp);
-    iovec[1].iov_base = outsamps;
-    iovec[1].iov_len = 2*sizeof(outsamps[0])*chunk; // 2 bytes/sample * stereo
-    
-    message.msg_name = &PCM_mcast_sockaddr;
-    message.msg_namelen = sizeof(PCM_mcast_sockaddr);
-    message.msg_iov = &iovec[0];
-    message.msg_iovlen = 2;
-    message.msg_control = NULL;
-    message.msg_controllen = 0;
-    message.msg_flags = 0;
-    sendmsg(Mcast_fd,&message,0);
-    
-    size -= chunk;
+    PCM_writeptr += 2*chunk;
     buffer += chunk;
+    size -= chunk;
+
+    assert(PCM_writeptr <= PCM_BUFSIZE);
+    if(PCM_writeptr == PCM_BUFSIZE){
+      // Full, send it
+      
+      struct rtp_header rtp;
+      rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+      rtp.ssrc = htonl(PCM_ssrc);
+      rtp.mpt = 10;         // 16 bit linear, big endian, stereo
+      rtp.seq = htons(PCM_seq++);
+      rtp.timestamp = htonl(PCM_timestamp);
+      PCM_timestamp += PCM_BUFSIZE/2; // Increase by stereo sample count
+      struct iovec iovec[2];      
+      iovec[0].iov_base = &rtp;
+      iovec[0].iov_len = sizeof(rtp);
+      iovec[1].iov_base = PCM_buf;
+      iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count
+      struct msghdr message;      
+      message.msg_name = &PCM_mcast_sockaddr;
+      message.msg_namelen = sizeof(PCM_mcast_sockaddr);
+      message.msg_iov = &iovec[0];
+      message.msg_iovlen = 2;
+      message.msg_control = NULL;
+      message.msg_controllen = 0;
+      message.msg_flags = 0;
+      sendmsg(Mcast_fd,&message,0);
+      PCM_writeptr = 0;
+    }
   }
   return 0;
 }
 
 
-int setup_audio(){
-  struct group_req group_req;
-  int error;
-  struct sockaddr_in lsock;
-  extern char *OPUS_mcast_address_text;
-  extern char *PCM_mcast_address_text;
-  
-  Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
-  lsock.sin_family = AF_INET;
-  lsock.sin_addr.s_addr = INADDR_ANY;
-  lsock.sin_port = 0;
-  if(bind(Mcast_fd,&lsock,sizeof(lsock)) == -1)
-    perror("bind");
-
-  // Make this configurable!!
-  PCM_mcast_sockaddr.ss_family = AF_INET;
-  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
-  inet_pton(AF_INET,PCM_mcast_address_text,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
-
-  group_req.gr_interface = 0;
-  memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
-  if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-    perror("setsockopt ipv4 multicast join");
-
-    // Make this configurable!!
-  OPUS_mcast_sockaddr.ss_family = AF_INET;
-  ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
-  inet_pton(AF_INET,OPUS_mcast_address_text,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
-
-  group_req.gr_interface = 0;
-  memcpy(&group_req.gr_group,&OPUS_mcast_sockaddr,sizeof(OPUS_mcast_sockaddr));
-  if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-    perror("setsockopt ipv4 multicast join");
-
-  // Apparently works for both IPv4 and IPv6
-  u_char loop = 1;
-  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
-    perror("setsockopt multicast loop failed");
-
-  u_char ttl = 1;
-  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
-    perror("setsockopt multicast ttl failed");
-
+int setup_audio(int bitrate){
   time_t tt;
   time(&tt);
   PCM_ssrc = tt & 0xffffffff; // low 32 bits of clock time
 
   OPUS_ssrc = (tt+1) & 0xffffffff; // low 32 bits of clock time
+  int error;
   Opus = opus_encoder_create(48000,2,OPUS_APPLICATION_AUDIO,&error);
-  opus_encoder_ctl(Opus,OPUS_SET_BITRATE(Opusbitrate));
+  opus_encoder_ctl(Opus,OPUS_SET_BITRATE(bitrate));
   return 0;
 }
