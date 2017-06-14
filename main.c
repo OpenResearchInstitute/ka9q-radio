@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.30 2017/06/14 05:32:38 karn Exp karn $
+// $Id: main.c,v 1.31 2017/06/14 22:33:11 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -364,7 +364,7 @@ void *input_loop(struct demod *demod){
     if(FD_ISSET(Ctl_fd,&mask)){
       // Got a command
       addrlen = sizeof(Ctl_address);
-      rdlen = recvfrom(Ctl_fd,&pktbuf,sizeof(pktbuf),0,&Ctl_address,&addrlen);
+      rdlen = recvfrom(Ctl_fd,&pktbuf,sizeof(pktbuf),0,(struct sockaddr *)&Ctl_address,&addrlen);
       // Should probably look at the source address
       if(rdlen > 0)
 	process_command(demod,pktbuf,rdlen);

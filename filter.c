@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.4 2017/05/29 16:30:33 karn Exp karn $
+// $Id: filter.c,v 1.5 2017/06/05 06:09:15 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -7,7 +7,7 @@
 #include <complex.h>
 #include <math.h>
 #include <fftw3.h>
-#include <malloc.h>
+#include <stdlib.h>
 #include <memory.h>
 #include <assert.h>
 #include "dsp.h"
@@ -87,7 +87,7 @@ int execute_filter(struct filter *f){
   } else if(f->type == CROSS_CONJ){
     // Hack for ISB; forces negative frequencies onto I, positive onto Q
     for(i=N-1,n=1; n < N_dec/2; n++,i--){
-      complex t; // Needed when decimate == 1
+      complex float t; // Needed when decimate == 1
       t = f->response[i] * (f->fdomain[i] - conjf(f->fdomain[n]));
       f->fdomain[n] = f->response[n] * (f->fdomain[n] + conjf(f->fdomain[i])); // positive
       f->fdomain[N_dec-n] = t; // negative

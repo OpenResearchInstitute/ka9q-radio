@@ -1,4 +1,4 @@
-// $Id$
+// $Id: fcd.c,v 1.1 2016/10/14 00:22:25 karn Exp karn $
 // KA9Q version of fcd.c
 /***************************************************************************
  *  This file is part of Qthid.
@@ -30,6 +30,7 @@
 #define FCD
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 #include "hidapi.h"
 #include "fcd.h"
 #include "fcdhidcmd.h"

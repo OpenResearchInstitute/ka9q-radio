@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.6 2017/06/02 12:06:07 karn Exp karn $
+// $Id: misc.c,v 1.7 2017/06/04 10:52:09 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -17,7 +17,12 @@
 const complex float csincosf(const float x){
   float s,c;
 
+#if __APPLE__ // No sincos
+  s = sinf(x);
+  c = cosf(x);
+#else
   sincosf(x,&s,&c);
+#endif
   return CMPLXF(c,s);
 }
 
@@ -25,7 +30,12 @@ const complex float csincosf(const float x){
 const complex double csincos(const double x){
   double s,c;
 
+#if __APPLE__
+  s = sin(x);
+  c = cos(x);
+#else
   sincos(x,&s,&c);
+#endif
   return CMPLX(c,s);
 }
 

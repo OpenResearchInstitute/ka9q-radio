@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.32 2017/06/14 03:09:12 karn Exp karn $
+// $Id: display.c,v 1.33 2017/06/14 05:32:38 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -171,7 +171,8 @@ void *display(void *arg){
       x = 25 - tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
     } else if(tunestep >= 9 && tunestep <= 9){
       x = 25 - tunestep - 3; // 1,000,000,000
-    }
+    } else
+      x = 0; // can't happen, but shuts up compiler
     // Highlight digit for current tuning step
     mvwchgat(fw,tuneitem,x,1,A_STANDOUT,0,NULL);
     wnoutrefresh(fw);
@@ -207,7 +208,7 @@ void *display(void *arg){
     wmove(net,0,0);
     char source[INET6_ADDRSTRLEN];
     char dest[INET6_ADDRSTRLEN];
-    int sport,dport;
+    int sport=-1,dport=-1;
 
     if(Input_source_address.ss_family == AF_INET){
       inet_ntop(AF_INET,&((struct sockaddr_in *)&Input_source_address)->sin_addr,source,sizeof(source));
@@ -462,10 +463,10 @@ void *display(void *arg){
     case 'm':   // Select demod mode from list
       strncpy(str,"Enter mode [ ",sizeof(str));
       for(i=1;i <= Nmodes;i++){
-	strncat(str,Modes[i].name,sizeof(str) - strlen(str));
-	strncat(str," ",sizeof(str) - strlen(str));
+	strncat(str,Modes[i].name,sizeof(str) - strlen(str) - 1);
+	strncat(str," ",sizeof(str) - strlen(str) - 1);
       }
-      strncat(str,"]: ",sizeof(str) - strlen(str));
+      strncat(str,"]: ",sizeof(str) - strlen(str) - 1);
       getentry(str,str,sizeof(str));
       if(strlen(str) > 0){
 	for(i=1;i <= Nmodes;i++){

@@ -1,8 +1,9 @@
-// $Id: audio.c,v 1.17 2017/06/14 05:32:38 karn Exp karn $
+// $Id: audio.c,v 1.18 2017/06/14 10:39:27 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <string.h>
 #include <complex.h>
