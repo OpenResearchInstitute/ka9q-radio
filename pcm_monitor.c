@@ -1,4 +1,4 @@
-// $Id: pcm_monitor.c,v 1.6 2017/06/13 09:27:17 karn Exp karn $
+// $Id: pcm_monitor.c,v 1.7 2017/06/14 03:09:12 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -238,12 +238,15 @@ int main(int argc,char *argv[]){
   PCM_mcast_sockaddr.ss_family = AF_INET;
   ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(dport);
 
-  struct group_req group_req;
-  group_req.gr_interface = 0;
-  memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
-  if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-    perror("setsockopt ipv4 multicast join");
-
+  if(IN_MULTICAST(ntohl((((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr.s_addr)))){
+    // Join only if it's actually a multicast address
+    // We could join 0.0.0.0 or our own address to receive unicasts
+    struct group_req group_req;
+    group_req.gr_interface = 0;
+    memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
+    if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+      perror("setsockopt ipv4 multicast join");
+  }
   // Let other processes also bind to this port
   int reuse = 1;
   if(setsockopt(Mcast_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)

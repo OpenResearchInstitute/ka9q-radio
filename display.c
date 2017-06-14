@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.31 2017/06/13 08:58:48 karn Exp karn $
+// $Id: display.c,v 1.32 2017/06/14 03:09:12 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -227,11 +227,12 @@ void *display(void *arg){
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
 
-    if(OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0)
-      wprintw(net,"OPUS out %s:%d\n",OPUS_mcast_address_text,Mcast_dest_port);
+    if(OPUS_bitrate > 0 && OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0)
+      wprintw(net,"OPUS audio -> %s:%d; %'d bps %.1f ms blocks\n",OPUS_mcast_address_text,Mcast_dest_port,
+	      OPUS_bitrate,1000.*OPUS_blocksize/DAC_samprate);
 
     if(PCM_mcast_address_text != NULL && strlen(PCM_mcast_address_text) > 0)
-      wprintw(net,"PCM out  %s:%d\n",PCM_mcast_address_text,Mcast_dest_port);
+      wprintw(net,"PCM audio  -> %s:%d\n",PCM_mcast_address_text,Mcast_dest_port);
 
     wnoutrefresh(net);
     doupdate();

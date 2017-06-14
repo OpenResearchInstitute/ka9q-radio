@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.28 2017/06/13 09:27:17 karn Exp karn $
+// $Id: main.c,v 1.29 2017/06/14 03:09:12 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -49,6 +49,8 @@ struct sockaddr_storage Input_mcast_sockaddr;
 
 char *OPUS_mcast_address_text = "239.1.2.6";
 char *PCM_mcast_address_text = "239.1.2.5";
+int OPUS_bitrate = 32000;
+int OPUS_blocksize = 960;
 
 int Input_fd;
 int Ctl_fd;
@@ -81,23 +83,23 @@ int main(int argc,char *argv[]){
   mode = FM;
   second_IF = ADC_samprate/4;
   char *iq_mcast_address_text = "239.1.2.3"; // Default for testing
-  int opusbitrate = 32000;
+  float opus_blockms = 20.0;
 
-  while((c = getopt(argc,argv,"b:B:i:I:l:L:m:M:O:p:P:qr:t:")) != EOF){
+  while((c = getopt(argc,argv,"b:B:i:I:k:l:L:m:M:O:p:P:qr:t:")) != EOF){
     int i;
 
     switch(c){
-    case 'b':
-      Kaiser_beta = atof(optarg);
-      break;
     case 'B':
-      opusbitrate = atoi(optarg);
+      opus_blockms = atof(optarg);
       break;
     case 'i':
       second_IF = atof(optarg);
       break;
     case 'I':
       iq_mcast_address_text = optarg;
+      break;
+    case 'k':
+      Kaiser_beta = atof(optarg);
       break;
     case 'l':
       locale = optarg;
@@ -129,7 +131,7 @@ int main(int argc,char *argv[]){
       Quiet++; // Suppress display
       break;
     case 'r':
-      DAC_samprate = atof(optarg);
+      OPUS_bitrate = atoi(optarg);
       break;
     case 't':
       Nthreads = atoi(optarg);
@@ -138,10 +140,10 @@ int main(int argc,char *argv[]){
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
     default:
-      fprintf(stderr,"Usage: %s [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r DAC sample rate] [-t threads]\n",argv[0]);
-      fprintf(stderr,"Default: %s -I %s -l %s -L %d -m %s -M %d -O %s -P %s -r %d -t %d\n",
-	      argv[0],iq_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
-	      OPUS_mcast_address_text,PCM_mcast_address_text,DAC_samprate,Nthreads);
+      fprintf(stderr,"Usage: %s [-B opus_blockms] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
+      fprintf(stderr,"Default: %s -B %.1f -I %s -l %s -L %d -m %s -M %d -O %s -P %s -r %d -t %d\n",
+	      argv[0],opus_blockms,iq_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
+	      OPUS_mcast_address_text,PCM_mcast_address_text,OPUS_bitrate,Nthreads);
       exit(1);
       break;
     }
@@ -272,36 +274,18 @@ int main(int argc,char *argv[]){
     PCM_mcast_sockaddr.ss_family = AF_INET;
     ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
     inet_pton(AF_INET,PCM_mcast_address_text,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
-
-    struct group_req group_req;
-    group_req.gr_interface = 0;
-    memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(PCM_mcast_sockaddr));
-    if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-      perror("setsockopt ipv4 multicast join");
-
   }
-  if(OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0){  
+  if(OPUS_bitrate > 0 && OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0){  
     OPUS_mcast_sockaddr.ss_family = AF_INET;
     ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
     inet_pton(AF_INET,OPUS_mcast_address_text,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
 
-    struct group_req group_req;
-    group_req.gr_interface = 0;
-    memcpy(&group_req.gr_group,&OPUS_mcast_sockaddr,sizeof(OPUS_mcast_sockaddr));
-    if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-      perror("setsockopt ipv4 multicast join");
-    
-    // Apparently works for both IPv4 and IPv6
-    int loop = 1;
-    if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
-    perror("setsockopt multicast loop failed");
-
-    int ttl = 1;
-    if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
-      perror("setsockopt multicast ttl failed");
   }
-
-
+  // Apparently works for both IPv4 and IPv6
+  int ttl = 2;
+  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
+    perror("setsockopt multicast ttl failed");
+  
   // Pipes for front end -> demod
   int sv[2];
   pipe(sv);
@@ -315,11 +299,13 @@ int main(int argc,char *argv[]){
   if(sz == -1)
     perror("F_SETPIPE_SZ");
 
-  setup_audio(opusbitrate);
+  if(setup_audio(opus_blockms,OPUS_bitrate) != 0){
+    fprintf(stderr,"Audio setup failed\n");
+    exit(1);
+  }
 
   set_mode(demod,mode);
   set_second_LO(demod,-second_IF,1);
-
   input_loop(demod); // Doesn't return
 
   exit(0);

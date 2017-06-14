@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.15 2017/06/13 09:27:17 karn Exp karn $
+// $Id: audio.c,v 1.16 2017/06/14 03:09:12 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -8,6 +8,7 @@
 #include <complex.h>
 #include <stdint.h>
 #include <time.h>
+#include <math.h>
 #undef I
 #include <sys/select.h>
 #include <sys/types.h>
@@ -33,11 +34,7 @@ int PCM_writeptr = 0;
 
 struct OpusEncoder *Opus;
 struct sockaddr_storage OPUS_mcast_sockaddr;
-const int Opusbitrate = 32000;
-// Must correspond to 2.5, 5, 10, 20, 40, 60 ms
-// i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
-#define OPUSBUFSIZE 960
-complex float Opusbuf[OPUSBUFSIZE];
+complex float *Opusbuf;
 int Opuswriteptr = 0;
 uint32_t OPUS_ssrc;
 uint32_t OPUS_timestamp = 0;
@@ -52,14 +49,14 @@ int send_stereo_opus(complex float *buffer,int size){
   if(OPUS_mcast_sockaddr.ss_family != AF_INET && OPUS_mcast_sockaddr.ss_family != AF_INET6)
      return 0;
   while(size > 0){
-    space = OPUSBUFSIZE - Opuswriteptr;
+    space = OPUS_blocksize - Opuswriteptr;
     chunk = min(space,size);
     memcpy(&Opusbuf[Opuswriteptr],buffer,chunk*sizeof(complex float));
     Opuswriteptr += chunk;
     buffer += chunk;
     size -= chunk;
 
-    if(Opuswriteptr == OPUSBUFSIZE){
+    if(Opuswriteptr == OPUS_blocksize){
       // Full, send it
       
       int dlen;
@@ -68,13 +65,13 @@ int send_stereo_opus(complex float *buffer,int size){
       struct iovec iovec[2];
       struct msghdr message;
       
-      dlen = opus_encode_float(Opus,(float *)Opusbuf,OPUSBUFSIZE,data,sizeof(data));
+      dlen = opus_encode_float(Opus,(float *)Opusbuf,OPUS_blocksize,data,sizeof(data));
       rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
       rtp.ssrc = htonl(OPUS_ssrc);
       rtp.mpt = 20;         // arbitrary choice
       rtp.seq = htons(OPUS_seq++);
       rtp.timestamp = htonl(OPUS_timestamp);
-      OPUS_timestamp += OPUSBUFSIZE;
+      OPUS_timestamp += OPUS_blocksize;
       
       iovec[0].iov_base = &rtp;
       iovec[0].iov_len = sizeof(rtp);
@@ -207,14 +204,35 @@ int send_stereo_audio(complex float *buffer,int size){
 }
 
 
-int setup_audio(int bitrate){
+int setup_audio(float buftime,int bitrate){
   time_t tt;
   time(&tt);
   PCM_ssrc = tt & 0xffffffff; // low 32 bits of clock time
+  int bufsize = round(buftime * DAC_samprate / 1000.);
 
-  OPUS_ssrc = (tt+1) & 0xffffffff; // low 32 bits of clock time
-  int error;
-  Opus = opus_encoder_create(48000,2,OPUS_APPLICATION_AUDIO,&error);
-  opus_encoder_ctl(Opus,OPUS_SET_BITRATE(bitrate));
+  if(bitrate > 0){
+    OPUS_ssrc = (tt+1) & 0xffffffff; // low 32 bits of clock time
+    int error;
+    Opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
+    if(Opus == NULL){
+      fprintf(stderr,"opus_encoder_create failed, error %d\n",error);
+      return -1;
+    }
+    // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
+    // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
+    if(bufsize != 120 && bufsize != 240 && bufsize != 480 && bufsize != 960 &&
+       bufsize != 1920 && bufsize != 2880){
+      fprintf(stderr,"opus block time must be 2.5/5/10/20/40/60 ms\n");
+      return -1;
+    }
+    OPUS_blocksize = bufsize;
+    Opusbuf = malloc(sizeof(complex float) * OPUS_blocksize);
+    if(Opusbuf == NULL){
+      fprintf(stderr,"opus buffer malloc failed\n");
+      return -1;
+    }
+    
+    opus_encoder_ctl(Opus,OPUS_SET_BITRATE(bitrate));
+  }
   return 0;
 }
