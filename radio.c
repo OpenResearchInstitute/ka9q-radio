@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.27 2017/06/11 05:01:13 karn Exp karn $
+// $Id: radio.c,v 1.28 2017/06/13 02:51:34 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -24,7 +24,8 @@
 extern int Ctl_fd;
 struct demod Demod;
 
-const float Headroom = .316227766; // sqrt(0.10) = -10 dB
+//const float Headroom = .316227766; // sqrt(0.10) = -10 dB
+const float Headroom = 0.1778; // -15 dB
 
 
 // Get true first LO frequency

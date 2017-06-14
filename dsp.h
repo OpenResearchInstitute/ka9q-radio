@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.4 2017/06/02 12:05:45 karn Exp karn $
+// $Id: dsp.h,v 1.5 2017/06/04 10:54:39 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -17,7 +17,7 @@ const double cnrm(const complex double x);
 
 int fillbuf(const int,char *,const int);
 
-#define CLIP(x) ((x) > SHRT_MAX ? SHRT_MAX : (x) < SHRT_MIN ? SHRT_MIN : (x))
+
 #define max(x,y) ((x) > (y) ? (x) : (y))
 #define min(x,y) ((x) < (y) ? (x) : (y))
 

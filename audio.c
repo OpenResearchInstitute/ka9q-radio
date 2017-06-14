@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.16 2017/06/14 03:09:12 karn Exp karn $
+// $Id: audio.c,v 1.17 2017/06/14 05:32:38 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -40,6 +40,14 @@ uint32_t OPUS_ssrc;
 uint32_t OPUS_timestamp = 0;
 uint16_t OPUS_seq = 0;
 
+inline short scaleclip(float x){
+  if(x > 1.0)
+    x = 1.0;
+  else if(x < -1.0)
+    x = -1.0;
+
+  return SHRT_MAX * x;
+}
 
 // Send floating point linear PCM as OPUS compressed multicast
 // size = # of stereo samples (half number of floats)
@@ -118,7 +126,7 @@ int send_mono_audio(float *buffer,int size){
     chunk = min(chunk,size);
     int i;
     for(i=0;i<chunk;i++)
-      PCM_buf[PCM_writeptr+i] = htons(CLIP(SHRT_MAX * buffer[i]));
+      PCM_buf[PCM_writeptr+i] = htons(scaleclip(buffer[i]));
 
     PCM_writeptr += chunk;
     buffer += chunk;
@@ -165,8 +173,8 @@ int send_stereo_audio(complex float *buffer,int size){
     chunk = min(chunk/2,size); // count of stereo samples (4 bytes, 2 16-bit words)
     int i;
     for(i=0;i<chunk;i++){
-      PCM_buf[PCM_writeptr+2*i] = htons(CLIP(SHRT_MAX * crealf(buffer[i])));
-      PCM_buf[PCM_writeptr+2*i+1] = htons(CLIP(SHRT_MAX * cimagf(buffer[i])));
+      PCM_buf[PCM_writeptr+2*i] = htons(scaleclip(crealf(buffer[i])));
+      PCM_buf[PCM_writeptr+2*i+1] = htons(scaleclip(cimagf(buffer[i])));
     }
     PCM_writeptr += 2*chunk;
     buffer += chunk;

@@ -1,4 +1,4 @@
-// $Id: pcm_monitor.c,v 1.7 2017/06/14 03:09:12 karn Exp karn $
+// $Id: pcm_monitor.c,v 1.8 2017/06/14 05:32:38 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -338,7 +338,7 @@ int main(int argc,char *argv[]){
     }
     ap->lastused = time(NULL);
     if(rtp.seq != ap->eseq){
-      fprintf(stderr,"expected %d got %d\n",ap->eseq,rtp.seq);
+      fprintf(stderr,"%d: expected %d got %d\n",(unsigned int)(ap - Audio),ap->eseq,rtp.seq);
       if((int16_t)(rtp.seq - ap->eseq) < 0){
 	ap->eseq = (rtp.seq + 1) & 0xffff;
 	continue;	// Drop probable duplicate
@@ -361,7 +361,8 @@ int main(int argc,char *argv[]){
 	inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&sender)->sin6_addr,src,sizeof(src));
 	sport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
       }
-      fprintf(stderr,"Session %ld receiving ssrc %x from %s:%d\n",(long int)(ap - Audio),ap->ssrc,src,sport);
+      fprintf(stderr,"Session %ld receiving ssrc %x type %d from %s:%d\n",
+	      (long int)(ap - Audio),ap->ssrc,rtp.mpt,src,sport);
     }
 
     size -= sizeof(rtp); // Bytes in data
