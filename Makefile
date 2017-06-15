@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.19 2017/06/14 23:04:54 karn Exp karn $
+# $Id: Makefile,v 1.20 2017/06/15 04:35:57 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -21,7 +21,7 @@ radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o filter.o display.o mode
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
 pcm_monitor: pcm_monitor.o
-	$(CC) -g -o $@ $^ -lasound  -lpthread -lncurses -lopus -lm
+	$(CC) -g -o $@ $^ -lasound  -lpthread -lopus -lm
 
 libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^

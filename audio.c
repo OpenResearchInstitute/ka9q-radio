@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.20 2017/06/15 00:58:02 karn Exp karn $
+// $Id: audio.c,v 1.21 2017/06/15 03:33:53 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -32,7 +32,6 @@ uint16_t PCM_seq = 0;
 int16_t PCM_buf[PCM_BUFSIZE];
 int PCM_writeptr = 0;
 
-
 struct OpusEncoder *Opus;
 struct sockaddr_in OPUS_mcast_sockaddr;
 complex float *Opusbuf;
@@ -53,11 +52,33 @@ inline short scaleclip(float x){
 // Send floating point linear PCM as OPUS compressed multicast
 // size = # of stereo samples (half number of floats)
 int send_stereo_opus(complex float *buffer,int size){
-  int space,chunk;
 
   if(OPUS_mcast_sockaddr.sin_family != AF_INET)
     return 0;
+
+  struct rtp_header rtp;
+  rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+  rtp.ssrc = htonl(OPUS_ssrc);
+  rtp.mpt = 20;         // arbitrary choice
+
+  struct iovec iovec[2];
+  unsigned char data[2048]; // Larger than Ethernet MTU
+  iovec[0].iov_base = &rtp;
+  iovec[0].iov_len = sizeof(rtp);
+  iovec[1].iov_base = data;
+
+  struct msghdr message;
+  message.msg_name = &OPUS_mcast_sockaddr;
+  // OSX is very finicky about the size of the sockaddr structure; Linux is not
+  message.msg_namelen = sizeof(struct sockaddr_in);
+  message.msg_iov = &iovec[0];
+  message.msg_iovlen = 2;
+  message.msg_control = NULL;
+  message.msg_controllen = 0;
+  message.msg_flags = 0;
+
   while(size > 0){
+    int space,chunk;
     space = OPUS_blocksize - Opuswriteptr;
     chunk = min(space,size);
     memcpy(&Opusbuf[Opuswriteptr],buffer,chunk*sizeof(complex float));
@@ -67,34 +88,12 @@ int send_stereo_opus(complex float *buffer,int size){
 
     if(Opuswriteptr == OPUS_blocksize){
       // Full, send it
-      
       int dlen;
-      unsigned char data[2048]; // Larger than Ethernet MTU
-      struct rtp_header rtp;
-      struct iovec iovec[2];
-      struct msghdr message;
-      
       dlen = opus_encode_float(Opus,(float *)Opusbuf,OPUS_blocksize,data,sizeof(data));
-      rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-      rtp.ssrc = htonl(OPUS_ssrc);
-      rtp.mpt = 20;         // arbitrary choice
       rtp.seq = htons(OPUS_seq++);
       rtp.timestamp = htonl(OPUS_timestamp);
       OPUS_timestamp += OPUS_blocksize;
-      
-      iovec[0].iov_base = &rtp;
-      iovec[0].iov_len = sizeof(rtp);
-      iovec[1].iov_base = data;
       iovec[1].iov_len = dlen;
-      
-      message.msg_name = &OPUS_mcast_sockaddr;
-      // OSX is very finicky about the size of the sockaddr structure; Linux is not
-      message.msg_namelen = sizeof(struct sockaddr_in);
-      message.msg_iov = &iovec[0];
-      message.msg_iovlen = 2;
-      message.msg_control = NULL;
-      message.msg_controllen = 0;
-      message.msg_flags = 0;
       sendmsg(Mcast_fd,&message,0);
       Opuswriteptr = 0;
     }
@@ -122,6 +121,26 @@ int send_mono_audio(float *buffer,int size){
 
   if(PCM_mcast_sockaddr.sin_family != AF_INET)
      return 0;
+  struct rtp_header rtp;
+  rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+  rtp.ssrc = htonl(PCM_ssrc);
+  rtp.mpt = 11;         // 16 bit linear, big endian, mono
+
+  struct iovec iovec[2];
+  iovec[0].iov_base = &rtp;
+  iovec[0].iov_len = sizeof(rtp);
+  iovec[1].iov_base = PCM_buf;
+  iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count
+
+  struct msghdr message;      
+  message.msg_name = &PCM_mcast_sockaddr;
+  // OSX is very finicky about the size of the sockaddr structure; Linux is not
+  message.msg_namelen = sizeof(struct sockaddr_in);
+  message.msg_iov = &iovec[0];
+  message.msg_iovlen = 2;
+  message.msg_control = NULL;
+  message.msg_controllen = 0;
+  message.msg_flags = 0;
 
   while(size > 0){
     int chunk = PCM_BUFSIZE - PCM_writeptr;
@@ -137,29 +156,9 @@ int send_mono_audio(float *buffer,int size){
     assert(PCM_writeptr <= PCM_BUFSIZE);
     if(PCM_writeptr == PCM_BUFSIZE){
       // Full, send it
-
-      struct rtp_header rtp;      
-      rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-      rtp.ssrc = htonl(PCM_ssrc);
-      rtp.mpt = 11;         // 16 bit linear, big endian, mono
       rtp.seq = htons(PCM_seq++);
       rtp.timestamp = htonl(PCM_timestamp);
       PCM_timestamp += PCM_BUFSIZE; // Increase by mono sample count
-      struct iovec iovec[2];      
-      iovec[0].iov_base = &rtp;
-      iovec[0].iov_len = sizeof(rtp);
-      iovec[1].iov_base = PCM_buf;
-      iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count
-      struct msghdr message;      
-      message.msg_name = &PCM_mcast_sockaddr;
-      // OSX is very finicky about the size of the sockaddr structure; Linux is not
-      message.msg_namelen = sizeof(struct sockaddr_in);
-
-      message.msg_iov = &iovec[0];
-      message.msg_iovlen = 2;
-      message.msg_control = NULL;
-      message.msg_controllen = 0;
-      message.msg_flags = 0;
       sendmsg(Mcast_fd,&message,0);
       PCM_writeptr = 0;
     }
@@ -171,6 +170,27 @@ int send_stereo_audio(complex float *buffer,int size){
 
   if(PCM_mcast_sockaddr.sin_family != AF_INET)
     return 0;
+
+  struct rtp_header rtp;
+  rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+  rtp.ssrc = htonl(PCM_ssrc);
+  rtp.mpt = 10;         // 16 bit linear, big endian, stereo
+
+  struct iovec iovec[2];      
+  iovec[0].iov_base = &rtp;
+  iovec[0].iov_len = sizeof(rtp);
+  iovec[1].iov_base = PCM_buf;
+  iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count - fixed
+  
+  struct msghdr message;      
+  message.msg_name = &PCM_mcast_sockaddr;
+  // OSX is very finicky about the size of the sockaddr structure; Linux is not
+  message.msg_namelen = sizeof(struct sockaddr_in);
+  message.msg_iov = &iovec[0];
+  message.msg_iovlen = 2;
+  message.msg_control = NULL;
+  message.msg_controllen = 0;
+  message.msg_flags = 0;
 
   while(size > 0){
     int chunk = PCM_BUFSIZE - PCM_writeptr;
@@ -187,29 +207,9 @@ int send_stereo_audio(complex float *buffer,int size){
     assert(PCM_writeptr <= PCM_BUFSIZE);
     if(PCM_writeptr == PCM_BUFSIZE){
       // Full, send it
-      
-      struct rtp_header rtp;
-      rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-      rtp.ssrc = htonl(PCM_ssrc);
-      rtp.mpt = 10;         // 16 bit linear, big endian, stereo
       rtp.seq = htons(PCM_seq++);
       rtp.timestamp = htonl(PCM_timestamp);
       PCM_timestamp += PCM_BUFSIZE/2; // Increase by stereo sample count
-      struct iovec iovec[2];      
-      iovec[0].iov_base = &rtp;
-      iovec[0].iov_len = sizeof(rtp);
-      iovec[1].iov_base = PCM_buf;
-      iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count
-      struct msghdr message;      
-      message.msg_name = &PCM_mcast_sockaddr;
-      // OSX is very finicky about the size of the sockaddr structure; Linux is not
-      message.msg_namelen = sizeof(struct sockaddr_in);
-
-      message.msg_iov = &iovec[0];
-      message.msg_iovlen = 2;
-      message.msg_control = NULL;
-      message.msg_controllen = 0;
-      message.msg_flags = 0;
       sendmsg(Mcast_fd,&message,0);
       PCM_writeptr = 0;
     }
@@ -219,10 +219,18 @@ int send_stereo_audio(complex float *buffer,int size){
 
 
 int setup_audio(float buftime,int bitrate){
+  // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
+  // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
+  if(buftime != 2.5 && buftime != 5 && buftime != 10 && buftime != 20 &&
+     buftime != 40 && buftime != 60){
+    fprintf(stderr,"opus block time must be 2.5/5/10/20/40/60 ms\n");
+    return -1;
+  }
+  int bufsize = round(buftime * DAC_samprate / 1000.);
+
   time_t tt;
   time(&tt);
   PCM_ssrc = tt & 0xffffffff; // low 32 bits of clock time
-  int bufsize = round(buftime * DAC_samprate / 1000.);
 
   if(bitrate > 0){
     OPUS_ssrc = (tt+1) & 0xffffffff; // low 32 bits of clock time
@@ -232,20 +240,12 @@ int setup_audio(float buftime,int bitrate){
       fprintf(stderr,"opus_encoder_create failed, error %d\n",error);
       return -1;
     }
-    // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
-    // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
-    if(bufsize != 120 && bufsize != 240 && bufsize != 480 && bufsize != 960 &&
-       bufsize != 1920 && bufsize != 2880){
-      fprintf(stderr,"opus block time must be 2.5/5/10/20/40/60 ms\n");
-      return -1;
-    }
     OPUS_blocksize = bufsize;
     Opusbuf = malloc(sizeof(complex float) * OPUS_blocksize);
     if(Opusbuf == NULL){
       fprintf(stderr,"opus buffer malloc failed\n");
       return -1;
     }
-    
     opus_encoder_ctl(Opus,OPUS_SET_BITRATE(bitrate));
   }
   return 0;
