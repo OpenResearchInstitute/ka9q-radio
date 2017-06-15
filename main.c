@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.31 2017/06/14 22:33:11 karn Exp karn $
+// $Id: main.c,v 1.32 2017/06/14 23:04:54 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -199,53 +199,66 @@ int main(int argc,char *argv[]){
 
     int reuse = 1;
     if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
+      perror("ipv4 so_reuseport failed");
+    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
       perror("ipv4 so_reuseaddr failed");
 
     Input_mcast_sockaddr.ss_family = AF_INET;
     ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
-    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
+    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(struct sockaddr_in)) != 0){
       perror("bind on IPv4 input socket");
       exit(1);
     }
 
+#if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
+    struct ip_mreq mreq;
+    mreq.imr_multiaddr = ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr;
+    mreq.imr_interface.s_addr = INADDR_ANY;
+    if(setsockopt(Input_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0){
+      perror("ipv4 multicast join");
+      exit(1);
+    }
+#else // Linux, etc
     struct group_req group_req;
     group_req.gr_interface = 0;
     Input_mcast_sockaddr.ss_family = AF_INET;
     memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
     if(setsockopt(Input_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
-      perror("ipv4 multicast join failed");
+      perror("ipv4 multicast join");
       exit(1);
     }
-  } else if(inet_pton(AF_INET6,iq_mcast_address_text,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr) == 1){
+#endif
+  }
+#ifndef __APPLE__ // Doesn't seem to work on OSX
+ else if(inet_pton(AF_INET6,iq_mcast_address_text,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr) == 1){
     if((Input_fd = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
-      perror("funcube: can't create IPv6 input socket");
+      perror("can't create IPv6 input socket");
       exit(1);
     }
 
     int reuse = 1;
-    setsockopt(Input_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse));
+    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
+      perror("setsockopt reuseport");
+    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
+      perror("setsockopt reuseaddr");
 
     Input_mcast_sockaddr.ss_family = AF_INET6;
     ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port = htons(Mcast_dest_port);
 
-    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
+    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(struct sockaddr_in6)) != 0){
       perror("bind on IPv6 input socket");
       exit(1);
     }
     struct group_req group_req;
     group_req.gr_interface = 0;
-    Input_mcast_sockaddr.ss_family = AF_INET6;
     memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
     if(setsockopt(Input_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
       perror("ipv4 multicast join failed");
       exit(1);
     }
-    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr)) != 0){
-      perror("bind on IPv6 input socket");
-      exit(1);
-    }
-
-  } else {
+  }
+#endif
+ else {
     fprintf(stderr,"Can't parse input mcast/target address %s\n",iq_mcast_address_text);
     exit(1);
   }
@@ -279,7 +292,6 @@ int main(int argc,char *argv[]){
     OPUS_mcast_sockaddr.ss_family = AF_INET;
     ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
     inet_pton(AF_INET,OPUS_mcast_address_text,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
-
   }
   // Apparently works for both IPv4 and IPv6
   int ttl = 2;

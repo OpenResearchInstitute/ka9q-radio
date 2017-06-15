@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.18 2017/06/14 10:39:27 karn Exp karn $
+// $Id: audio.c,v 1.19 2017/06/14 23:04:54 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -88,7 +88,13 @@ int send_stereo_opus(complex float *buffer,int size){
       iovec[1].iov_len = dlen;
       
       message.msg_name = &OPUS_mcast_sockaddr;
-      message.msg_namelen = sizeof(OPUS_mcast_sockaddr);
+      // OSX is very finicky about the size of the sockaddr structure; Linux is not
+      if(OPUS_mcast_sockaddr.ss_family == AF_INET)
+	message.msg_namelen = sizeof(struct sockaddr_in);
+      else if(OPUS_mcast_sockaddr.ss_family == AF_INET6)
+	message.msg_namelen = sizeof(struct sockaddr_in6);
+      else
+	message.msg_namelen = 0; // ??
       message.msg_iov = &iovec[0];
       message.msg_iovlen = 2;
       message.msg_control = NULL;
@@ -151,7 +157,14 @@ int send_mono_audio(float *buffer,int size){
       iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count
       struct msghdr message;      
       message.msg_name = &PCM_mcast_sockaddr;
-      message.msg_namelen = sizeof(PCM_mcast_sockaddr);
+      // OSX is very finicky about the size of the sockaddr structure; Linux is not
+      if(PCM_mcast_sockaddr.ss_family == AF_INET)
+	message.msg_namelen = sizeof(struct sockaddr_in);
+      else if(PCM_mcast_sockaddr.ss_family == AF_INET6)
+	message.msg_namelen = sizeof(struct sockaddr_in6);
+      else
+	message.msg_namelen = 0; // ??
+
       message.msg_iov = &iovec[0];
       message.msg_iovlen = 2;
       message.msg_control = NULL;
@@ -199,7 +212,14 @@ int send_stereo_audio(complex float *buffer,int size){
       iovec[1].iov_len = PCM_BUFSIZE * 2; // byte count
       struct msghdr message;      
       message.msg_name = &PCM_mcast_sockaddr;
-      message.msg_namelen = sizeof(PCM_mcast_sockaddr);
+      // OSX is very finicky about the size of the sockaddr structure; Linux is not
+      if(PCM_mcast_sockaddr.ss_family == AF_INET)
+	message.msg_namelen = sizeof(struct sockaddr_in);
+      else if(PCM_mcast_sockaddr.ss_family == AF_INET6)
+	message.msg_namelen = sizeof(struct sockaddr_in6);
+      else
+	message.msg_namelen = 0; // ??
+
       message.msg_iov = &iovec[0];
       message.msg_iovlen = 2;
       message.msg_control = NULL;
