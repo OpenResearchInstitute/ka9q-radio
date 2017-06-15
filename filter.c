@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.5 2017/06/05 06:09:15 karn Exp karn $
+// $Id: filter.c,v 1.6 2017/06/14 23:04:54 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -23,7 +23,7 @@
 // NB: Input and response are still both full-size complex
 
 // response[] must be SIMD-aligned (e.g., with fftw_alloc) and will be freed by delete_filter()
-struct filter *create_filter(int L,int M, complex float *response,int decimate,enum filtertype type){
+struct filter *create_filter(const int L,const int M, complex float *response,const int decimate,const enum filtertype type){
   struct filter *f;
   const int N = L + M - 1;
   const int N_dec = N / decimate;
@@ -67,34 +67,38 @@ struct filter *create_filter(int L,int M, complex float *response,int decimate,e
 }
 
 int execute_filter(struct filter *f){
-  int N;
-  int N_dec;
-  int i,n;
+  int N,N_dec;
   
   if(f == NULL || f->type == NONE || f->response == NULL)
     return -1;
-  N = f->blocksize_in + f->impulse_length - 1;
-  N_dec = N / f->decimate;
+  N = f->blocksize_in + f->impulse_length - 1; // points in input buffer
+  N_dec = N / f->decimate;                     // points in (decimated) output buffer
   fftwf_execute(f->fwd_plan);  // Forward transform
   memmove(f->input_buffer,f->input_buffer + f->blocksize_in,(f->impulse_length - 1)*sizeof(*f->input_buffer)); // Save for next
 
   f->fdomain[0] *= f->response[0];      // DC
-  if(f->type == COMPLEX){ // Actually the simplest
-    for(i=N-1,n=1; n < N_dec/2; n++,i--){
-      f->fdomain[n] *= f->response[n];    // Positive frequency
-      f->fdomain[N_dec-n] = f->fdomain[i] * f->response[i]; // Negative frequency
+  if(f->type == COMPLEX){ // Actually the simplest!
+    int n,p,dn;
+    for(n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--){
+      f->fdomain[p]  = f->response[p] * f->fdomain[p]; // Positive frequency
+      f->fdomain[dn] = f->response[n] * f->fdomain[n]; // Negative frequency
     }
   } else if(f->type == CROSS_CONJ){
-    // Hack for ISB; forces negative frequencies onto I, positive onto Q
-    for(i=N-1,n=1; n < N_dec/2; n++,i--){
-      complex float t; // Needed when decimate == 1
-      t = f->response[i] * (f->fdomain[i] - conjf(f->fdomain[n]));
-      f->fdomain[n] = f->response[n] * (f->fdomain[n] + conjf(f->fdomain[i])); // positive
-      f->fdomain[N_dec-n] = t; // negative
+    // hack for ISB; forces negative frequencies onto I, positive onto Q
+    int n,p,dn;
+    for(n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--){
+      complex float neg,pos;
+      neg = f->response[n] * f->fdomain[n];
+      pos = f->response[p] * f->fdomain[p];
+      f->fdomain[p] = pos + conjf(neg);
+      f->fdomain[dn] = neg - conjf(pos);
     }
   } else if(f->type == REAL){
-    for(i=N-1,n=1; n < N_dec/2; n++,i--)
-      f->fdomain[n] = f->fdomain[n] * f->response[n] + conjf(f->fdomain[i] * f->response[i]);
+    // Negative frequencies are assumed by c->r IFFT to be complex conjugate of positive freqs,
+    // so we don't need to set them
+    int n,p;
+    for(n=N-1,p=1; p < N_dec/2; p++,n--)
+      f->fdomain[p] = f->response[p] * f->fdomain[p] + conjf(f->response[n] * f->fdomain[n]); // positive freqs
   }
   f->fdomain[N_dec/2] *= f->response[N_dec/2]; // Nyquist frequency
   fftwf_execute(f->rev_plan); // Note: c2r version destroys fdomain[]
@@ -120,7 +124,7 @@ double Kaiser_beta = 3.0;
 
 
 // Hamming window
-const double hamming(int n,int M){
+const double hamming(const int n,const int M){
   const double alpha = 25./46;
   const double beta = (1-alpha);
 
@@ -128,12 +132,12 @@ const double hamming(int n,int M){
 }
 
 // Hann / "Hanning" window
-const double hann(int n,int M){
+const double hann(const int n,const int M){
     return 0.5 - 0.5 * (cos(2*M_PI*n/(M-1)));
 }
 
 // Exact Blackman window
-const double blackman(int n,int M){
+const double blackman(const int n,const int M){
   const double a0 = 7938./18608;
   const double a1 = 9240./18608;
   const double a2 = 1430./18608;
@@ -141,7 +145,7 @@ const double blackman(int n,int M){
 }
 
 // Modified Bessel function of the 0th kind, used by the Kaiser window
-static const double i0(double x){
+static const double i0(const double x){
   double sum = 0;
   double t,term;
   int k;
@@ -168,7 +172,7 @@ const double kaiser(int n,int M, double beta){
 // "response" is SIMD-aligned array of N complex floats
 // Impulse response will be limited to first M samples in the time domain
 // Phase is adjusted so "time zero" (center of impulse response) is at M/2
-int window_filter(int L,int M,complex float *response,double beta){
+int window_filter(const int L,const int M,complex float *response,const double beta){
   fftwf_plan fwd_filter_plan,rev_filter_plan;
   int N,n;
   complex float *buffer;
@@ -216,7 +220,7 @@ int window_filter(int L,int M,complex float *response,double beta){
 // Real-only counterpart to window_filter()
 // response[] is only N/2+1 elements containing DC and positive frequencies only
 // Negative frequencies are inplicitly the conjugate of the positive frequencies
-int window_rfilter(int L,int M,complex float *response,double beta){
+int window_rfilter(const int L,const int M,complex float *response,const double beta){
   complex float *buffer;
   float *timebuf;
   fftwf_plan fwd_filter_plan,rev_filter_plan;

@@ -37,10 +37,10 @@ struct filter {
   int decimate;
   int blocksize_out;
 };
-int window_filter(int L,int M,complex float *response,double beta);
-int window_rfilter(int L,int M,complex float *response,double beta);
+int window_filter(const int L,const int M,complex float *response,const double beta);
+int window_rfilter(const int L,const int M,complex float *response,const double beta);
 
-struct filter *create_filter(int,int,complex float *,int,enum filtertype);
+struct filter *create_filter(const int,const int,complex float *,const int,const enum filtertype);
 int execute_filter(struct filter *);
 int delete_filter(struct filter *);
 #endif
