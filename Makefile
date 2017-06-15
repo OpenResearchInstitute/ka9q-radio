@@ -1,9 +1,12 @@
-# $Id: Makefile,v 1.18 2017/06/11 05:01:28 karn Exp karn $
+# $Id: Makefile,v 1.19 2017/06/14 23:04:54 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
 all: bandplan.txt radio control funcube pcm_monitor
+
+install: all
+	install --target-directory=$(HOME)/bin/ radio control funcube pcm_monitor
 
 clean:
 	rm -f *.o radio control funcube pcm_monitor bandplan.txt libfcd.a
