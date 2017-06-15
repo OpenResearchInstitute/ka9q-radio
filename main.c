@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.32 2017/06/14 23:04:54 karn Exp karn $
+// $Id: main.c,v 1.33 2017/06/15 00:58:02 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -43,9 +43,9 @@ int DAC_samprate = 48000;
 int Quiet;
 int Ctl_port = 4159;
 
-struct sockaddr_in6 Ctl_address;
-struct sockaddr_storage Input_source_address;
-struct sockaddr_storage Input_mcast_sockaddr;
+struct sockaddr_in Ctl_address;
+struct sockaddr_in Input_source_address;
+struct sockaddr_in Input_mcast_sockaddr;
 
 char *OPUS_mcast_address_text = "239.1.2.6";
 char *PCM_mcast_address_text = "239.1.2.5";
@@ -191,7 +191,7 @@ int main(int argc,char *argv[]){
   signal(SIGPIPE,SIG_IGN);
 
   // Set up input socket for multicast data stream from front end
-  if(inet_pton(AF_INET,iq_mcast_address_text,&((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr) == 1){
+  if(inet_pton(AF_INET,iq_mcast_address_text,&Input_mcast_sockaddr.sin_addr) == 1){
     if((Input_fd = socket(PF_INET,SOCK_DGRAM,0)) == -1){
       perror("can't create IPv4 input socket");
       exit(1);
@@ -203,16 +203,16 @@ int main(int argc,char *argv[]){
     if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
       perror("ipv4 so_reuseaddr failed");
 
-    Input_mcast_sockaddr.ss_family = AF_INET;
-    ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
+    Input_mcast_sockaddr.sin_family = AF_INET;
+    Input_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
     if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(struct sockaddr_in)) != 0){
       perror("bind on IPv4 input socket");
       exit(1);
     }
 
-#if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
+#if 1 // old version, seems required on Apple    
     struct ip_mreq mreq;
-    mreq.imr_multiaddr = ((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr;
+    mreq.imr_multiaddr = Input_mcast_sockaddr.sin_addr;
     mreq.imr_interface.s_addr = INADDR_ANY;
     if(setsockopt(Input_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0){
       perror("ipv4 multicast join");
@@ -229,75 +229,82 @@ int main(int argc,char *argv[]){
     }
 #endif
   }
-#ifndef __APPLE__ // Doesn't seem to work on OSX
- else if(inet_pton(AF_INET6,iq_mcast_address_text,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr) == 1){
-    if((Input_fd = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
-      perror("can't create IPv6 input socket");
-      exit(1);
-    }
 
-    int reuse = 1;
-    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
-      perror("setsockopt reuseport");
-    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
-      perror("setsockopt reuseaddr");
-
-    Input_mcast_sockaddr.ss_family = AF_INET6;
-    ((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port = htons(Mcast_dest_port);
-
-    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(struct sockaddr_in6)) != 0){
-      perror("bind on IPv6 input socket");
-      exit(1);
-    }
-    struct group_req group_req;
-    group_req.gr_interface = 0;
-    memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
-    if(setsockopt(Input_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
-      perror("ipv4 multicast join failed");
-      exit(1);
-    }
-  }
-#endif
- else {
-    fprintf(stderr,"Can't parse input mcast/target address %s\n",iq_mcast_address_text);
-    exit(1);
-  }
   // Set up control port
-  // Will work for both IPv4 and IPv6
-  Ctl_address.sin6_family = AF_INET6;
-  Ctl_address.sin6_port = htons(Ctl_port);
-  Ctl_address.sin6_flowinfo = 0;
-  Ctl_address.sin6_addr = in6addr_any;
-  Ctl_address.sin6_scope_id = 0;
+  Ctl_address.sin_family = AF_INET;
+  Ctl_address.sin_port = htons(Ctl_port);
+  Ctl_address.sin_addr.s_addr = INADDR_ANY;
 
-  if((Ctl_fd = socket(PF_INET6,SOCK_DGRAM, 0)) == -1){
+  if((Ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
     perror("can't open control socket");
-    exit(1);
-  }
+
   if(bind(Ctl_fd,(struct sockaddr *)&Ctl_address,sizeof(Ctl_address)) != 0)
     perror("control bind failed");
 
-  fcntl(Ctl_fd,F_SETFL,O_NONBLOCK);
+  if(fcntl(Ctl_fd,F_SETFL,O_NONBLOCK) != 0)
+    perror("control fcntl noblock");
 
   // Set up audio output stream(s)
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
 
-  // Make these support IPv6!!
+  // I've given up on IPv6 multicast for now. Too many bugs in too many places
   if(PCM_mcast_address_text != NULL && strlen(PCM_mcast_address_text) > 0){
-    PCM_mcast_sockaddr.ss_family = AF_INET;
-    ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
-    inet_pton(AF_INET,PCM_mcast_address_text,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
+    PCM_mcast_sockaddr.sin_family = AF_INET;
+    PCM_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
+    inet_pton(AF_INET,PCM_mcast_address_text,&PCM_mcast_sockaddr.sin_addr);
+
+
+    // Strictly speaking, it is not necessary to join a multicast group to which we only send.
+    // But this creates a problem with brain-dead Netgear (and probably other) "smart" switches
+    // that do IGMP snooping. There's a setting to handle what happens with multicast groups
+    // to which no IGMP messages are seen. If set to discard them, IPv6 multicast breaks
+    // because there's no IPv6 multicast querier. But set to pass them, then IPv4 multicasts
+    // that aren't subscribed to by anybody are flooded everywhere! We avoid that by subscribing
+    // to our own multicasts.
+#if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
+    struct ip_mreq mreq;
+    mreq.imr_multiaddr = ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr;
+    mreq.imr_interface.sin_addr.s_addr = INADDR_ANY;
+    if(setsockopt(Mcast_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
+      perror("ipv4 multicast join");
+
+#else // Linux, etc
+    struct group_req group_req;
+    group_req.gr_interface = 0;
+    Input_mcast_sockaddr.sin_family = AF_INET;
+    memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
+    if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+      perror("ipv4 multicast join");
+#endif
+
   }
   if(OPUS_bitrate > 0 && OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0){  
-    OPUS_mcast_sockaddr.ss_family = AF_INET;
-    ((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_port = htons(Mcast_dest_port);
-    inet_pton(AF_INET,OPUS_mcast_address_text,&((struct sockaddr_in *)&OPUS_mcast_sockaddr)->sin_addr);
+    OPUS_mcast_sockaddr.sin_family = AF_INET;
+    OPUS_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
+    inet_pton(AF_INET,OPUS_mcast_address_text,&OPUS_mcast_sockaddr.sin_addr);
+
+#if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
+    struct ip_mreq mreq;
+    mreq.imr_multiaddr = OPUS_mcast_sockaddr.sin_addr;
+    mreq.imr_interface.sin_addr.s_addr = INADDR_ANY;
+    if(setsockopt(Mcast_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
+      perror("ipv4 multicast join");
+
+#else // Linux, etc
+    struct group_req group_req;
+    group_req.gr_interface = 0;
+    Input_mcast_sockaddr.sin_family = AF_INET;
+    memcpy(&group_req.gr_group,&OPUS_mcast_sockaddr,sizeof(OPUS_mcast_sockaddr));
+    if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+      perror("ipv4 multicast join");
+#endif
+
   }
   // Apparently works for both IPv4 and IPv6
   int ttl = 2;
   if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
     perror("setsockopt multicast ttl failed");
-  
+
   // Pipes for front end -> demod
   int sv[2];
   pipe(sv);

@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.19 2017/06/14 23:04:54 karn Exp karn $
+// $Id: audio.c,v 1.20 2017/06/15 00:58:02 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -24,7 +24,7 @@
 
 int Mcast_fd;
 
-struct sockaddr_storage PCM_mcast_sockaddr;
+struct sockaddr_in PCM_mcast_sockaddr;
 uint32_t PCM_ssrc;
 uint32_t PCM_timestamp = 0;
 uint16_t PCM_seq = 0;
@@ -34,7 +34,7 @@ int PCM_writeptr = 0;
 
 
 struct OpusEncoder *Opus;
-struct sockaddr_storage OPUS_mcast_sockaddr;
+struct sockaddr_in OPUS_mcast_sockaddr;
 complex float *Opusbuf;
 int Opuswriteptr = 0;
 uint32_t OPUS_ssrc;
@@ -55,8 +55,8 @@ inline short scaleclip(float x){
 int send_stereo_opus(complex float *buffer,int size){
   int space,chunk;
 
-  if(OPUS_mcast_sockaddr.ss_family != AF_INET && OPUS_mcast_sockaddr.ss_family != AF_INET6)
-     return 0;
+  if(OPUS_mcast_sockaddr.sin_family != AF_INET)
+    return 0;
   while(size > 0){
     space = OPUS_blocksize - Opuswriteptr;
     chunk = min(space,size);
@@ -89,12 +89,7 @@ int send_stereo_opus(complex float *buffer,int size){
       
       message.msg_name = &OPUS_mcast_sockaddr;
       // OSX is very finicky about the size of the sockaddr structure; Linux is not
-      if(OPUS_mcast_sockaddr.ss_family == AF_INET)
-	message.msg_namelen = sizeof(struct sockaddr_in);
-      else if(OPUS_mcast_sockaddr.ss_family == AF_INET6)
-	message.msg_namelen = sizeof(struct sockaddr_in6);
-      else
-	message.msg_namelen = 0; // ??
+      message.msg_namelen = sizeof(struct sockaddr_in);
       message.msg_iov = &iovec[0];
       message.msg_iovlen = 2;
       message.msg_control = NULL;
@@ -112,8 +107,8 @@ int send_mono_opus(const float *buffer,int size){
   complex float cbuffer[size];
   int i;
 
-  if(OPUS_mcast_sockaddr.ss_family != AF_INET && OPUS_mcast_sockaddr.ss_family != AF_INET6)
-     return 0;
+  if(OPUS_mcast_sockaddr.sin_family != AF_INET)
+    return 0;
 
   for(i=0;i<size;i++)
     cbuffer[i] = CMPLXF(buffer[i],buffer[i]);
@@ -125,7 +120,7 @@ int send_mono_opus(const float *buffer,int size){
 int send_mono_audio(float *buffer,int size){
   send_mono_opus(buffer,size);
 
-  if(PCM_mcast_sockaddr.ss_family != AF_INET && PCM_mcast_sockaddr.ss_family != AF_INET6)
+  if(PCM_mcast_sockaddr.sin_family != AF_INET)
      return 0;
 
   while(size > 0){
@@ -158,12 +153,7 @@ int send_mono_audio(float *buffer,int size){
       struct msghdr message;      
       message.msg_name = &PCM_mcast_sockaddr;
       // OSX is very finicky about the size of the sockaddr structure; Linux is not
-      if(PCM_mcast_sockaddr.ss_family == AF_INET)
-	message.msg_namelen = sizeof(struct sockaddr_in);
-      else if(PCM_mcast_sockaddr.ss_family == AF_INET6)
-	message.msg_namelen = sizeof(struct sockaddr_in6);
-      else
-	message.msg_namelen = 0; // ??
+      message.msg_namelen = sizeof(struct sockaddr_in);
 
       message.msg_iov = &iovec[0];
       message.msg_iovlen = 2;
@@ -179,8 +169,8 @@ int send_mono_audio(float *buffer,int size){
 int send_stereo_audio(complex float *buffer,int size){
   send_stereo_opus(buffer,size);
 
-  if(PCM_mcast_sockaddr.ss_family != AF_INET && PCM_mcast_sockaddr.ss_family != AF_INET6)
-     return 0;
+  if(PCM_mcast_sockaddr.sin_family != AF_INET)
+    return 0;
 
   while(size > 0){
     int chunk = PCM_BUFSIZE - PCM_writeptr;
@@ -213,12 +203,7 @@ int send_stereo_audio(complex float *buffer,int size){
       struct msghdr message;      
       message.msg_name = &PCM_mcast_sockaddr;
       // OSX is very finicky about the size of the sockaddr structure; Linux is not
-      if(PCM_mcast_sockaddr.ss_family == AF_INET)
-	message.msg_namelen = sizeof(struct sockaddr_in);
-      else if(PCM_mcast_sockaddr.ss_family == AF_INET6)
-	message.msg_namelen = sizeof(struct sockaddr_in6);
-      else
-	message.msg_namelen = 0; // ??
+      message.msg_namelen = sizeof(struct sockaddr_in);
 
       message.msg_iov = &iovec[0];
       message.msg_iovlen = 2;

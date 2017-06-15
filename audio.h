@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.8 2017/06/13 02:51:32 karn Exp karn $
+// $Id: audio.h,v 1.10 2017/06/14 05:32:59 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -21,8 +21,8 @@ extern complex float *Opusbuf;
 extern int OPUS_bitrate;
 extern int OPUS_blocksize;
 
-extern struct sockaddr_storage PCM_mcast_sockaddr;
-extern struct sockaddr_storage OPUS_mcast_sockaddr;
+extern struct sockaddr_in PCM_mcast_sockaddr;
+extern struct sockaddr_in OPUS_mcast_sockaddr;
 int Mcast_fd;
 
 #endif

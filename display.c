@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.33 2017/06/14 05:32:38 karn Exp karn $
+// $Id: display.c,v 1.34 2017/06/14 23:04:54 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -210,20 +210,11 @@ void *display(void *arg){
     char dest[INET6_ADDRSTRLEN];
     int sport=-1,dport=-1;
 
-    if(Input_source_address.ss_family == AF_INET){
-      inet_ntop(AF_INET,&((struct sockaddr_in *)&Input_source_address)->sin_addr,source,sizeof(source));
-      sport = ntohs(((struct sockaddr_in *)&Input_source_address)->sin_port);
-    } else if(Input_source_address.ss_family == AF_INET6){
-      inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&Input_source_address)->sin6_addr,source,sizeof(source));
-      sport = ntohs(((struct sockaddr_in6 *)&Input_source_address)->sin6_port);
-    }      
-    if(Input_mcast_sockaddr.ss_family == AF_INET){
-      inet_ntop(AF_INET,&((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_addr,dest,sizeof(dest));      
-      dport = ntohs(((struct sockaddr_in *)&Input_mcast_sockaddr)->sin_port);
-    } else if(Input_mcast_sockaddr.ss_family == AF_INET6){
-      inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_addr,dest,sizeof(dest));
-      dport = ntohs(((struct sockaddr_in6 *)&Input_mcast_sockaddr)->sin6_port);
-    }
+    inet_ntop(AF_INET,&Input_source_address.sin_addr,source,sizeof(source));
+    sport = ntohs(Input_source_address.sin_port);
+    inet_ntop(AF_INET,&Input_mcast_sockaddr.sin_addr,dest,sizeof(dest));      
+    dport = ntohs(Input_mcast_sockaddr.sin_port);
+
     wprintw(net,"IQ in %s:%d -> %s:%d\n",source,sport,dest,dport);
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
