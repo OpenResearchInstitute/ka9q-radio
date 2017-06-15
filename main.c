@@ -264,7 +264,7 @@ int main(int argc,char *argv[]){
 #if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
     struct ip_mreq mreq;
     mreq.imr_multiaddr = ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr;
-    mreq.imr_interface.sin_addr.s_addr = INADDR_ANY;
+    mreq.imr_interface.s_addr = INADDR_ANY;
     if(setsockopt(Mcast_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
       perror("ipv4 multicast join");
 
@@ -286,7 +286,7 @@ int main(int argc,char *argv[]){
 #if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
     struct ip_mreq mreq;
     mreq.imr_multiaddr = OPUS_mcast_sockaddr.sin_addr;
-    mreq.imr_interface.sin_addr.s_addr = INADDR_ANY;
+    mreq.imr_interface.s_addr = INADDR_ANY;
     if(setsockopt(Mcast_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
       perror("ipv4 multicast join");
 
