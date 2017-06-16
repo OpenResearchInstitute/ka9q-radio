@@ -1,0 +1,21 @@
+KA9Q DSP receiver program -- single-key commands
+?/h          (this help screen)
+l            Lock/unlock frequency
+Tab, PgDn    Move cursor down
+sh+Tab,PgUp  Move cursor up
+HOME         Move cursor to top
+END          Move cursor to bottom
+Left arrow,
+BKSP         Move cursor left one digit
+Right arrow  Move cursor right one digit
+Up arrow     Increase by 1
+Down arrow   Decrease by 1
+ctl+L        Redraw screen
+b            Set filter blocksize (samples)
+c            Set calibration offset (ppm)
+n            Set noise ref for am/iq/ssb/cw/isb SNR
+m            Set demod mode (cam/am/usb/lsb/cwu/cwl/iq/isb/fm)
+f            Set frequency (eg: 147m435, 10m0, 760k0, 14313000)
+u            Set display update rate, ms
+k            Set Kaiser window beta parameter
+
