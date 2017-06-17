@@ -1,18 +1,21 @@
-# $Id: Makefile,v 1.21 2017/06/15 09:29:23 karn Exp karn $
+# $Id: Makefile,v 1.22 2017/06/17 00:25:54 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
-all: bandplan.txt help.txt radio control funcube pcm_monitor
+all: bandplan.txt help.txt radio control funcube pcm_monitor iqrecord iqplay
 
 install: all
-	install --target-directory=$(HOME)/bin/ radio control funcube pcm_monitor
+	install --target-directory=$(HOME)/bin/ radio control funcube pcm_monitor iqrecord iqplay
 
 clean:
-	rm -f *.o radio control funcube pcm_monitor bandplan.txt help.txt libfcd.a
+	rm -f *.o radio control funcube pcm_monitor iqrecord bandplan.txt help.txt libfcd.a b
 
 funcube: funcube.o gr.o libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lm
+
+iqplay: iqplay.o
+	$(CC) -g -o $@ $^ -lpthread -lm
 
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
@@ -22,6 +25,9 @@ radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o filter.o display.o mode
 
 pcm_monitor: pcm_monitor.o
 	$(CC) -g -o $@ $^ -lasound  -lpthread -lopus -lm
+
+iqrecord: iqrecord.o
+	$(CC) -g -o $@ $^ -lpthread -lm
 
 libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
@@ -47,3 +53,4 @@ radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
 ssb.o: ssb.c dsp.h filter.h radio.h audio.h
 iq.o: iq.c dsp.h filter.h radio.h audio.h
 bandplan.o: bandplan.c bandplan.h
+iqrecord.o: iqrecord.c command.h rtp.h
