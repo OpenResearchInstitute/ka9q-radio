@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.35 2017/06/15 03:33:53 karn Exp karn $
+// $Id: display.c,v 1.36 2017/06/17 00:25:28 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +75,9 @@ void getentry(char *prompt,char *response,int len){
   wrefresh(pwin);
   echo();
   timeout(0);
+  // Manpage for wgetnstr doesn't say whether a terminating
+  // null is stashed. Hard to believe it isn't, but this is to be sure
+  memset(response,0,len);
   wgetnstr(pwin,response,len);
   if((cp = strchr(response,'\r')) != NULL)
     *cp = '\0';

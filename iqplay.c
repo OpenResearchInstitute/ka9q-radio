@@ -1,4 +1,4 @@
-// $Id$
+// $Id: iqplay.c,v 1.1 2017/06/17 07:21:37 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -32,7 +33,6 @@ void closedown(int a){
 
 
 int main(int argc,char *argv[]){
-
   char *locale;
   int c;
   struct timeval ltv,ntv;
@@ -165,7 +165,7 @@ int main(int argc,char *argv[]){
 
   int timestamp = 0;
   int seq = 0;
-  int d = 1000000LL * blocksize / ADC_samprate; // microsec between packets
+  int d = round(1000000. * blocksize / ADC_samprate); // microsec between packets
   int i;
   gettimeofday(&ltv,NULL);
   for(i=optind;i<argc;i++){
@@ -173,10 +173,21 @@ int main(int argc,char *argv[]){
       fprintf(stderr,"Can't read %s\n",argv[i]);
       continue;
     }
-    char temp[PATH_MAX];
-    getxattr(argv[optind],"user.frequency",temp,sizeof(temp));
-    status.frequency = atof(temp);
-    status.samprate = ADC_samprate;
+    char temp[PATH_MAX+1];
+    int n;
+    if((n = getxattr(argv[i],"user.samplerate",temp,sizeof(temp))) > 0){
+      temp[n] = '\0';
+      status.samprate = atol(temp);
+    } else
+      status.samprate = ADC_samprate; // Use default
+    if((n = getxattr(argv[i],"user.frequency",temp,sizeof(temp))) > 0){
+      temp[n] = '\0';
+      status.frequency = atof(temp);
+    } else
+      status.frequency = 0; // Unknown
+    
+    if(Verbose)
+      fprintf(stderr,"Playing %s: %'.1lf Hz, %'d samp/s\n",argv[i],status.frequency,status.samprate);
 
     while(fread(sampbuf,sizeof(short),2*blocksize,fp) > 0){
       rtp.seq = htons(seq++);

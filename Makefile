@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.23 2017/06/17 07:22:03 karn Exp karn $
+# $Id: Makefile,v 1.24 2017/06/17 07:24:30 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -9,7 +9,7 @@ install: all
 	install --target-directory=$(HOME)/bin/ radio control funcube pcm_monitor iqrecord iqplay
 
 clean:
-	rm -f *.o radio control funcube pcm_monitor iqrecord bandplan.txt help.txt libfcd.a b
+	rm -f *.o radio control funcube pcm_monitor iqrecord iqplay bandplan.txt help.txt libfcd.a
 
 funcube: funcube.o gr.o libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lm

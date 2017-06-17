@@ -1,7 +1,6 @@
-// $Id: funcube.c,v 1.11 2017/06/01 23:50:36 karn Exp karn $
+// $Id: funcube.c,v 1.12 2017/06/03 04:15:20 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
-// Correct for DC offset, I/Q gain and phase imbalance
-// Emit complex float sample stream on stdout
+// Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -25,8 +24,6 @@
 #include "command.h"
 #include "dsp.h"
 #include "rtp.h"
-
-#define MAXPKT 1500
 
 void *display(void *arg);
 pthread_t Display_thread;
