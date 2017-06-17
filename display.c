@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.36 2017/06/17 00:25:28 karn Exp karn $
+// $Id: display.c,v 1.37 2017/06/17 08:15:19 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,21 +64,62 @@ const double parse_frequency(const char *s){
 }
 
 
+// Pop up a temporary window with the contents of a file,
+// then wait for a kb character to clear it
+#define MAXCOLS 256
+void popup(const char *filename){
+
+  FILE *fp;
+  if((fp = fopen(filename,"r")) == NULL)
+    return;
+  // Determine size of box
+  int rows=0, cols=0;
+  char line[MAXCOLS];
+  while(fgets(line,sizeof(line),fp) != NULL){
+    char *cp;
+    if((cp = strchr(line,'\n')) != NULL)
+      *cp = '\0';
+    rows++;
+    if(strlen(line) > cols)
+      cols = strlen(line);
+  }
+  rewind(fp);
+  
+  // Allow room for box
+  WINDOW *pop = newwin(rows+2,cols+2,0,0);
+  box(pop,0,0);
+  int row = 0;
+  while(fgets(line,sizeof(line),fp) != NULL){
+    char *cp;
+    if((cp = strchr(line,'\n')) != NULL)
+      *cp = '\0';
+    mvwprintw(pop,++row,1,line);
+  }
+  fclose(fp);
+  wnoutrefresh(pop);
+  doupdate();
+  timeout(-1); // blocking read - wait indefinitely
+  (void)getch();
+  timeout(Update_interval);
+  werase(pop);
+  wrefresh(pop);
+  delwin(pop);
+}
+
+
 // Pop up a dialog box, issue a prompt and get a response
 void getentry(char *prompt,char *response,int len){
-  WINDOW *pwin;
-  char *cp;
-  
-  pwin = newwin(3,70,20,0);
+  WINDOW *pwin = newwin(3,70,20,0);
   box(pwin,0,0);
   mvwprintw(pwin,1,1,prompt);
   wrefresh(pwin);
   echo();
-  timeout(0);
+  timeout(-1);
   // Manpage for wgetnstr doesn't say whether a terminating
   // null is stashed. Hard to believe it isn't, but this is to be sure
   memset(response,0,len);
   wgetnstr(pwin,response,len);
+  char *cp;
   if((cp = strchr(response,'\r')) != NULL)
     *cp = '\0';
   if((cp = strchr(response,'\n')) != NULL)
@@ -268,7 +309,7 @@ void *display(void *arg){
     wmove(sdr,0,0);
     wprintw(sdr,"I offset %10.6f\n",demod->DC_i);
     wprintw(sdr,"Q offset %10.6f\n",demod->DC_q);
-    wprintw(sdr,"I/Q imbal%10.1f dB\n",power2dB(demod->power_i/demod->power_q));
+    wprintw(sdr,"I/Q imbal%10.3f dB\n",power2dB(demod->power_i/demod->power_q));
     double sinphi = demod->dotprod / (demod->power_i + demod->power_q);
     wprintw(sdr,"I/Q phi  %10.5f rad\n",sinphi);
     wprintw(sdr,"LNA      %10u\n",demod->lna_gain);
@@ -277,7 +318,6 @@ void *display(void *arg){
     wnoutrefresh(sdr);
     
     extern int Delayed,Skips;
-
 
     char source[INET6_ADDRSTRLEN];
     char dest[INET6_ADDRSTRLEN];
@@ -352,6 +392,10 @@ void *display(void *arg){
       break;
     case 'q':   // Exit radio program
       goto done;
+    case 'h':
+    case '?':
+      popup("help.txt");
+      break;
     case 'l':
       demod->frequency_lock = !demod->frequency_lock;
       break;
