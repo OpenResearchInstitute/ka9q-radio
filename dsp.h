@@ -1,9 +1,13 @@
-// $Id: dsp.h,v 1.5 2017/06/04 10:54:39 karn Exp karn $
+// $Id: dsp.h,v 1.6 2017/06/14 10:39:27 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
 #include <complex.h>
 #undef I
+
+#include <math.h> // Get M_PI
+
+#define M_1_2PI (0.5 * M_1_PI) // fraction of a rotation in one radian
 
 const complex float csincosf(const float x);
 const complex double csincos(const double x);

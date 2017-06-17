@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.30 2017/06/14 23:04:54 karn Exp karn $
+// $Id: radio.c,v 1.31 2017/06/15 03:33:53 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -39,8 +39,8 @@ const double get_first_LO(const struct demod *demod){
 const double get_second_LO(const struct demod *demod,const int offset){
   if(cimag(demod->second_LO_phase_accel) != 0){
     // sweeping, get instantaneous frequency
-    return demod->samprate
-      * (offset * carg(demod->second_LO_phase_accel) + carg(demod->second_LO_phase_step)) / (2*M_PI);
+    return M_1_2PI * demod->samprate
+      * (offset * carg(demod->second_LO_phase_accel) + carg(demod->second_LO_phase_step));
   } else 
     return demod->second_LO;
 }
@@ -156,17 +156,15 @@ double set_second_LO(struct demod *demod,const double second_LO,const int force)
   return second_LO;
 }
 double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int force){
-  double sampsq;
-
   if(!force && second_LO_rate == demod->second_LO_rate)
     return second_LO_rate;
 
-  sampsq = demod->samprate * demod->samprate;
+  const double sampsq = demod->samprate * demod->samprate;
   demod->second_LO_rate = second_LO_rate;
   if(second_LO_rate == 0){
     // if stopped, store current frequency in case somebody reads it
     demod->second_LO_phase_accel = 0;
-    demod->second_LO = demod->samprate * carg(demod->second_LO_phase_step)/(2*M_PI);
+    demod->second_LO = demod->samprate * carg(demod->second_LO_phase_step) * M_1_2PI;
   } else {
     demod->second_LO_phase_accel = csincos(2*M_PI*second_LO_rate/sampsq);
   }

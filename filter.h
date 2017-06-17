@@ -5,7 +5,7 @@
 #include <fftw3.h>
 #undef I
 
-extern double Kaiser_beta;
+extern float Kaiser_beta;
 
 enum filtertype {
   NONE,
@@ -37,8 +37,8 @@ struct filter {
   int decimate;
   int blocksize_out;
 };
-int window_filter(const int L,const int M,complex float *response,const double beta);
-int window_rfilter(const int L,const int M,complex float *response,const double beta);
+int window_filter(const int L,const int M,complex float *response,const float beta);
+int window_rfilter(const int L,const int M,complex float *response,const float beta);
 
 struct filter *create_filter(const int,const int,complex float *,const int,const enum filtertype);
 int execute_filter(struct filter *);

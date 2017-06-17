@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.6 2017/06/14 23:04:54 karn Exp karn $
+// $Id: filter.c,v 1.7 2017/06/15 09:28:55 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -67,14 +67,13 @@ struct filter *create_filter(const int L,const int M, complex float *response,co
 }
 
 int execute_filter(struct filter *f){
-  int N,N_dec;
-  
   if(f == NULL || f->type == NONE || f->response == NULL)
     return -1;
-  N = f->blocksize_in + f->impulse_length - 1; // points in input buffer
-  N_dec = N / f->decimate;                     // points in (decimated) output buffer
+  const int N = f->blocksize_in + f->impulse_length - 1; // points in input buffer
+  const int N_dec = N / f->decimate;                     // points in (decimated) output buffer
   fftwf_execute(f->fwd_plan);  // Forward transform
-  memmove(f->input_buffer,f->input_buffer + f->blocksize_in,(f->impulse_length - 1)*sizeof(*f->input_buffer)); // Save for next
+  // Save for next block - non-destructive copy
+  memmove(f->input_buffer,f->input_buffer + f->blocksize_in,(f->impulse_length - 1)*sizeof(*f->input_buffer));
 
   f->fdomain[0] *= f->response[0];      // DC
   if(f->type == COMPLEX){ // Actually the simplest!
@@ -120,37 +119,37 @@ int delete_filter(struct filter *f){
 
 // Window shape factor for Kaiser window
 // Transition region is approx sqrt(1+Beta^2)
-double Kaiser_beta = 3.0;
+float Kaiser_beta = 3.0;
 
 
 // Hamming window
-const double hamming(const int n,const int M){
-  const double alpha = 25./46;
-  const double beta = (1-alpha);
+const float hamming(const int n,const int M){
+  const float alpha = 25./46;
+  const float beta = (1-alpha);
 
-  return alpha - beta * (cos(2*M_PI*n/(M-1)));
+  return alpha - beta * cos(2*M_PI*n/(M-1));
 }
 
 // Hann / "Hanning" window
-const double hann(const int n,const int M){
-    return 0.5 - 0.5 * (cos(2*M_PI*n/(M-1)));
+const float hann(const int n,const int M){
+    return 0.5 - 0.5 * cos(2*M_PI*n/(M-1));
 }
 
 // Exact Blackman window
-const double blackman(const int n,const int M){
-  const double a0 = 7938./18608;
-  const double a1 = 9240./18608;
-  const double a2 = 1430./18608;
+const float blackman(const int n,const int M){
+  const float a0 = 7938./18608;
+  const float a1 = 9240./18608;
+  const float a2 = 1430./18608;
   return a0 - a1*cos(2*M_PI*n/(M-1)) + a2*cos(4*M_PI*n/(M-1));
 }
 
 // Modified Bessel function of the 0th kind, used by the Kaiser window
-static const double i0(const double x){
-  double sum = 0;
-  double t,term;
+static const float i0(const float x){
+  float sum = 0;
+  float term;
   int k;
 
-  t = 0.25 * x * x;
+  const float t = 0.25 * x * x;
   sum = 1 + t;
   term = t;
   for(k=2;k<40;k++){
@@ -163,21 +162,21 @@ static const double i0(const double x){
 }
 
 // Jim Kaiser was in my Bellcore department in the 1980s. Wonder whatever happened to him.
-const double kaiser(int n,int M, double beta){
-  double p = 2.0*n/(M-1) - 1;
-  return i0(M_PI*beta*sqrt(1-p*p)) / i0(M_PI*beta);
+const float kaiser(const int n,const int M, const float beta){
+  const float p = 2.0*n/(M-1) - 1;
+  return i0(M_PI*beta*sqrtf(1-p*p)) / i0(M_PI*beta);
 }
 
 // Apply Kaiser window to filter frequency response
 // "response" is SIMD-aligned array of N complex floats
 // Impulse response will be limited to first M samples in the time domain
 // Phase is adjusted so "time zero" (center of impulse response) is at M/2
-int window_filter(const int L,const int M,complex float *response,const double beta){
+int window_filter(const int L,const int M,complex float *response,const float beta){
   fftwf_plan fwd_filter_plan,rev_filter_plan;
-  int N,n;
+  int n;
   complex float *buffer;
 
-  N = L + M - 1;
+  const int N = L + M - 1;
   // fftw_plan can overwrite its buffers, so we're forced to make a temp. Ugh.
   buffer = fftwf_alloc_complex(N);
   fwd_filter_plan = fftwf_plan_dft_1d(N,buffer,buffer,FFTW_FORWARD,FFTW_ESTIMATE);
@@ -187,10 +186,11 @@ int window_filter(const int L,const int M,complex float *response,const double b
   memcpy(buffer,response,N*(sizeof *buffer));
   fftwf_execute(rev_filter_plan);
   fftwf_destroy_plan(rev_filter_plan);
-
+  
   // Shift to beginning of buffer, apply window and scale (N*N)
+  const float scale = 1./(N*N);
   for(n = M - 1; n >= 0; n--)
-    buffer[n] = buffer[(n-M/2+N)%N] * kaiser(n,M,beta)/(N*N);
+    buffer[n] = buffer[(n-M/2+N)%N] * kaiser(n,M,beta) * scale;
 
   // Pad with zeroes on right side
   memset(buffer+M,0,(N-M)*sizeof(*buffer));
@@ -220,13 +220,13 @@ int window_filter(const int L,const int M,complex float *response,const double b
 // Real-only counterpart to window_filter()
 // response[] is only N/2+1 elements containing DC and positive frequencies only
 // Negative frequencies are inplicitly the conjugate of the positive frequencies
-int window_rfilter(const int L,const int M,complex float *response,const double beta){
+int window_rfilter(const int L,const int M,complex float *response,const float beta){
   complex float *buffer;
   float *timebuf;
   fftwf_plan fwd_filter_plan,rev_filter_plan;
-  int N,n;
+  int n;
 
-  N = L + M - 1;
+  const int N = L + M - 1;
   buffer = fftwf_alloc_complex(N/2 + 1); // plan destroys its input
   timebuf = fftwf_alloc_real(N);
   rev_filter_plan = fftwf_plan_dft_c2r_1d(N,buffer,timebuf,FFTW_ESTIMATE);
@@ -238,8 +238,9 @@ int window_rfilter(const int L,const int M,complex float *response,const double 
   fftwf_destroy_plan(rev_filter_plan);
 
   // Shift to beginning of buffer, apply window and scale (N*N)
+  const float scale = 1./(N*N);
   for(n = M - 1; n >= 0; n--)
-    timebuf[n] = timebuf[(n-M/2+N)%N] * kaiser(n,M,beta)/(N*N);
+    timebuf[n] = timebuf[(n-M/2+N)%N] * kaiser(n,M,beta) * scale;
   
   // Pad with zeroes on right side
   memset(timebuf+M,0,(N-M)*sizeof(*timebuf));
@@ -257,7 +258,7 @@ int window_rfilter(const int L,const int M,complex float *response,const double 
   printf("Filter frequency response\n");
   for(n=0; n < N/2 + 1; n++)
     printf("%d %g %g (%.1f dB)\n",n,crealf(buffer[n]),cimagf(buffer[n]),
-	   power2dB(cnrm(buffer[n])));
+	   power2dB(cnrmf(buffer[n])));
 #endif
   memcpy(response,buffer,(N/2+1)*sizeof(*response));
   fftwf_free(buffer);

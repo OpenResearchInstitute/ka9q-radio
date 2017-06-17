@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.33 2017/06/15 00:58:02 karn Exp karn $
+// $Id: main.c,v 1.35 2017/06/15 03:45:14 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -85,12 +85,15 @@ int main(int argc,char *argv[]){
   char *iq_mcast_address_text = "239.1.2.3"; // Default for testing
   float opus_blockms = 20.0;
 
-  while((c = getopt(argc,argv,"b:B:i:I:k:l:L:m:M:O:p:P:qr:t:")) != EOF){
+  while((c = getopt(argc,argv,"B:c:i:I:k:l:L:m:M:O:p:P:qr:t:")) != EOF){
     int i;
 
     switch(c){
     case 'B':
       opus_blockms = atof(optarg);
+      break;
+    case 'c':
+      demod->calibrate = atof(optarg) * 1e-6;
       break;
     case 'i':
       second_IF = atof(optarg);
@@ -140,9 +143,9 @@ int main(int argc,char *argv[]){
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
     default:
-      fprintf(stderr,"Usage: %s [-B opus_blockms] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
-      fprintf(stderr,"Default: %s -B %.1f -I %s -l %s -L %d -m %s -M %d -O %s -P %s -r %d -t %d\n",
-	      argv[0],opus_blockms,iq_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
+      fprintf(stderr,"Usage: %s [-B opus_blockms] [-c calibrate_ppm] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
+      fprintf(stderr,"Default: %s -B %.1f -c %.2lf -I %s -l %s -L %d -m %s -M %d -O %s -P %s -r %d -t %d\n",
+	      argv[0],opus_blockms,demod->calibrate*1e6,iq_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
 	      OPUS_mcast_address_text,PCM_mcast_address_text,OPUS_bitrate,Nthreads);
       exit(1);
       break;

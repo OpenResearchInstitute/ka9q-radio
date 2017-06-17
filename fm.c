@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.16 2017/06/11 05:01:13 karn Exp karn $
+// $Id: fm.c,v 1.17 2017/06/12 18:19:57 karn Exp karn $
 // FM demodulation and squelch
 #include <assert.h>
 #include <limits.h>
@@ -61,13 +61,11 @@ void fm_cleanup(void *arg){
 
 
 void *demod_fm(void *arg){
-  int n;
-  int N;
   complex float state = 0;
   struct demod *demod = arg;
   int devhold = 0;
 
-  N = demod->L + demod->M - 1;
+  const float dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
 
   demod->pdeviation = 0;
   demod->foffset = 0;
@@ -75,7 +73,6 @@ void *demod_fm(void *arg){
   // Create filter, leaving response momentarily empty
   demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
   set_filter(demod,demod->low,demod->high); // Set response
-  demod->foffset = 0;
 
   pthread_cleanup_push(fm_cleanup,demod);
 
@@ -85,7 +82,7 @@ void *demod_fm(void *arg){
   while(1){
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
-    demod->gain = (Headroom * N / M_PI) / (demod->decimate * N*fabsf(demod->low - demod->high)/demod->samprate);
+    demod->gain = (Headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
 
     fillbuf(demod->input,(char *)demod->filter->input,
 	    demod->filter->blocksize_in*sizeof(complex float));
@@ -98,11 +95,12 @@ void *demod_fm(void *arg){
       float audio[demod->filter->blocksize_out];
       do_fm(audio,demod->filter->output.c,demod->filter->blocksize_out,&state);
       if(demod->snr > 2){
+	int n;
 	for(n=0;n<demod->filter->blocksize_out;n++){
 	  demod->foffset += 0.00005 * (audio[n] - demod->foffset);
 	  if(devhold == 0 || (fabsf(audio[n] - demod->foffset)) > demod->pdeviation){
 	    demod->pdeviation = fabsf(audio[n] - demod->foffset);
-	    devhold = 0.5 * demod->samprate/demod->decimate;
+	    devhold = 0.5 * dsamprate;
 	  } else {
 	    devhold--;
 	  }
@@ -112,6 +110,7 @@ void *demod_fm(void *arg){
 	squelchtime--;
 
       // Scale and send to audio thread
+      int n;
       for(n=0;n<demod->filter->blocksize_out;n++)
 	audio[n] *= demod->gain;
       

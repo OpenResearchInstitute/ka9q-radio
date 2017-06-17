@@ -68,7 +68,7 @@ void *demod_cam(void *arg){
     // Frequency error is the phase of this block minus the last, times blocks/sec
     // Phase was already flipped, hence the minus
     // Only move a fraction of the error at one time
-    freqerror = -0.01 * carg(phase * conj(lastphase))/(2*M_PI) * demod->samprate/demod->filter->blocksize_in;
+    freqerror = -0.01 * carg(phase * conj(lastphase)) * M_1_2PI * demod->samprate/demod->filter->blocksize_in;
     lastphase = phase;
     set_second_LO(demod,-freqerror + demod->second_LO,0);
 

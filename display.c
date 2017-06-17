@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.34 2017/06/14 23:04:54 karn Exp karn $
+// $Id: display.c,v 1.35 2017/06/15 03:33:53 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +96,75 @@ void display_cleanup(void *arg){
 
 WINDOW *deb;
 
+static void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
+
+  float low,high;
+
+  switch(tuneitem){
+  case 0: // Dial frequency
+    if(!demod->frequency_lock) // Ignore if locked
+      set_freq(demod,get_freq(demod) + tunestep,0);
+    break;
+  case 1: // First LO
+    if(fabs(tunestep) < 1)
+      break; // First LO can't make steps < 1  Hz
+    
+    if(demod->frequency_lock){
+      // See how much we'll have to retune LO2 to stay on frequency
+      double new_lo2 = get_second_LO(demod,0) + tunestep * (1 + demod->calibrate);
+      if(LO2_in_range(demod,new_lo2)){
+	// This waits for it to actually change, minimizing the glitch that would
+	// otherwise happen if we changed LO2 first
+	set_first_LO(demod, get_first_LO(demod) + tunestep * (1 + demod->calibrate),0);
+	// Change LO2 by actual amount of LO1 change
+	set_second_LO(demod,new_lo2,0);
+      } // else ignore; LO2 would be out-of-range
+    } else
+      set_first_LO(demod, get_first_LO(demod) + tunestep * (1 + demod->calibrate),0);
+
+    break;
+  case 2: // IF
+    ; // because next line is declaration
+    double new_lo2 = get_second_LO(demod,0);
+
+    if(demod->frequency_lock){
+      if(fabs(tunestep) < 1)
+	break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
+      
+      new_lo2 -= tunestep * (1 + demod->calibrate); // Accomodate actual change in LO1
+      if(!LO2_in_range(demod,new_lo2))
+	break; // Ignore command to tune IF out of range
+      set_first_LO(demod, get_first_LO(demod) - tunestep * (1 + demod->calibrate),0);
+    } else {
+      new_lo2 -= tunestep;
+    }
+    if(LO2_in_range(demod,new_lo2))
+      set_second_LO(demod,new_lo2,0); // Ignore if out of range
+    break;
+  case 3: // Dial offset
+    demod->dial_offset += tunestep;
+    break;
+  case 4: // Calibrate offset
+    set_cal(demod,get_cal(demod) + tunestep * 1e-6); // ppm
+    break;
+  case 5: // Filter low edge
+    get_filter(demod,&low,&high);
+    low += tunestep;
+    set_filter(demod,low,high);
+    break;
+  case 6: // Filter high edge
+    get_filter(demod,&low,&high);
+    high += tunestep;
+    set_filter(demod,low,high);
+    break;
+  case 7: // Kaiser beta
+    get_filter(demod,&low,&high);
+    Kaiser_beta += tunestep;
+    set_filter(demod,low,high);
+    break;
+  }
+}
+
 void *display(void *arg){
   int c;
   struct demod *demod = &Demod;
@@ -128,6 +197,7 @@ void *display(void *arg){
     float low,high;
     struct bandplan *bp;
     
+    // Update display
     wmove(fw,0,0);
     get_filter(demod,&low,&high);
     wprintw(fw,"Frequency   %'17.2f Hz",get_freq(demod));
@@ -187,9 +257,9 @@ void *display(void *arg){
     if(!isnan(demod->snr) && demod->snr != 0)
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
     if(!isnan(demod->foffset))
-      wprintw(sig,"offset  %+7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset/(2*M_PI));
+      wprintw(sig,"offset  %+7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset * M_1_2PI);
     if(!isnan(demod->pdeviation))
-      wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation/(2*M_PI));
+      wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation * M_1_2PI);
     wnoutrefresh(sig);
     
     wmove(sdr,0,0);
@@ -205,7 +275,7 @@ void *display(void *arg){
     
     extern int Delayed,Skips;
 
-    wmove(net,0,0);
+
     char source[INET6_ADDRSTRLEN];
     char dest[INET6_ADDRSTRLEN];
     int sport=-1,dport=-1;
@@ -215,6 +285,7 @@ void *display(void *arg){
     inet_ntop(AF_INET,&Input_mcast_sockaddr.sin_addr,dest,sizeof(dest));      
     dport = ntohs(Input_mcast_sockaddr.sin_port);
 
+    wmove(net,0,0);
     wprintw(net,"IQ in %s:%d -> %s:%d\n",source,sport,dest,dport);
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
@@ -234,7 +305,6 @@ void *display(void *arg){
     char str[160];
     int i;
 
-    
     // Redefine stuff we need from linux/input.h
     // We can't include it because it conflicts with ncurses.h!
 #define EV_SYN 0
@@ -250,29 +320,29 @@ void *display(void *arg){
     };
     // End of redefined input stuff
 
+    // Poll Powermate knob
     struct input_event event;
     if(read(dial_fd,&event,sizeof(event)) == sizeof(event)){
       // Got something from the powermate knob
       if(event.type == EV_SYN){
 	// Ignore
-	continue;
       } if(event.type == EV_REL){
 	if(event.code == REL_DIAL){
 	  // Dial has been turned. Simulate up/down arrow tuning commands
-	  if(event.value > 0)
-	    c = KEY_UP;
-	  else if(event.value < 0)
-	    c = KEY_DOWN;
+	  if(event.value > 0){
+	    adjust_item(demod,tuneitem,tunestep10);
+	  } else if(event.value < 0)
+	    adjust_item(demod,tuneitem,-tunestep10);
 	}
       } else if(event.type == EV_KEY){
 	if(event.code == BTN_MISC)
 	  if(event.value)
-	    demod->frequency_lock = !demod->frequency_lock;
+	    demod->frequency_lock = !demod->frequency_lock; // Toggle frequency tuning lock
       }
-    } else
-      c = getch(); // read with timeout from keyboard
+      continue; // Start again with display refresh
+    }
 
-    double new_lo2;
+    c = getch(); // read keyboard with timeout
 
     switch(c){
     case ERR:   // no key; timed out. Do nothing.
@@ -282,11 +352,12 @@ void *display(void *arg){
     case 'l':
       demod->frequency_lock = !demod->frequency_lock;
       break;
-      
+    case KEY_NPAGE: // Page Down
     case '\t':  // tab: cycle through tuning fields
       tuneitem = (tuneitem + 1) % 8;
       break;
     case KEY_BTAB: // Backtab, i.e., shifted tab: cycle backwards through tuning fields
+    case KEY_PPAGE: // Page Up
       tuneitem = (8 + tuneitem - 1) % 8;
       break;
     case KEY_HOME: // Go back to starting spot
@@ -308,126 +379,10 @@ void *display(void *arg){
       }
       break;
     case KEY_UP:        // Increase whatever we're tuning
-      switch(tuneitem){
-      case 0: // Dial frequency
-	if(!demod->frequency_lock)
-	  set_freq(demod,get_freq(demod) + tunestep10,0);
-	break;
-      case 1: // First LO
-	if(tunestep10 < 1)
-	  break; // First LO can't make steps < 1  Hz
-
-	if(demod->frequency_lock){
-	  // See how much we'll have to retune LO2 to stay on frequency
-	  new_lo2 = get_second_LO(demod,0) + tunestep10 * (1 + demod->calibrate);
-	  if(!LO2_in_range(demod,new_lo2))
-	    break; // Can't stay on frequency by changing LO2
-	}
-	set_first_LO(demod, get_first_LO(demod) + tunestep10 * (1 + demod->calibrate),0);
-	if(demod->frequency_lock){
-	  // Change LO2 by actual amount of LO1 change
-	  set_second_LO(demod,new_lo2,0);
-	}
-	break;
-      case 2: // IF
-	if(demod->frequency_lock){
-	  if(tunestep10 < 1)
-	    break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
-
-	  new_lo2 = get_second_LO(demod,0) - tunestep10 * (1 + demod->calibrate);
-	  if(!LO2_in_range(demod,new_lo2))
-	    break;
-	  set_first_LO(demod, get_first_LO(demod) - tunestep10 * (1 + demod->calibrate),0);
-	} else {
-	  new_lo2 = get_second_LO(demod,0) - tunestep10;
-	  if(!LO2_in_range(demod,new_lo2))
-	    break;
-	}
-	set_second_LO(demod,new_lo2,0);
-	break;
-      case 3: // Dial offset
-	demod->dial_offset += tunestep10;
-	break;
-      case 4: // Calibrate offset
-	set_cal(demod,get_cal(demod) + tunestep10 * 1e-6);
-	break;
-      case 5: // Filter low edge
-	get_filter(demod,&low,&high);
-	low += tunestep10;
-	set_filter(demod,low,high);
-	break;
-      case 6: // Filter high edge
-	get_filter(demod,&low,&high);
-	high += tunestep10;
-	set_filter(demod,low,high);
-	break;
-      case 7: // Kaiser beta
-	get_filter(demod,&low,&high);
-	Kaiser_beta += tunestep10;
-	set_filter(demod,low,high);
-	break;
-      }
+      adjust_item(demod,tuneitem,tunestep10);
       break;
     case KEY_DOWN:      // Decrease whatever we're tuning
-      switch(tuneitem){
-      case 0:  // Dial frequency
-	if(!demod->frequency_lock)
-	  set_freq(demod,get_freq(demod) - tunestep10,0);
-	break;
-      case 1:  // First LO
-	if(tunestep10 < 1)
-	  break;	  // First LO can't make steps < 1  Hz
-
-	if(demod->frequency_lock){
-	  // See if new LO2 is OK
-	  new_lo2 = get_second_LO(demod,0) - tunestep10 * (1 + demod->calibrate);
-	  if(!LO2_in_range(demod,new_lo2))
-	    break; // Can't stay on frequency by changing LO2
-	}
-	set_first_LO(demod, get_first_LO(demod) - tunestep10 * (1 + demod->calibrate),0);
-	if(demod->frequency_lock){
-	  // Change LO2 by actual amount of LO1 change
-	  set_second_LO(demod,new_lo2,0);	  
-	}
-	break;
-      case 2:  // IF
-	if(demod->frequency_lock){
-	  if(tunestep10 < 1)
-	    break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
-
-	  new_lo2 = get_second_LO(demod,0) + tunestep10 * (1 + demod->calibrate);
-	  if(!LO2_in_range(demod,new_lo2))
-	    break;
-	  set_first_LO(demod, get_first_LO(demod) + tunestep10 * (1 + demod->calibrate),0);
-	} else {
-	  new_lo2 = get_second_LO(demod,0) + tunestep10;
-	  if(!LO2_in_range(demod,new_lo2))
-	    break;
-	}
-	set_second_LO(demod,new_lo2,0);
-	break;
-      case 3:  // Dial offset
-	demod->dial_offset -= tunestep10;
-	break;
-      case 4:  // Calibrate offset
-	set_cal(demod,get_cal(demod) - tunestep10 * 1e-6);
-	break;
-      case 5:  // Filter low edge
-	get_filter(demod,&low,&high);
-	low -= tunestep10;
-	set_filter(demod,low,high);
-	break;
-      case 6:  // Filter high edge
-	get_filter(demod,&low,&high);
-	high -= tunestep10;
-	set_filter(demod,low,high);
-	break;
-      case 7: // Kaiser beta
-	get_filter(demod,&low,&high);
-	Kaiser_beta -= tunestep10;
-	set_filter(demod,low,high);
-	break;
-      }
+      adjust_item(demod,tuneitem,-tunestep10);
       break;
     case '\f':  // Screen repaint
       clearok(curscr,TRUE);
@@ -440,7 +395,6 @@ void *display(void *arg){
 	set_mode(demod,demod->mode); // Restart demod thread
       }
       break;
-      
     case 'c':   // TCXO calibration offset
       getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
       if(strlen(str) > 0){
