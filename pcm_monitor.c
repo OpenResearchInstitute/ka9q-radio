@@ -1,4 +1,4 @@
-// $Id: pcm_monitor.c,v 1.10 2017/06/17 00:25:18 karn Exp $
+// $Id: pcm_monitor.c,v 1.11 2017/06/17 03:26:49 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -169,7 +169,7 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
 int play_stereo_pcm(struct audio *ap,int16_t *outsamps,int size){
 
-
+  static int16_t silence[1000]; // Play this when we underrun; about 10.4 ms @ 48 kHz stereo
 
   snd_pcm_state_t state = snd_pcm_state(ap->handle);
   // Underruns can deliberately happen when the demodulator thread simply
@@ -199,6 +199,12 @@ int play_stereo_pcm(struct audio *ap,int16_t *outsamps,int size){
     if(Verbose > 1)
       fprintf(stderr,"chunk %d delay %f ms\n",(int)chunk,1000.*delay/ap->samprate);
 
+    if(1000.*delay/ap->samprate < 10){
+      if(Verbose)
+	fprintf(stderr,"injecting silence\n");
+      snd_pcm_writei(ap->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
+    }
+
     if(chunk == 0){
       ap->overrun++;
       usleep(L * 1000000 / ap->samprate); // Wait one buffer time for some room
@@ -208,7 +214,7 @@ int play_stereo_pcm(struct audio *ap,int16_t *outsamps,int size){
     // Size of the buffer, or the max available in the device, whichever is less
     chunk = min(chunk,size);
     if((r = snd_pcm_writei(ap->handle,outsamps,chunk)) != chunk){
-      static int16_t silence[1000]; // Play this when we underrun; about 10.4 ms @ 48 kHz stereo
+
 
       // What errors could occur here? mainly underruns
       if(Verbose)

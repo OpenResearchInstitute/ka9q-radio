@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.35 2017/06/15 03:45:14 karn Exp karn $
+// $Id: main.c,v 1.36 2017/06/17 00:25:42 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -219,7 +219,6 @@ int main(int argc,char *argv[]){
     mreq.imr_interface.s_addr = INADDR_ANY;
     if(setsockopt(Input_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0){
       perror("ipv4 multicast join");
-      exit(1);
     }
 #else // Linux, etc
     struct group_req group_req;
@@ -228,7 +227,6 @@ int main(int argc,char *argv[]){
     memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
     if(setsockopt(Input_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
       perror("ipv4 multicast join");
-      exit(1);
     }
 #endif
   }
