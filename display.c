@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.37 2017/06/17 08:15:19 karn Exp karn $
+// $Id: display.c,v 1.38 2017/06/17 23:58:44 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #include <stdio.h>
 #include <stdlib.h>
@@ -483,9 +483,12 @@ void *display(void *arg){
 	int u;
 
 	u = atoi(str);
-	if(u > 50 && u < 10000){
+	if(u > 50){
 	  Update_interval = u;
-	  timeout(u);
+	  timeout(Update_interval);
+	} else if(u <= 0){
+	  Update_interval = -1; // No automatic update
+	  timeout(Update_interval);
 	}
       }
       break;
