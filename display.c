@@ -478,7 +478,7 @@ void *display(void *arg){
       }
       break;
     case 'u': // Display update rate
-      getentry("Enter update interval, ms: ",str,sizeof(str));
+      getentry("Enter update interval, ms [<=0 means no auto update]: ",str,sizeof(str));
       if(strlen(str) > 0){
 	int u;
 

@@ -1,4 +1,4 @@
-// $Id: pcm_monitor.c,v 1.11 2017/06/17 03:26:49 karn Exp karn $
+// $Id: pcm_monitor.c,v 1.12 2017/06/17 09:00:24 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -18,7 +18,7 @@
 // Maximum samples/words per packet
 // Bigger than Ethernet MTU because of network device fragmentation/reassembly
 const int Bufsize = 8192;
-struct sockaddr_storage PCM_mcast_sockaddr;
+struct sockaddr_in PCM_mcast_sockaddr;
 int Input_fd;
 const int L=512;
 const int Samprate = 48000;
@@ -30,21 +30,27 @@ int Verbose;
 #define NSESSIONS 20
 
 struct audio {
+  struct audio *prev; // Linked list pointers
+  struct audio *next; 
   uint32_t ssrc;
   int eseq; // Next expected sequence number
   int etime; // Next expected timestamp
   time_t lastused;
-  struct sockaddr_storage pcm_sender;
+  struct sockaddr_in sender;
   OpusDecoder *opus;
   char *name;
   snd_pcm_t *handle;
   unsigned int samprate;
   int underrun;
   int overrun;
-} Audio[NSESSIONS];
+};
 
+struct audio *Audio[256]; // Hash chains
 
 void close_audio(struct audio *ap){
+  if(ap == NULL)
+    return;
+  
   if(ap->opus != NULL){
     opus_decoder_destroy(ap->opus);
     ap->opus = NULL;
@@ -54,12 +60,10 @@ void close_audio(struct audio *ap){
     snd_pcm_close(ap->handle);
     ap->handle = NULL;
   }
+  free(ap);
 }
 
 void closedown(){
-  int i;
-  for(i=0;i<NSESSIONS;i++)
-    close_audio(&Audio[i]);
 
   if(Input_fd != -1)
     close(Input_fd);
@@ -167,20 +171,20 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 }
 
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
-int play_stereo_pcm(struct audio *ap,int16_t *outsamps,int size){
+int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
 
-  static int16_t silence[1000]; // Play this when we underrun; about 10.4 ms @ 48 kHz stereo
+  static int16_t silence[960]; // Play this when we underrun; 10 ms @ 48 kHz stereo
 
-  snd_pcm_state_t state = snd_pcm_state(ap->handle);
+  snd_pcm_state_t state = snd_pcm_state(sp->handle);
   // Underruns can deliberately happen when the demodulator thread simply
   // stops sending data, e.g., when a FM squelch is closed
   if(state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED){
-    snd_pcm_prepare(ap->handle);
+    snd_pcm_prepare(sp->handle);
     if(Verbose)
-      fprintf(stderr,"session %ld state %d\n",ap - Audio,state);
+      fprintf(stderr,"session %p state %d\n",sp,state);
 
     if(state == SND_PCM_STATE_XRUN){
-      ap->underrun++;
+      sp->underrun++;
     }
   }
 
@@ -189,40 +193,37 @@ int play_stereo_pcm(struct audio *ap,int16_t *outsamps,int size){
     
     snd_pcm_sframes_t delay = 0;
     snd_pcm_sframes_t chunk = 0;
-    if((r = snd_pcm_avail_delay(ap->handle,&chunk,&delay)) != 0){
-      snd_pcm_prepare(ap->handle);
+    if((r = snd_pcm_avail_delay(sp->handle,&chunk,&delay)) != 0){
+      snd_pcm_prepare(sp->handle);
       if(Verbose > 1)
 	fprintf(stderr,"snd_pcm_avail_delay %s %d %s\n",snd_strerror(r),r,strerror(-r));
       usleep(1000);
       continue;
     }
     if(Verbose > 1)
-      fprintf(stderr,"chunk %d delay %f ms\n",(int)chunk,1000.*delay/ap->samprate);
+      fprintf(stderr,"chunk %d delay %f ms\n",(int)chunk,1000.*delay/sp->samprate);
 
-    if(1000.*delay/ap->samprate < 10){
+    if(1000.*delay/sp->samprate < 10){
+      // Less than 10 ms in buffer, we risk underrrun. Inject silence
       if(Verbose)
-	fprintf(stderr,"injecting silence\n");
-      snd_pcm_writei(ap->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
+	fprintf(stderr,"%lx injecting silence\n",(long unsigned int)sp->ssrc);
+      snd_pcm_writei(sp->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
     }
 
     if(chunk == 0){
-      ap->overrun++;
-      usleep(L * 1000000 / ap->samprate); // Wait one buffer time for some room
-      fprintf(stderr,"session %ld overrun\n",ap - Audio);
-      continue;
+      sp->overrun++;
+      fprintf(stderr,"session %p overrun\n",sp);
+      return 0; // Drop audio to let it catch up
     }
     // Size of the buffer, or the max available in the device, whichever is less
     chunk = min(chunk,size);
-    if((r = snd_pcm_writei(ap->handle,outsamps,chunk)) != chunk){
-
-
-      // What errors could occur here? mainly underruns
+    if((r = snd_pcm_writei(sp->handle,outsamps,chunk)) != chunk){
+      // What errors could occur here? probably just underruns
       if(Verbose)
 	fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
-
-      snd_pcm_prepare(ap->handle);
+      snd_pcm_prepare(sp->handle);
       usleep(1000);
-      snd_pcm_writei(ap->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
+      snd_pcm_writei(sp->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
       continue;
     }
     size -= r; // stereo samples left (2 16 bit words, 4 bytes)
@@ -231,6 +232,46 @@ int play_stereo_pcm(struct audio *ap,int16_t *outsamps,int size){
   return 0;
 }
 
+struct audio *lookup_session(uint32_t ssrc,struct sockaddr_in *sender){
+  struct audio *sp;
+
+  // Walk hash chain
+  for(sp = Audio[ssrc & 0xff]; sp != NULL; sp = sp->next){
+    if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
+      // Found it
+      // Move to top of hash chain as we'll probably use it again soon
+      if(sp->prev != NULL){
+	sp->prev->next = sp->next;
+	sp->prev = NULL;
+      }
+      if(sp->next != NULL)
+	sp->next->prev = sp->prev;
+
+      sp->next = Audio[ssrc & 0xff];
+      Audio[ssrc & 0xff] = sp;
+
+      sp->lastused = time(NULL); // Update last used time
+      return sp;
+    }
+  }
+  return NULL;
+}
+// Create a new session, partly initialize; ssrc is used as hash key
+struct audio *make_session(uint32_t ssrc){
+  struct audio *sp;
+
+  if((sp = calloc(1,sizeof(struct audio))) == NULL)
+    return NULL; // Shouldn't happen on modern machines!
+  
+  sp->lastused = time(NULL);
+  // Partly initialize entry; caller has to do other fields
+  sp->ssrc = ssrc;
+  sp->next = Audio[ssrc & 0xff];
+  if(sp->next != NULL)
+    sp->next->prev = sp;
+  Audio[ssrc & 0xff] = sp;
+  return sp;
+}
 
 int main(int argc,char *argv[]){
   char *mcast_address_string = "239.1.2.6"; // Opus broadcast
@@ -268,11 +309,11 @@ int main(int argc,char *argv[]){
   // Set up socket, bind to port
   // Add full IPv6 support!
   Input_fd = socket(AF_INET,SOCK_DGRAM,0);
-  inet_pton(AF_INET,mcast_address_string,&((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr);
-  PCM_mcast_sockaddr.ss_family = AF_INET;
-  ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_port = htons(dport);
+  inet_pton(AF_INET,mcast_address_string,&PCM_mcast_sockaddr.sin_addr);
+  PCM_mcast_sockaddr.sin_family = AF_INET;
+  PCM_mcast_sockaddr.sin_port = htons(dport);
 
-  if(IN_MULTICAST(ntohl((((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr.s_addr)))){
+  if(IN_MULTICAST(ntohl(PCM_mcast_sockaddr.sin_addr.s_addr))){
     // Join only if it's actually a multicast address
     // We could join 0.0.0.0 or our own address to receive unicasts
     // Or 127.0.0.1 for local loopbacks
@@ -291,9 +332,6 @@ int main(int argc,char *argv[]){
     perror("bind");
     exit(1);
   }
-
-
-
   fprintf(stderr,"Listening on %s:%d\n",mcast_address_string,dport);
 
   struct iovec iovec[2];
@@ -306,7 +344,7 @@ int main(int argc,char *argv[]){
   iovec[1].iov_len = sizeof(data);
 
   struct msghdr message;
-  struct sockaddr_storage sender;
+  struct sockaddr_in sender;
   message.msg_name = &sender;
   message.msg_namelen = sizeof(sender);
   message.msg_iov = &iovec[0];
@@ -331,7 +369,6 @@ int main(int argc,char *argv[]){
     }
   }
 
-
   while(1){
     ssize_t size;
     int drop;
@@ -345,108 +382,67 @@ int main(int argc,char *argv[]){
     rtp.timestamp = ntohl(rtp.timestamp);
 
     // Look up session
-    struct audio *ap = NULL;
-    int i;
+    struct audio *sp;
 
-    for(i=0;i<NSESSIONS;i++){
-      if(Audio[i].ssrc == rtp.ssrc){
-	ap = &Audio[i];
-	break;
-      }
-    }
-    if(ap == NULL){ // Not found; look for empty slot
-      time_t tt = time(NULL);
-      for(i=0;i<NSESSIONS;i++){
-	if(Audio[i].handle == NULL || Audio[i].lastused + 30 < tt){
-	  ap = &Audio[i];
-	  if(ap->handle != NULL){
-	    fprintf(stderr,"Closing old session %d\n",i);
-	    close_audio(ap);
-	  }
-	  // Initialize entry
-	  memset(&ap->pcm_sender,0,sizeof(ap->pcm_sender));
-	  ap->name = Audioname;
-	  audio_init(ap,Samprate,2,L);
-	  ap->ssrc = rtp.ssrc;
-	  ap->eseq = rtp.seq;
-	  ap->etime = rtp.timestamp;
-	  break;
-	}
-      }
-    }
-    if(ap == NULL){
+    if((sp = lookup_session(rtp.ssrc,&sender)) == NULL){
+      // Not found; create new entry
       char src[INET6_ADDRSTRLEN];
       int sport = -1;
-      if(sender.ss_family == AF_INET){
-	inet_ntop(AF_INET,&((struct sockaddr_in *)&sender)->sin_addr,src,sizeof(src));      
-	sport = ntohs(((struct sockaddr_in *)&sender)->sin_port);
-      } else if(sender.ss_family == AF_INET6){
-	inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&sender)->sin6_addr,src,sizeof(src));
-	sport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
-      } else {
-	strcpy(src,"unknown");
+      inet_ntop(AF_INET,&sender.sin_addr,src,sizeof(src));      
+      sport = ntohs(sender.sin_port);
+      fprintf(stderr,"New stream from %s:%d ssrc %x type %d\n",src,sport,
+	      rtp.ssrc,rtp.mpt);
+
+      if((sp = make_session(rtp.ssrc)) == NULL){
+	fprintf(stderr,"No room!!\n");
+	continue;
       }
-      fprintf(stderr,"No slots available for ssrc 0x%x from %s:%d\n",(unsigned int)rtp.ssrc,src,sport);
-      continue; // Drop packet
+      // Initialize entry
+      sp->name = Audioname;
+      audio_init(sp,Samprate,2,L); // sets up audio device, opus encoder
+      memcpy(&sp->sender,&sender,sizeof(struct sockaddr_in));
+      sp->eseq = rtp.seq;
+      sp->etime = rtp.timestamp;
     }
-    ap->lastused = time(NULL);
-    if(rtp.seq != ap->eseq){
-      fprintf(stderr,"%d: expected %d got %d\n",(unsigned int)(ap - Audio),ap->eseq,rtp.seq);
-      if((int16_t)(rtp.seq - ap->eseq) < 0){
-	ap->eseq = (rtp.seq + 1) & 0xffff;
+    if(rtp.seq != sp->eseq){
+      fprintf(stderr,"%p: expected %d got %d\n",sp,sp->eseq,rtp.seq);
+      if((int16_t)(rtp.seq - sp->eseq) < 0){
+	sp->eseq = (rtp.seq + 1) & 0xffff;
 	continue;	// Drop probable duplicate
       } else
-	drop = rtp.seq - ap->eseq;
+	drop = rtp.seq - sp->eseq; // Apparent # packets dropped
     } else
       drop = 0;
-    ap->eseq = (rtp.seq + 1) & 0xffff;
-    // How do we compute next expected timestamp?
-
-    // Show sending address & source port, if it has changed
-    if(memcmp(&ap->pcm_sender,&sender,sizeof(sender)) != 0){
-      memcpy(&ap->pcm_sender,&sender,sizeof(sender));
-      char src[INET6_ADDRSTRLEN];
-      int sport = -1;
-      if(sender.ss_family == AF_INET){
-	inet_ntop(AF_INET,&((struct sockaddr_in *)&sender)->sin_addr,src,sizeof(src));      
-	sport = ntohs(((struct sockaddr_in *)&sender)->sin_port);
-      } else if(PCM_mcast_sockaddr.ss_family == AF_INET6){
-	inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&sender)->sin6_addr,src,sizeof(src));
-	sport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
-      }
-      fprintf(stderr,"Session %ld receiving ssrc %x type %d from %s:%d\n",
-	      (long int)(ap - Audio),ap->ssrc,rtp.mpt,src,sport);
-    }
+    sp->eseq = (rtp.seq + 1) & 0xffff;
 
     size -= sizeof(rtp); // Bytes in data
     int16_t outsamps[2*Bufsize];
+    int i;
     switch(rtp.mpt){
     case 10: // Stereo
       size /= 2;           // # 16-bit word samples
       for(i=0;i<size;i++)
 	outsamps[i] = ntohs(data[i]); // RTP profile specifies big-endian samples
       size /= 2;           // # 32-bit stereo samples
-      ap->etime += size;
       break;
     case 11: // Mono; send to both stereo channels
       size /= 2;
       for(i=0;i<size;i++)
 	outsamps[2*i] = outsamps[2*i+1] = ntohs(data[i]);
-      ap->etime += size;
       break;
     case 20: // Opus codec decode - arbitrary choice
       if(drop != 0){
 	// packet dropped; conceal
-	size = opus_decode(ap->opus,NULL,rtp.timestamp - ap->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
-	play_stereo_pcm(ap,outsamps,size);
+	size = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
+	play_stereo_pcm(sp,outsamps,size);
       }
-      size = opus_decode(ap->opus,(unsigned char *)data,size,(opus_int16 *)outsamps,sizeof(outsamps),0);
-      ap->etime += size;
+      size = opus_decode(sp->opus,(unsigned char *)data,size,(opus_int16 *)outsamps,sizeof(outsamps),0);
       break;
     default:
       continue; // ignore
     }
-    play_stereo_pcm(ap,outsamps,size);
+    sp->etime = rtp.timestamp + size;
+    play_stereo_pcm(sp,outsamps,size);
   }
   exit(0);
 }
