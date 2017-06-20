@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 
 #include "bandplan.h"
 
@@ -25,14 +26,16 @@ static int compar(const void *a,const void *b){
 int Bandplan_init;
 extern int init_bandplan(int class);
 
-struct bandplan *lookup_frequency(double f){
-  f /= 1e6;
+const struct bandplan *lookup_frequency(const double f){
+  double key;
+
+  key = round(f) / 1.0e6;
 
   if(!Bandplan_init){
     init_bandplan(EXTRA_CLASS);
     Bandplan_init = 1;
   }
-  return bsearch(&f,Bandplans,Nbandplans,sizeof(struct bandplan),compar);
+  return bsearch(&key,Bandplans,Nbandplans,sizeof(struct bandplan),compar);
 }
 
 

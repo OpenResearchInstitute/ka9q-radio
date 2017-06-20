@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.40 2017/06/18 19:35:12 karn Exp karn $
+// $Id: display.c,v 1.41 2017/06/20 03:01:01 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #define _GNU_SOURCE 1
 #include <stdio.h>
@@ -245,7 +245,7 @@ void *display(void *arg){
 
   for(;;){
     float low,high;
-    struct bandplan *bp;
+    const struct bandplan *bp;
     
     // Update display
     wmove(fw,0,0);
