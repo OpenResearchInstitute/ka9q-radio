@@ -24,6 +24,7 @@ void *demod_am(void *arg){
   int n;
   struct demod *demod = arg;
 
+  pthread_setname_np(pthread_self(),"am");
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 

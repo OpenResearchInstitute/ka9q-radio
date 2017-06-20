@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.36 2017/06/17 00:25:42 karn Exp karn $
+// $Id: main.c,v 1.37 2017/06/17 09:00:11 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -45,17 +45,62 @@ int Ctl_port = 4159;
 
 struct sockaddr_in Ctl_address;
 struct sockaddr_in Input_source_address;
-struct sockaddr_in Input_mcast_sockaddr;
 
-char *OPUS_mcast_address_text = "239.1.2.6";
-char *PCM_mcast_address_text = "239.1.2.5";
-int OPUS_bitrate = 32000;
-int OPUS_blocksize = 960;
+char *IQ_mcast_address_text;
+int Mcast_dest_port;
+char *BB_mcast_address_text;
+struct sockaddr_in BB_mcast_sockaddr;
+int Send_OPUS; // send OPUS audio if 1, PCM if 0
 
 int Input_fd;
 int Ctl_fd;
 int Demod_sock;
-int Mcast_dest_port = 5004;     // Default for testing; recommended default RTP port
+
+
+int setup_input(char *addr){
+  int fd = -1;
+  struct sockaddr_in sock;
+
+  // Set up input socket for multicast data stream from front end
+  if(inet_pton(AF_INET,addr,&sock.sin_addr) != 1)
+    return -1;
+
+  if((fd = socket(PF_INET,SOCK_DGRAM,0)) == -1){
+    perror("can't create IPv4 input socket");
+    return -1;
+  }
+
+  int reuse = 1;
+  if(setsockopt(fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
+    perror("ipv4 so_reuseport failed");
+  if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
+    perror("ipv4 so_reuseaddr failed");
+  
+  sock.sin_family = AF_INET;
+  sock.sin_port = htons(Mcast_dest_port);
+  if(bind(fd,(struct sockaddr *)&sock,sizeof(sock)) != 0){
+    perror("bind on IPv4 input socket");
+    return -1;
+  }
+  
+#if 1 // old version, seems required on Apple    
+  struct ip_mreq mreq;
+  mreq.imr_multiaddr = sock.sin_addr;
+  mreq.imr_interface.s_addr = INADDR_ANY;
+  if(setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
+    perror("ipv4 multicast join");
+  
+#else // Linux, etc
+  struct group_req group_req;
+  group_req.gr_interface = 0;
+  sock.sin_family.sin_family = AF_INET;
+  memcpy(&group_req.gr_group,&sock,sizeof(sock));
+  if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+    perror("ipv4 multicast join");
+  
+#endif
+  return fd;
+}
 
 int Skips;
 int Delayed;
@@ -82,27 +127,34 @@ int main(int argc,char *argv[]){
   demod->M = 4096+1;    // Length of filter impulse response
   mode = FM;
   second_IF = ADC_samprate/4;
-  char *iq_mcast_address_text = "239.1.2.3"; // Default for testing
-  float opus_blockms = 20.0;
 
-  while((c = getopt(argc,argv,"B:c:i:I:k:l:L:m:M:O:p:P:qr:t:")) != EOF){
+  IQ_mcast_address_text = strdup("239.1.2.3");
+  BB_mcast_address_text = strdup("239.1.2.5");
+  OPUS_bitrate = 32000;
+  Mcast_dest_port = 5004;     // recommended default RTP port
+  Send_OPUS = 0;
+  OPUS_blocktime = 20;
+
+  while((c = getopt(argc,argv,"B:c:i:I:k:l:L:m:M:p:R:qr:t:")) != EOF){
     int i;
 
     switch(c){
     case 'B':
-      opus_blockms = atof(optarg);
+      OPUS_blocktime = strtod(optarg,NULL);
       break;
     case 'c':
-      demod->calibrate = atof(optarg) * 1e-6;
+      demod->calibrate = 1e-6 * strtod(optarg,NULL);
       break;
     case 'i':
-      second_IF = atof(optarg);
+      second_IF = strtod(optarg,NULL);
       break;
     case 'I':
-      iq_mcast_address_text = optarg;
+      if(IQ_mcast_address_text)
+	free(IQ_mcast_address_text);
+      IQ_mcast_address_text = strdup(optarg);
       break;
     case 'k':
-      Kaiser_beta = atof(optarg);
+      Kaiser_beta = strtod(optarg,NULL);
       break;
     case 'l':
       locale = optarg;
@@ -121,20 +173,20 @@ int main(int argc,char *argv[]){
     case 'M':
       demod->M = atoi(optarg);
       break;
-    case 'O':
-      OPUS_mcast_address_text = optarg;
       break;
     case 'p':
       Ctl_port = atoi(optarg);
-      break;
-    case 'P':
-      PCM_mcast_address_text = optarg;
       break;
     case 'q':
       Quiet++; // Suppress display
       break;
     case 'r':
-      OPUS_bitrate = atoi(optarg);
+      OPUS_bitrate = atoi(optarg); 
+      break;
+    case 'R':
+      if(BB_mcast_address_text)
+	free(BB_mcast_address_text);
+      BB_mcast_address_text = strdup(optarg);
       break;
     case 't':
       Nthreads = atoi(optarg);
@@ -143,18 +195,21 @@ int main(int argc,char *argv[]){
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
     default:
-      fprintf(stderr,"Usage: %s [-B opus_blockms] [-c calibrate_ppm] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
-      fprintf(stderr,"Default: %s -B %.1f -c %.2lf -I %s -l %s -L %d -m %s -M %d -O %s -P %s -r %d -t %d\n",
-	      argv[0],opus_blockms,demod->calibrate*1e6,iq_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
-	      OPUS_mcast_address_text,PCM_mcast_address_text,OPUS_bitrate,Nthreads);
+      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
+      fprintf(stderr,"Default: %s -B %.1f -c %.2lf -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d\n",
+	      argv[0],OPUS_blocktime,demod->calibrate*1e6,IQ_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
+	      BB_mcast_address_text,OPUS_bitrate,Nthreads);
       exit(1);
       break;
     }
   }
-  if(iq_mcast_address_text == NULL){
+  if(IQ_mcast_address_text == NULL){
     fprintf(stderr,"Specify -I iq_mcast_address_text_address\n");
     exit(1);
   }
+  if(OPUS_bitrate == 0)
+    Send_OPUS = 0; // Force PCM
+
   setlocale(LC_ALL,locale);
 
   demod->samprate = ADC_samprate * (1 + demod->calibrate);
@@ -193,67 +248,32 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
 
-  // Set up input socket for multicast data stream from front end
-  if(inet_pton(AF_INET,iq_mcast_address_text,&Input_mcast_sockaddr.sin_addr) == 1){
-    if((Input_fd = socket(PF_INET,SOCK_DGRAM,0)) == -1){
-      perror("can't create IPv4 input socket");
-      exit(1);
-    }
+  Input_fd = setup_input(IQ_mcast_address_text);
 
-    int reuse = 1;
-    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
-      perror("ipv4 so_reuseport failed");
-    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
-      perror("ipv4 so_reuseaddr failed");
-
-    Input_mcast_sockaddr.sin_family = AF_INET;
-    Input_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
-    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(struct sockaddr_in)) != 0){
-      perror("bind on IPv4 input socket");
-      exit(1);
-    }
-
-#if 1 // old version, seems required on Apple    
-    struct ip_mreq mreq;
-    mreq.imr_multiaddr = Input_mcast_sockaddr.sin_addr;
-    mreq.imr_interface.s_addr = INADDR_ANY;
-    if(setsockopt(Input_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0){
-      perror("ipv4 multicast join");
-    }
-#else // Linux, etc
-    struct group_req group_req;
-    group_req.gr_interface = 0;
-    Input_mcast_sockaddr.ss_family = AF_INET;
-    memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
-    if(setsockopt(Input_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
-      perror("ipv4 multicast join");
-    }
-#endif
-  }
-
+  {
   // Set up control port
-  Ctl_address.sin_family = AF_INET;
-  Ctl_address.sin_port = htons(Ctl_port);
-  Ctl_address.sin_addr.s_addr = INADDR_ANY;
+    struct sockaddr_in sock;
+    sock.sin_family = AF_INET;
+    sock.sin_port = htons(Ctl_port);
+    sock.sin_addr.s_addr = INADDR_ANY;
 
-  if((Ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
-    perror("can't open control socket");
+    if((Ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
+      perror("can't open control socket");
 
-  if(bind(Ctl_fd,(struct sockaddr *)&Ctl_address,sizeof(Ctl_address)) != 0)
-    perror("control bind failed");
+    if(bind(Ctl_fd,&sock,sizeof(struct sockaddr_in)) != 0)
+      perror("control bind failed");
 
-  if(fcntl(Ctl_fd,F_SETFL,O_NONBLOCK) != 0)
-    perror("control fcntl noblock");
-
+    if(fcntl(Ctl_fd,F_SETFL,O_NONBLOCK) != 0)
+      perror("control fcntl noblock");
+  }
   // Set up audio output stream(s)
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
 
   // I've given up on IPv6 multicast for now. Too many bugs in too many places
-  if(PCM_mcast_address_text != NULL && strlen(PCM_mcast_address_text) > 0){
-    PCM_mcast_sockaddr.sin_family = AF_INET;
-    PCM_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
-    inet_pton(AF_INET,PCM_mcast_address_text,&PCM_mcast_sockaddr.sin_addr);
-
+  if(BB_mcast_address_text != NULL && strlen(BB_mcast_address_text) > 0){
+    BB_mcast_sockaddr.sin_family = AF_INET;
+    BB_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
+    inet_pton(AF_INET,BB_mcast_address_text,&BB_mcast_sockaddr.sin_addr);
 
     // Strictly speaking, it is not necessary to join a multicast group to which we only send.
     // But this creates a problem with brain-dead Netgear (and probably other) "smart" switches
@@ -264,7 +284,7 @@ int main(int argc,char *argv[]){
     // to our own multicasts.
 #if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
     struct ip_mreq mreq;
-    mreq.imr_multiaddr = ((struct sockaddr_in *)&PCM_mcast_sockaddr)->sin_addr;
+    mreq.imr_multiaddr = BB_mcast_sockaddr.sin_addr;
     mreq.imr_interface.s_addr = INADDR_ANY;
     if(setsockopt(Mcast_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
       perror("ipv4 multicast join");
@@ -272,34 +292,11 @@ int main(int argc,char *argv[]){
 #else // Linux, etc
     struct group_req group_req;
     group_req.gr_interface = 0;
-    Input_mcast_sockaddr.sin_family = AF_INET;
-    memcpy(&group_req.gr_group,&PCM_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
+    BB_mcast_sockaddr.sin_family = AF_INET;
+    memcpy(&group_req.gr_group,&BB_mcast_sockaddr,sizeof(struct sockaddr_in));
     if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
       perror("ipv4 multicast join");
 #endif
-
-  }
-  if(OPUS_bitrate > 0 && OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0){  
-    OPUS_mcast_sockaddr.sin_family = AF_INET;
-    OPUS_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
-    inet_pton(AF_INET,OPUS_mcast_address_text,&OPUS_mcast_sockaddr.sin_addr);
-
-#if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
-    struct ip_mreq mreq;
-    mreq.imr_multiaddr = OPUS_mcast_sockaddr.sin_addr;
-    mreq.imr_interface.s_addr = INADDR_ANY;
-    if(setsockopt(Mcast_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
-      perror("ipv4 multicast join");
-
-#else // Linux, etc
-    struct group_req group_req;
-    group_req.gr_interface = 0;
-    Input_mcast_sockaddr.sin_family = AF_INET;
-    memcpy(&group_req.gr_group,&OPUS_mcast_sockaddr,sizeof(OPUS_mcast_sockaddr));
-    if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-      perror("ipv4 multicast join");
-#endif
-
   }
   // Apparently works for both IPv4 and IPv6
   int ttl = 2;
@@ -320,7 +317,7 @@ int main(int argc,char *argv[]){
   if(sz == -1)
     perror("F_SETPIPE_SZ");
 #endif // F_SETPIPE_SZ
-  if(setup_audio(opus_blockms,OPUS_bitrate) != 0){
+  if(setup_audio() != 0){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
   }
@@ -345,14 +342,13 @@ void closedown(int a){
 // Read from RTP network socket, assemble blocks of samples with corrections done
 
 void *input_loop(struct demod *demod){
-  int cnt;
-  short samples[MAXPKT];
-  struct rtp_header rtp_header;
+  int16_t samples[MAXPKT];
+  struct rtp_header rtp;
   struct status status;
   struct iovec iovec[3];
 
-  iovec[0].iov_base = &rtp_header;
-  iovec[0].iov_len = sizeof(rtp_header);
+  iovec[0].iov_base = &rtp;
+  iovec[0].iov_len = sizeof(rtp);
   iovec[1].iov_base = &status;
   iovec[1].iov_len = sizeof(status);
   iovec[2].iov_base = samples;
@@ -370,11 +366,7 @@ void *input_loop(struct demod *demod){
   int eseq = -1;
 
   while(1){
-    socklen_t addrlen;
-    int rdlen;
-    char pktbuf[MAXPKT];
     fd_set mask;
-
     FD_ZERO(&mask);
     FD_SET(Ctl_fd,&mask);
     FD_SET(Input_fd,&mask);
@@ -383,7 +375,10 @@ void *input_loop(struct demod *demod){
 
     if(FD_ISSET(Ctl_fd,&mask)){
       // Got a command
+      socklen_t addrlen;
       addrlen = sizeof(Ctl_address);
+      char pktbuf[MAXPKT];
+      int rdlen;
       rdlen = recvfrom(Ctl_fd,&pktbuf,sizeof(pktbuf),0,(struct sockaddr *)&Ctl_address,&addrlen);
       // Should probably look at the source address
       if(rdlen > 0)
@@ -391,31 +386,32 @@ void *input_loop(struct demod *demod){
     }
     if(FD_ISSET(Input_fd,&mask)){
       // Receive I/Q data from front end
+      int cnt;
       cnt = recvmsg(Input_fd,&message,0);
       if(cnt <= 0){    // ??
 	perror("recvfrom");
 	usleep(50000);
 	continue;
       }
-      if(cnt < sizeof(rtp_header) + sizeof(status))
+      if(cnt < sizeof(rtp) + sizeof(status))
 	continue; // Too small, ignore
       
       // Host byte order
-      rtp_header.ssrc = ntohl(rtp_header.ssrc);
-      rtp_header.seq = ntohs(rtp_header.seq);
-      rtp_header.timestamp = ntohl(rtp_header.timestamp);
-      if(eseq != -1 && (int16_t)(eseq - rtp_header.seq) < 0){
+      rtp.ssrc = ntohl(rtp.ssrc);
+      rtp.seq = ntohs(rtp.seq);
+      rtp.timestamp = ntohl(rtp.timestamp);
+      if(eseq != -1 && (int16_t)(eseq - rtp.seq) < 0){
 	Skips++;
-      } else if(eseq != -1 && (int16_t)(eseq - rtp_header.seq) > 0){
+      } else if(eseq != -1 && (int16_t)(eseq - rtp.seq) > 0){
 	Delayed++;
       }
-      eseq = rtp_header.seq + 1;
+      eseq = rtp.seq + 1;
       
       demod->first_LO = status.frequency;
       demod->lna_gain = status.lna_gain;
       demod->mixer_gain = status.mixer_gain;
       demod->if_gain = status.if_gain;    
-      cnt -= sizeof(rtp_header) + sizeof(status);
+      cnt -= sizeof(rtp) + sizeof(status);
       cnt /= 4; // count 4-byte stereo samples
       proc_samples(demod,samples,cnt);
     }

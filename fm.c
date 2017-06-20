@@ -1,5 +1,6 @@
-// $Id: fm.c,v 1.17 2017/06/12 18:19:57 karn Exp karn $
+// $Id: fm.c,v 1.18 2017/06/17 00:24:11 karn Exp karn $
 // FM demodulation and squelch
+#define _GNU_SOURCE 1
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
@@ -65,6 +66,7 @@ void *demod_fm(void *arg){
   struct demod *demod = arg;
   int devhold = 0;
 
+  pthread_setname_np(pthread_self(),"fm");
   const float dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
 
   demod->pdeviation = 0;

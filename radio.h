@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.21 2017/06/07 09:45:52 karn Exp karn $
+// $Id: radio.h,v 1.22 2017/06/11 05:01:13 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -81,7 +81,7 @@ int set_cal(struct demod *,const double);
 const double get_cal(const struct demod *);
 int spindown(struct demod *demod,complex float *data,const int len);
 void closedown(const int a);
-void proc_samples(struct demod *,const short *,const int);
+void proc_samples(struct demod *,const int16_t *,const int);
 
 // Thread entry points
 void *fcd_command(void *);

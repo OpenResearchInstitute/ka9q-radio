@@ -28,6 +28,7 @@ void *demod_iq(void *arg){
   int n;
   struct demod *demod = arg;
 
+  pthread_setname_np(pthread_self(),"iq");
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 

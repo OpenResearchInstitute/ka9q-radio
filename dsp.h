@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.6 2017/06/14 10:39:27 karn Exp karn $
+// $Id: dsp.h,v 1.7 2017/06/17 00:24:40 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -19,7 +19,7 @@ const float camplitude(const complex float *data, const int len);
 const float cnrmf(const complex float x);
 const double cnrm(const complex double x);
 
-int fillbuf(const int,char *,const int);
+int fillbuf(const int,void *,const int);
 
 
 #define max(x,y) ((x) > (y) ? (x) : (y))

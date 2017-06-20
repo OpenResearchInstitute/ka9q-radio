@@ -23,6 +23,7 @@ void cam_cleanup(void *arg){
 void *demod_cam(void *arg){
   struct demod *demod = arg;
 
+  pthread_setname_np(pthread_self(),"cam");
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 

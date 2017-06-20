@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.7 2017/06/04 10:52:09 karn Exp karn $
+// $Id: misc.c,v 1.8 2017/06/14 23:04:54 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -71,12 +71,13 @@ const float camplitude(const complex float *data, const int len){
   return sqrtf(amplitude/len);
 }
 
-int fillbuf(const int fd,char *buffer,const int cnt){
+int fillbuf(const int fd,void *buffer,const int cnt){
   int i;
+  unsigned char *bp = buffer;
   for(i=0;i<cnt;){
     int n;
     
-    n = read(fd,&buffer[i],cnt-i);
+    n = read(fd,bp+i,cnt-i);
     if(n < 0)
       return n;
     i += n;

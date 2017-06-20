@@ -59,8 +59,10 @@ extern int Rtpsock;
 extern struct sockaddr_in Input_source_address;
 extern socklen_t Rtpaddrlen;
 
-extern struct sockaddr_in Input_mcast_sockaddr;  
+extern char *IQ_mcast_address_text;
+extern int Mcast_dest_port;
+extern int Input_fd;
 
-
+int setup_input(char *);
 
 #endif

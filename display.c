@@ -1,5 +1,6 @@
-// $Id: display.c,v 1.38 2017/06/17 23:58:44 karn Exp karn $
+// $Id: display.c,v 1.40 2017/06/18 19:35:12 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
+#define _GNU_SOURCE 1
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -43,11 +44,14 @@ const double parse_frequency(const char *s){
   char *ss = alloca(strlen(s));
   char *sp;
   int i;
-  double mult;
+  double mult,f;
+  char *endptr;
 
   for(i=0;i<strlen(s);i++)
     ss[i] = tolower(s[i]);
 
+  ss[i] = '\0';
+  
   if((sp = strchr(ss,'g')) != NULL){
     mult = 1e9;
     *sp = '.';
@@ -60,7 +64,8 @@ const double parse_frequency(const char *s){
   } else
     mult = 1;
 
-  return mult * atof(ss);
+  f = strtod(ss,&endptr);
+  return mult * f;
 }
 
 
@@ -219,6 +224,7 @@ void *display(void *arg){
   WINDOW *fw,*sig,*sdr,*net;
 
   pthread_cleanup_push(display_cleanup,demod);
+  pthread_setname_np(pthread_self(),"display");
 
   initscr();
   keypad(stdscr,TRUE);
@@ -320,33 +326,30 @@ void *display(void *arg){
     extern int Delayed,Skips;
 
     char source[INET6_ADDRSTRLEN];
-    char dest[INET6_ADDRSTRLEN];
-    int sport=-1,dport=-1;
+    int sport=-1;
 
     inet_ntop(AF_INET,&Input_source_address.sin_addr,source,sizeof(source));
     sport = ntohs(Input_source_address.sin_port);
-    inet_ntop(AF_INET,&Input_mcast_sockaddr.sin_addr,dest,sizeof(dest));      
-    dport = ntohs(Input_mcast_sockaddr.sin_port);
 
     wmove(net,0,0);
-    wprintw(net,"IQ in %s:%d -> %s:%d\n",source,sport,dest,dport);
+    wprintw(net,"IQ in %s:%d -> %s:%d\n",source,sport,IQ_mcast_address_text,Mcast_dest_port);
     wprintw(net,"Delayed %d\n",Delayed);
     wprintw(net,"Skips   %d\n",Skips);
 
-    if(OPUS_bitrate > 0 && OPUS_mcast_address_text != NULL && strlen(OPUS_mcast_address_text) > 0)
-      wprintw(net,"OPUS audio -> %s:%d; %'d bps %.1f ms blocks\n",OPUS_mcast_address_text,Mcast_dest_port,
-	      OPUS_bitrate,1000.*OPUS_blocksize/DAC_samprate);
+    if(OPUS_bitrate > 0){
+      wprintw(net,"OPUS audio -> %s:%d; %'d bps %.1f ms blocks\n",BB_mcast_address_text,Mcast_dest_port,
+	      OPUS_bitrate,OPUS_blocktime);
 
-    if(PCM_mcast_address_text != NULL && strlen(PCM_mcast_address_text) > 0)
-      wprintw(net,"PCM audio  -> %s:%d\n",PCM_mcast_address_text,Mcast_dest_port);
-
+    } else {
+      wprintw(net,"PCM audio  -> %s:%d\n",BB_mcast_address_text,Mcast_dest_port);
+    }
     wnoutrefresh(net);
     doupdate();
 
 
     double f;
     char str[160];
-    int i;
+    int i,j;
 
     // Redefine stuff we need from linux/input.h
     // We can't include it because it conflicts with ncurses.h!
@@ -395,6 +398,17 @@ void *display(void *arg){
     case 'h':
     case '?':
       popup("help.txt");
+      break;
+    case 'I':
+      getentry("IQ input IP dest address: ",str,sizeof(str));
+      i = setup_input(str);
+      j = Input_fd;
+      Input_fd = i;
+      if(j != -1)
+	close(j);
+      if(IQ_mcast_address_text != NULL)
+	free(IQ_mcast_address_text);
+      IQ_mcast_address_text = strdup(str);
       break;
     case 'l':
       demod->frequency_lock = !demod->frequency_lock;
@@ -445,7 +459,7 @@ void *display(void *arg){
     case 'c':   // TCXO calibration offset
       getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
       if(strlen(str) > 0){
-	f = atof(str);
+	f = strtod(str,NULL);
 	set_cal(demod,f * 1e-6);
       }
       break;
@@ -495,7 +509,7 @@ void *display(void *arg){
     case 'k': // Kaiser window beta parameter
       getentry("Enter Kaiser window beta: ",str,sizeof(str));
       if(strlen(str) > 0){
-	double b = atof(str);
+	double b = strtod(str,NULL);
 	double ob = Kaiser_beta;
 	if(b >= 0 && b < 100 && b != ob){
 	  Kaiser_beta = b;

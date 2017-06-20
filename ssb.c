@@ -28,6 +28,7 @@ void *demod_ssb(void *arg){
   int n;
   struct demod *demod = arg;
 
+  pthread_setname_np(pthread_self(),"ssb");
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 
