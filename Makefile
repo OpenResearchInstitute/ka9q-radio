@@ -1,15 +1,15 @@
-# $Id: Makefile,v 1.26 2017/06/17 23:58:29 karn Exp karn $
+# $Id: Makefile,v 1.27 2017/06/18 19:35:25 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
-all: bandplan.txt help.txt radio control funcube pcm_monitor iqrecord iqplay
+all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay
 
 install: all
-	install --target-directory=$(HOME)/bin/ radio control funcube pcm_monitor iqrecord iqplay
+	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay
 
 clean:
-	rm -f *.o radio control funcube pcm_monitor iqrecord iqplay bandplan.txt help.txt libfcd.a
+	rm -f *.o radio control funcube monitor iqrecord iqplay bandplan.txt help.txt libfcd.a
 	rcsclean
 
 funcube: funcube.o gr.o libfcd.a
@@ -24,7 +24,7 @@ control: control.o modes.o
 radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o filter.o display.o modes.o audio.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
-pcm_monitor: pcm_monitor.o
+monitor: monitor.o
 	$(CC) -g -o $@ $^ -lasound  -lpthread -lopus -lm
 
 iqrecord: iqrecord.o
@@ -49,7 +49,7 @@ hid-libusb.o: hid-libusb.c hidapi.h
 main.o: main.c radio.h filter.h dsp.h audio.h command.h rtp.h
 misc.o: misc.c
 modes.o: modes.c command.h
-pcm_monitor.o: pcm_monitor.c rtp.h dsp.h
+monitor.o: monitor.c rtp.h dsp.h
 radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
 ssb.o: ssb.c dsp.h filter.h radio.h audio.h
 iq.o: iq.c dsp.h filter.h radio.h audio.h
