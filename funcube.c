@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.13 2017/06/17 08:15:40 karn Exp karn $
+// $Id: funcube.c,v 1.14 2017/06/21 09:08:55 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -68,7 +68,7 @@ int main(int argc,char *argv[]){
   int Dongle = 0;
   struct rtp_header rtp;
 
-  char *dest = "239.1.2.3"; // Default for testing
+  char *dest = "239.1.2.1"; // Default for testing
   int dest_port = 5004;     // Default for testing; recommended default RTP port
   int dest_is_ipv6 = -1;
 
