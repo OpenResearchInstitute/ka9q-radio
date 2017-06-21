@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.38 2017/06/20 03:00:48 karn Exp karn $
+// $Id: main.c,v 1.39 2017/06/21 09:08:32 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -131,8 +131,8 @@ int main(int argc,char *argv[]){
   mode = FM;
   second_IF = ADC_samprate/4;
 
-  IQ_mcast_address_text = strdup("239.1.2.3");
-  BB_mcast_address_text = strdup("239.1.2.5");
+  IQ_mcast_address_text = strdup("239.1.2.1");
+  BB_mcast_address_text = strdup("239.2.1.1");
   OPUS_bitrate = 32000;
   Mcast_dest_port = 5004;     // recommended default RTP port
   Send_OPUS = 0;
