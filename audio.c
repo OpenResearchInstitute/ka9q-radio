@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.23 2017/06/20 03:01:01 karn Exp karn $
+// $Id: audio.c,v 1.24 2017/06/21 09:08:47 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -84,9 +84,14 @@ void *stereo_opus_audio(void *arg){
   pthread_setname_np(pthread_self(),"opus");
   // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
   // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
-  if(OPUS_blocktime != 2.5 && OPUS_blocktime != 5 && OPUS_blocktime != 10 && OPUS_blocktime != 20 &&
-     OPUS_blocktime != 40 && OPUS_blocktime != 60){
-    fprintf(stderr,"opus block time must be 2.5/5/10/20/40/60 ms\n");
+  // opus 1.2 also supports 80, 100 and 120 ms
+  if(OPUS_blocktime != 2.5 && OPUS_blocktime != 5
+     && OPUS_blocktime != 10 && OPUS_blocktime != 20
+     && OPUS_blocktime != 40 && OPUS_blocktime != 60
+     && OPUS_blocktime != 80 && OPUS_blocktime != 100
+     && OPUS_blocktime != 120){
+    fprintf(stderr,"opus block time must be 2.5/5/10/20/40/60/80/100/120 ms\n");
+    fprintf(stderr,"80/100/120 supported only on opus 1.2 and later\n");
     return NULL;
   }
   OPUS_blocksize = round(OPUS_blocktime * DAC_samprate / 1000.);
@@ -133,6 +138,10 @@ void *stereo_opus_audio(void *arg){
     
     int dlen;
     dlen = opus_encode_float(Opus,(float *)opusbuf,OPUS_blocksize,data,sizeof(data));
+    if(dlen < 0){
+      fprintf(stderr,"opus encode error %d\n",dlen);
+      continue;
+    }
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
     timestamp += OPUS_blocksize;
