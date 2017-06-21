@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.37 2017/06/17 09:00:11 karn Exp karn $
+// $Id: main.c,v 1.38 2017/06/20 03:00:48 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -41,6 +41,7 @@ int ADC_samprate = 192000;
 int DAC_samprate = 48000;
 
 int Quiet;
+int Verbose;
 int Ctl_port = 4159;
 
 struct sockaddr_in Ctl_address;
@@ -116,9 +117,11 @@ int main(int argc,char *argv[]){
   locale = getenv("LANG");
   setlocale(LC_ALL,locale);
 
-  fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
-  fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
-  fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
+  if(Verbose){
+    fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
+    fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
+    fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
+  }
 
   // Defaults
   Quiet = 0;
@@ -135,7 +138,7 @@ int main(int argc,char *argv[]){
   Send_OPUS = 0;
   OPUS_blocktime = 20;
 
-  while((c = getopt(argc,argv,"B:c:i:I:k:l:L:m:M:p:R:qr:t:")) != EOF){
+  while((c = getopt(argc,argv,"B:c:i:I:k:l:L:m:M:p:R:qr:t:v")) != EOF){
     int i;
 
     switch(c){
@@ -194,6 +197,9 @@ int main(int argc,char *argv[]){
       fftwf_plan_with_nthreads(Nthreads);
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
+    case 'v':
+      Verbose++;
+      break;
     default:
       fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
       fprintf(stderr,"Default: %s -B %.1f -c %.2lf -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d\n",
@@ -229,14 +235,15 @@ int main(int argc,char *argv[]){
   // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
   fftwf_import_system_wisdom();
 
-  fprintf(stderr,"UDP control port %d\n",Ctl_port);
-  fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d\n",
+  if(Verbose){
+    fprintf(stderr,"UDP control port %d\n",Ctl_port);
+    fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d\n",
 	  ADC_samprate,DAC_samprate,demod->decimate);
-  fprintf(stderr,"block size: %'d complex samples (%'.1f ms @ %'u S/s)\n",
+    fprintf(stderr,"block size: %'d complex samples (%'.1f ms @ %'u S/s)\n",
 	  demod->L,1000.*demod->L/ADC_samprate,ADC_samprate);
-  fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
-	  Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
-
+    fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
+	    Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
+  }
   if(!Quiet)
     pthread_create(&Display_thread,NULL,display,NULL);
 
@@ -262,9 +269,6 @@ int main(int argc,char *argv[]){
 
     if(bind(Ctl_fd,&sock,sizeof(struct sockaddr_in)) != 0)
       perror("control bind failed");
-
-    if(fcntl(Ctl_fd,F_SETFL,O_NONBLOCK) != 0)
-      perror("control fcntl noblock");
   }
   // Set up audio output stream(s)
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);

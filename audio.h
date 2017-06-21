@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.12 2017/06/20 03:01:01 karn Exp karn $
+// $Id: audio.h,v 1.13 2017/06/20 03:10:30 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -17,10 +17,11 @@ extern char *BB_mcast_address_text;
 extern int Mcast_dest_port;
 extern int DAC_samprate;
 extern int OPUS_bitrate;
-extern int Opus_stereo_fd;
 extern float OPUS_blocktime;
 extern struct sockaddr_in BB_mcast_sockaddr;
 extern int Mcast_fd;
+extern int Verbose;
+
 
 #endif
 

@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.12 2017/06/03 04:15:20 karn Exp karn $
+// $Id: funcube.c,v 1.13 2017/06/17 08:15:40 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -62,11 +62,9 @@ double set_fc_LO(double);
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 
 int main(int argc,char *argv[]){
-
-
   char *locale;
   int c;
-  int blocksize = 350;
+  int blocksize = 356;      // Makes a 1480 byte IPv4 datagram; 20 bytes available for tunneling
   int Dongle = 0;
   struct rtp_header rtp;
 

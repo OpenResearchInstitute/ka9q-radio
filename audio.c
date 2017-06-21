@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.22 2017/06/15 09:28:50 karn Exp karn $
+// $Id: audio.c,v 1.23 2017/06/20 03:01:01 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -251,6 +251,8 @@ pthread_t PCM_mono_thread;
 // Set up pipes to encoding/sending tasks and start them up
 int setup_audio(){
   
+  if(Verbose)
+    fprintf(stderr,"%s\n",opus_get_version_string());
   int pipefd[2];
 
   pipe(pipefd);

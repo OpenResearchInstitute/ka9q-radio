@@ -1,4 +1,4 @@
-// $Id: pcm_monitor.c,v 1.12 2017/06/17 09:00:24 karn Exp karn $
+// $Id: pcm_monitor.c,v 1.13 2017/06/18 19:33:06 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -298,6 +298,10 @@ int main(int argc,char *argv[]){
       exit(1);
     }
   }
+  if(Verbose)
+    fprintf(stderr,"%s: %s\n",argv[0],opus_get_version_string());
+
+
   // Graceful signal catch
   signal(SIGPIPE,closedown);
   signal(SIGINT,closedown);
