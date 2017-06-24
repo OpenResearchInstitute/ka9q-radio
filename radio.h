@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.22 2017/06/11 05:01:13 karn Exp karn $
+// $Id: radio.h,v 1.23 2017/06/20 03:01:01 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -93,5 +93,6 @@ void *demod_ssb(void *);
 void *demod_iq(void *);
 void *demod_cam(void *);
 void *demod_am(void *);
+void *demod_dsb(void *);
 
 #endif

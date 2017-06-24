@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.6 2016/10/23 06:15:59 karn Exp karn $
+// $Id: control.c,v 1.7 2017/05/11 10:31:05 karn Exp karn $
 // Send remote commands
 #define _GNU_SOURCE 1 // Get NAN macro
 #include <stdio.h>
@@ -87,7 +87,7 @@ int main(int argc,char *argv[]){
       command.second_LO_rate = atof(optarg);
       break;
     case 'm':
-      for(i=1;i<=Nmodes;i++){
+      for(i=0;i< Nmodes;i++){
 	if(strcasecmp(Modes[i].name,optarg) == 0){
 	  command.mode = Modes[i].mode;
 	  break;
@@ -223,9 +223,9 @@ int main(int argc,char *argv[]){
 	  break;
 	case MODE:
 	  command.mode += event.value;
-	  if(command.mode <= 0)
+	  if(command.mode < 0)
 	    command.mode = Nmodes;
-	  else if(command.mode > Nmodes)
+	  else if(command.mode >= Nmodes)
 	    command.mode = 0;
 	  break;
 	case STEP:

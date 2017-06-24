@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.31 2017/06/15 03:33:53 karn Exp karn $
+// $Id: radio.c,v 1.32 2017/06/17 00:24:22 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -185,6 +185,9 @@ int set_mode(struct demod *demod,const enum mode mode){
     set_freq(demod,get_freq(demod),1);
 
   switch(mode){
+  case DSB:
+    pthread_create(&demod->demod_thread,NULL,demod_dsb,&Demod);
+    break;
   case NFM:
   case FM:
     pthread_create(&demod->demod_thread,NULL,demod_fm,&Demod);

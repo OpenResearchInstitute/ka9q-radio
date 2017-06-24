@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.39 2017/06/21 09:08:32 karn Exp karn $
+// $Id: main.c,v 1.40 2017/06/21 21:57:09 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -117,11 +117,6 @@ int main(int argc,char *argv[]){
   locale = getenv("LANG");
   setlocale(LC_ALL,locale);
 
-  if(Verbose){
-    fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
-    fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
-    fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
-  }
 
   // Defaults
   Quiet = 0;
@@ -166,7 +161,7 @@ int main(int argc,char *argv[]){
       demod->L = atoi(optarg);
       break;
     case 'm':
-      for(i = 1; i < Nmodes;i++){
+      for(i = 0; i < Nmodes;i++){
 	if(strcasecmp(optarg,Modes[i].name) == 0){
 	  mode = Modes[i].mode;
 	  break;
@@ -236,6 +231,10 @@ int main(int argc,char *argv[]){
   fftwf_import_system_wisdom();
 
   if(Verbose){
+    fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
+    fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
+    fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
+    fprintf(stderr,"Nmodes = %d\n",Nmodes);
     fprintf(stderr,"UDP control port %d\n",Ctl_port);
     fprintf(stderr,"A/D sample rate %'d, D/A sample rate %'d, decimation ratio %'d\n",
 	  ADC_samprate,DAC_samprate,demod->decimate);
@@ -444,7 +443,7 @@ int process_command(struct demod *demod,char *cmdbuf,int len){
 	set_second_LO(demod,command.second_LO,0);
       if(fabs(command.second_LO_rate) < 1e9)
 	set_second_LO_rate(demod,command.second_LO_rate,0);
-      if(command.mode > 0 && command.mode <= Nmodes)
+      if(command.mode >= 0 && command.mode < Nmodes)
 	set_mode(demod,command.mode);
       if(fabs(command.calibrate) < 1)
 	set_cal(demod,command.calibrate);

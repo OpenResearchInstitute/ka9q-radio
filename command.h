@@ -9,7 +9,7 @@ enum cmd {
 };
 
 enum mode {
-  AM = 1,
+  AM = 0,
   CAM,     // coherent AM
   IQ,
   ISB,
@@ -19,6 +19,7 @@ enum mode {
   CWL,
   NFM,
   FM,
+  DSB,
   WFM,
 };
 

@@ -1,4 +1,4 @@
-// $Id: pcm_monitor.c,v 1.14 2017/06/21 09:09:05 karn Exp karn $
+// $Id: monitor.c,v 1.1 2017/06/21 21:56:43 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -196,23 +196,26 @@ int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
     if((r = snd_pcm_avail_delay(sp->handle,&chunk,&delay)) != 0){
       snd_pcm_prepare(sp->handle);
       if(Verbose > 1)
-	fprintf(stderr,"snd_pcm_avail_delay %s %d %s\n",snd_strerror(r),r,strerror(-r));
-      usleep(1000);
+	fprintf(stderr,"ssrc %lx snd_pcm_avail_delay %s %d %s\n",
+		(long unsigned int)sp->ssrc,snd_strerror(r),r,strerror(-r));
+      usleep(500);
       continue;
     }
     if(Verbose > 1)
-      fprintf(stderr,"chunk %d delay %f ms\n",(int)chunk,1000.*delay/sp->samprate);
+      fprintf(stderr,"ssrc %lx chunk %d delay %f ms\n",
+	      (long unsigned int)sp->ssrc,(int)chunk,1000.*delay/sp->samprate);
 
     if(1000.*delay/sp->samprate < 10){
       // Less than 10 ms in buffer, we risk underrrun. Inject silence
       if(Verbose)
-	fprintf(stderr,"%lx injecting silence\n",(long unsigned int)sp->ssrc);
+	fprintf(stderr,"ssrc %lx injecting silence\n",(long unsigned int)sp->ssrc);
       snd_pcm_writei(sp->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
     }
 
     if(chunk == 0){
       sp->overrun++;
-      fprintf(stderr,"session %p overrun\n",sp);
+      if(Verbose)
+	fprintf(stderr,"ssrc %lx overrun\n",(long unsigned int)sp->ssrc);
       return 0; // Drop audio to let it catch up
     }
     // Size of the buffer, or the max available in the device, whichever is less
@@ -220,9 +223,10 @@ int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
     if((r = snd_pcm_writei(sp->handle,outsamps,chunk)) != chunk){
       // What errors could occur here? probably just underruns
       if(Verbose)
-	fprintf(stderr,"audio write fail %s %d %s\n",snd_strerror(r),r,strerror(-r));
+	fprintf(stderr,"ssrc %lx audio write fail %s %d\n",
+		(long unsigned int)sp->ssrc,snd_strerror(r),r);
       snd_pcm_prepare(sp->handle);
-      usleep(1000);
+      usleep(500);
       snd_pcm_writei(sp->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
       continue;
     }
@@ -240,12 +244,13 @@ struct audio *lookup_session(uint32_t ssrc,struct sockaddr_in *sender){
     if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
       // Found it
       // Move to top of hash chain as we'll probably use it again soon
+      if(sp->next != NULL)
+	sp->next->prev = sp->prev;
+
       if(sp->prev != NULL){
 	sp->prev->next = sp->next;
 	sp->prev = NULL;
       }
-      if(sp->next != NULL)
-	sp->next->prev = sp->prev;
 
       sp->next = Audio[ssrc & 0xff];
       Audio[ssrc & 0xff] = sp;

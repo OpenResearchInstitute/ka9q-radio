@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.41 2017/06/20 03:01:01 karn Exp karn $
+// $Id: display.c,v 1.42 2017/06/20 03:37:55 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #define _GNU_SOURCE 1
 #include <stdio.h>
@@ -304,12 +304,21 @@ void *display(void *arg){
     wprintw(sig,"IF      %7.1f dBFS\n",power2dB(demod->power_i + demod->power_q));
     wprintw(sig,"Baseband%7.1f dBFS\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %7.1f dB\n",voltage2dB(demod->gain));
+#if 0
+    // Ratio of baseband to IF power, adjusted for bandwidth ratios
+    // Gives good SNR estimate **only** when there are no out-of-band signals
+    // and the noise bandwidth of the filter is close to fabs(high-low), which is
+    // probably not true for small bandwidths (should probably adjust for Kaiser beta)
+    float n0 = ((demod->power_i + demod->power_q) - (demod->amplitude * demod->amplitude))
+      / (demod->samprate - fabs(high-low));
+#endif
     if(!isnan(demod->snr) && demod->snr != 0)
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
     if(!isnan(demod->foffset))
       wprintw(sig,"offset  %+7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset * M_1_2PI);
     if(!isnan(demod->pdeviation))
       wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation * M_1_2PI);
+
     wnoutrefresh(sig);
     
     wmove(sdr,0,0);
@@ -468,14 +477,14 @@ void *display(void *arg){
       break;
     case 'm':   // Select demod mode from list
       strncpy(str,"Enter mode [ ",sizeof(str));
-      for(i=1;i <= Nmodes;i++){
+      for(i=0;i < Nmodes;i++){
 	strncat(str,Modes[i].name,sizeof(str) - strlen(str) - 1);
 	strncat(str," ",sizeof(str) - strlen(str) - 1);
       }
       strncat(str,"]: ",sizeof(str) - strlen(str) - 1);
       getentry(str,str,sizeof(str));
       if(strlen(str) > 0){
-	for(i=1;i <= Nmodes;i++){
+	for(i=0;i < Nmodes;i++){
 	  if(strcasecmp(str,Modes[i].name) == 0){
 	    set_mode(demod,Modes[i].mode);
 	    break;

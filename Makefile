@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.27 2017/06/18 19:35:25 karn Exp karn $
+# $Id: Makefile,v 1.28 2017/06/21 21:57:42 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -21,7 +21,7 @@ iqplay: iqplay.o
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
 
-radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o filter.o display.o modes.o audio.o bandplan.o misc.o
+radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
 monitor: monitor.o
@@ -40,6 +40,7 @@ cam.o: cam.c dsp.h filter.h radio.h audio.h
 control.o: control.c command.h
 demod.o: demod.c radio.h
 display.o: display.c radio.h command.h audio.h dsp.h filter.h bandplan.h
+dsb.o: dsb.c dsp.h filter.h radio.h audio.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c dsp.h filter.h
 fm.o: fm.c dsp.h filter.h radio.h audio.h
