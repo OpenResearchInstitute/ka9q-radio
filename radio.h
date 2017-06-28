@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.23 2017/06/20 03:01:01 karn Exp karn $
+// $Id: radio.h,v 1.24 2017/06/24 23:52:01 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -13,6 +13,8 @@ extern int ADC_samprate;
 struct demod {
   // Front end state
   double samprate;  // True A/D sample rate, assuming same TCXO as tuner
+  float min_IF;     // Limits on usable IF due to aliasing, filtering, etc
+  float max_IF;
   double first_LO;  // UNcorrected local copy of frequency sent to front end tuner
   double calibrate; // Tuner TCXO calibration; - -> frequency low, + -> frequency high
                     // True first LO freq =  (1 + calibrate) * demod.first_LO
@@ -64,7 +66,7 @@ extern int Demod_sock;
 
 extern const float Headroom; // Audio headroom ratio
 
-const int LO2_in_range(const struct demod *demod,const double f);
+const int LO2_in_range(const struct demod *demod,const double f,int avoid_alias);
 const double get_freq(const struct demod *);
 double set_freq(struct demod *,const double,const int);
 double set_first_LO(struct demod *demod,const double first_LO,const int);
