@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.32 2017/06/17 00:24:22 karn Exp karn $
+// $Id: radio.c,v 1.33 2017/06/24 23:51:38 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -54,7 +54,7 @@ double set_freq(struct demod *demod,const double f,const int force){
   double lo2 = get_second_LO(demod,0) - change;
   // If the new LO2 is out of range, or if we're forced, recenter LO2
   // and retune LO1
-  if(force || !LO2_in_range(demod,lo2)){
+  if(force || !LO2_in_range(demod,lo2,1)){
     if(change < 0){
       // Assume the user will keep tuning down, so put the IF in the
       // high half (lo2 in the low half)
@@ -122,30 +122,27 @@ double set_first_LO(struct demod *demod,const double first_LO,const int force){
   return requested_status.frequency * (1 + demod->calibrate);
 }
 
-// Return 1 if specified carrier frequency is in range of LO2 given
-// sampling rate and filter setting
-const int LO2_in_range(const struct demod *demod,const double f){
-  if( f < -demod->samprate/2 + max(0,demod->high)
-      || f > demod->samprate/2 + min(0,demod->low))
-    return 0;
+// If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
+// sampling rate, filter setting and alias region
+//
+// If avoid_alias is false, simply test that specified frequency is between +/- samplerate/2
+const int LO2_in_range(const struct demod *demod,const double f,int avoid_alias){
+  if(avoid_alias)
+    return f >= demod->min_IF + max(0,demod->high)
+	    && f <= demod->max_IF + min(0,demod->low);
   else
-    return 1;
+    return f >= -demod->samprate/2 && f <= demod->samprate/2;
+
 }
 
-
+// Set second local oscillator (the one in software)
+// Only limit range to +/- samprate/2; the caller must avoid the alias region, e.g., with LO2_in_range()
 double set_second_LO(struct demod *demod,const double second_LO,const int force){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
   if(!force && second_LO == demod->second_LO)
     return second_LO;
   
-  // Don't allow a frequency that puts the passband past the nyquist rate
-  // Exception: if we're already in the forbidden region, allow a change
-  // that will move us toward the exit so we don't get stuck, e.g.,
-  // after a filter change
-  if(((second_LO < -demod->samprate/2 + max(0,demod->high))
-      && (second_LO < demod->second_LO))
-     || ((second_LO > demod->samprate/2 + min(0,demod->low))
-      && (second_LO > demod->second_LO)))
+  if(second_LO < -demod->samprate/2 || second_LO > demod->samprate/2)
     return demod->second_LO; // Don't let it go out of range
 
   demod->second_LO = second_LO;
@@ -181,7 +178,7 @@ int set_mode(struct demod *demod,const enum mode mode){
   demod->high = Modes[mode].high;
 
   double lo2 = get_second_LO(demod,0);
-  if(!LO2_in_range(demod,lo2))
+  if(!LO2_in_range(demod,lo2,1))
     set_freq(demod,get_freq(demod),1);
 
   switch(mode){
@@ -227,7 +224,7 @@ int set_filter(struct demod *demod,const float low,const float high){
   int n;
   int N = demod->L + demod->M - 1;
 
-  if(high > demod->samprate/2 || low < -demod->samprate/2 || high <= low)
+  if(high > demod->max_IF || low < demod->min_IF || high <= low)
     return -1;
 
   if(demod->filter->type == REAL || demod->filter->type == CROSS_CONJ)
@@ -290,12 +287,12 @@ int spindown(struct demod *demod,complex float *data,const int len){
     // We're sweeping, so ensure we won't run the passband past the edges of the first IF bandwidth
     double first_if = -get_second_LO(demod,demod->filter->blocksize_in);  // first IF at end of *next* sample block
     double new_first_if = first_if;
-    if(first_if + max(Modes[demod->mode].high,0) >= demod->samprate/2){
+    if(first_if + max(Modes[demod->mode].high,0) >= demod->max_IF){
       // Will hit upper end
-      new_first_if = -demod->samprate/2 - min(Modes[demod->mode].low,0);
-    } else if(first_if - min(Modes[demod->mode].low,0) <= -demod->samprate/2){
+      new_first_if = demod->min_IF - min(Modes[demod->mode].low,0);
+    } else if(first_if - min(Modes[demod->mode].low,0) <= demod->min_IF){
       // Will hit lower end
-      new_first_if = demod->samprate/2 - max(Modes[demod->mode].high,0);
+      new_first_if = demod->max_IF - max(Modes[demod->mode].high,0);
     }
     if(new_first_if != first_if){
       // Make the changes
