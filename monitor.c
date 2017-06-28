@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.1 2017/06/21 21:56:43 karn Exp karn $
+// $Id: monitor.c,v 1.2 2017/06/24 23:51:59 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -18,6 +18,7 @@
 // Maximum samples/words per packet
 // Bigger than Ethernet MTU because of network device fragmentation/reassembly
 const int Bufsize = 8192;
+#define Silence_size 960 // 10 ms @ 48 kHz
 struct sockaddr_in PCM_mcast_sockaddr;
 int Input_fd;
 const int L=512;
@@ -80,14 +81,6 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 
   if(Verbose)
     fprintf(stderr,"audio_init(%s,rate=%u,blksize=%d,chans=%d)\n",ap->name,samprate,L,channels);
-
-  if(ap->opus != NULL)
-    opus_decoder_destroy(ap->opus);
-
-  int error;
-  ap->opus = opus_decoder_create(samprate,2,&error);
-  if(ap->opus == NULL)
-    fprintf(stderr,"Opus decoder error %d\n",error);
 
   if(ap->handle != NULL){
     snd_pcm_drop(ap->handle);
@@ -173,7 +166,7 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
 int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
 
-  static int16_t silence[960]; // Play this when we underrun; 10 ms @ 48 kHz stereo
+  static int16_t silence[Silence_size]; // Play this when we underrun; 10 ms @ 48 kHz stereo
 
   snd_pcm_state_t state = snd_pcm_state(sp->handle);
   // Underruns can deliberately happen when the demodulator thread simply
@@ -181,11 +174,10 @@ int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
   if(state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED){
     snd_pcm_prepare(sp->handle);
     if(Verbose)
-      fprintf(stderr,"session %p state %d\n",sp,state);
+      fprintf(stderr,"ssrc %lx state %d\n",(unsigned long)sp->ssrc,state);
 
-    if(state == SND_PCM_STATE_XRUN){
+    if(state == SND_PCM_STATE_XRUN)
       sp->underrun++;
-    }
   }
 
   while(size > 0){
@@ -196,8 +188,8 @@ int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
     if((r = snd_pcm_avail_delay(sp->handle,&chunk,&delay)) != 0){
       snd_pcm_prepare(sp->handle);
       if(Verbose > 1)
-	fprintf(stderr,"ssrc %lx snd_pcm_avail_delay %s %d %s\n",
-		(long unsigned int)sp->ssrc,snd_strerror(r),r,strerror(-r));
+	fprintf(stderr,"ssrc %lx snd_pcm_avail_delay error: %s %d\n",
+		(long unsigned int)sp->ssrc,snd_strerror(r),r);
       usleep(500);
       continue;
     }
@@ -208,14 +200,17 @@ int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
     if(1000.*delay/sp->samprate < 10){
       // Less than 10 ms in buffer, we risk underrrun. Inject silence
       if(Verbose)
-	fprintf(stderr,"ssrc %lx injecting silence\n",(long unsigned int)sp->ssrc);
-      snd_pcm_writei(sp->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
+	fprintf(stderr,"ssrc %lx: delay %.1f, injecting silence\n",
+		(long unsigned int)sp->ssrc,
+		1000.*delay/sp->samprate);
+      snd_pcm_writei(sp->handle,silence,Silence_size);
     }
 
     if(chunk == 0){
       sp->overrun++;
       if(Verbose)
-	fprintf(stderr,"ssrc %lx overrun\n",(long unsigned int)sp->ssrc);
+	fprintf(stderr,"ssrc %lx overrun, drop %.1f ms\n",(long unsigned int)sp->ssrc,
+		1000. * size/sp->samprate);
       return 0; // Drop audio to let it catch up
     }
     // Size of the buffer, or the max available in the device, whichever is less
@@ -223,11 +218,11 @@ int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
     if((r = snd_pcm_writei(sp->handle,outsamps,chunk)) != chunk){
       // What errors could occur here? probably just underruns
       if(Verbose)
-	fprintf(stderr,"ssrc %lx audio write fail %s %d\n",
+	fprintf(stderr,"ssrc %lx snd_pcm_writei fail: %s %d. Injecting silence\n",
 		(long unsigned int)sp->ssrc,snd_strerror(r),r);
       snd_pcm_prepare(sp->handle);
       usleep(500);
-      snd_pcm_writei(sp->handle,silence,sizeof(silence) / (2 * sizeof(int16_t)));
+      snd_pcm_writei(sp->handle,silence,Silence_size);
       continue;
     }
     size -= r; // stereo samples left (2 16 bit words, 4 bytes)
@@ -236,7 +231,7 @@ int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
   return 0;
 }
 
-struct audio *lookup_session(uint32_t ssrc,struct sockaddr_in *sender){
+struct audio *lookup_session(const uint32_t ssrc,const struct sockaddr_in *sender){
   struct audio *sp;
 
   // Walk hash chain
@@ -262,7 +257,7 @@ struct audio *lookup_session(uint32_t ssrc,struct sockaddr_in *sender){
   return NULL;
 }
 // Create a new session, partly initialize; ssrc is used as hash key
-struct audio *make_session(uint32_t ssrc){
+struct audio *make_session(const uint32_t ssrc){
   struct audio *sp;
 
   if((sp = calloc(1,sizeof(struct audio))) == NULL)
@@ -380,11 +375,12 @@ int main(int argc,char *argv[]){
 
   while(1){
     ssize_t size;
-    int drop;
 
-    if((size = recvmsg(Input_fd,&message,0)) < sizeof(rtp))
+    if((size = recvmsg(Input_fd,&message,0)) < sizeof(rtp)){
+      usleep(500); // Avoid tight loop
+      perror("recvmsg");
       continue; // Too small to be valid RTP
-
+    }
     // To host order
     rtp.ssrc = ntohl(rtp.ssrc);
     rtp.seq = ntohs(rtp.seq);
@@ -396,9 +392,8 @@ int main(int argc,char *argv[]){
     if((sp = lookup_session(rtp.ssrc,&sender)) == NULL){
       // Not found; create new entry
       char src[INET6_ADDRSTRLEN];
-      int sport = -1;
       inet_ntop(AF_INET,&sender.sin_addr,src,sizeof(src));      
-      sport = ntohs(sender.sin_port);
+      int sport = ntohs(sender.sin_port);
       fprintf(stderr,"New stream from %s:%d ssrc %x type %d\n",src,sport,
 	      rtp.ssrc,rtp.mpt);
 
@@ -413,20 +408,20 @@ int main(int argc,char *argv[]){
       sp->eseq = rtp.seq;
       sp->etime = rtp.timestamp;
     }
+    int drop = 0;
     if(rtp.seq != sp->eseq){
-      fprintf(stderr,"%p: expected %d got %d\n",sp,sp->eseq,rtp.seq);
-      if((int16_t)(rtp.seq - sp->eseq) < 0){
-	sp->eseq = (rtp.seq + 1) & 0xffff;
+      int diff = (int)(rtp.seq - sp->eseq);
+      fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
+      if(diff < 0 && diff > -10){
 	continue;	// Drop probable duplicate
-      } else
-	drop = rtp.seq - sp->eseq; // Apparent # packets dropped
-    } else
-      drop = 0;
+      }
+      drop = diff; // Apparent # packets dropped
+    }
     sp->eseq = (rtp.seq + 1) & 0xffff;
 
     size -= sizeof(rtp); // Bytes in data
     int16_t outsamps[2*Bufsize];
-    int i;
+    int i,error;
     switch(rtp.mpt){
     case 10: // Stereo
       size /= 2;           // # 16-bit word samples
@@ -440,6 +435,13 @@ int main(int argc,char *argv[]){
 	outsamps[2*i] = outsamps[2*i+1] = ntohs(data[i]);
       break;
     case 20: // Opus codec decode - arbitrary choice
+
+      if(sp->opus == NULL){ // Create if it doesn't already exist
+	sp->opus = opus_decoder_create(sp->samprate,2,&error);
+	if(sp->opus == NULL)
+	  fprintf(stderr,"Opus decoder error %d\n",error);
+	break;
+      }
       if(drop != 0){
 	// packet dropped; conceal
 	size = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
