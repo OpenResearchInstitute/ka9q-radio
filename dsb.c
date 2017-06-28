@@ -1,14 +1,14 @@
 // DSB-AM / BPSK
 
-#define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
+#define _GNU_SOURCE 1
+#include <complex.h>
+#include <math.h>
+#include <fftw3.h>
 #include <assert.h>
 #include <unistd.h>
 #include <limits.h>
 #include <pthread.h>
-#include <math.h>
-#include <complex.h>
-#undef I
-#include <fftw3.h>
+
 
 #include "dsp.h"
 #include "filter.h"
@@ -26,13 +26,20 @@ void dsb_cleanup(void *arg){
 }
 
 
+float DSB_offset;
+float DSB_phase;
+
+
 void *demod_dsb(void *arg){
   struct demod *demod = arg;
   int hangcount = 0;
   const float agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
   const int hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
-  complex float pll = 1;
-
+  complex float *tbuf = fftwf_alloc_complex(65536);
+  complex float *fbuf = fftwf_alloc_complex(65536);  
+  fftwf_plan loop_filter_plan = fftwf_plan_dft_1d(65536,tbuf,fbuf,FFTW_FORWARD,FFTW_ESTIMATE);
+  int loop_filter_pointer = 0;
+  
   pthread_setname_np(pthread_self(),"dsb");
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
@@ -54,10 +61,35 @@ void *demod_dsb(void *arg){
     int n;
 
     for(n=0; n < demod->filter->blocksize_out; n++){
-      complex float rsamp = demod->filter->output.c[n] * pll;
+      complex float rsamp = demod->filter->output.c[n];
       phase += crealf(rsamp) * cimagf(rsamp);
       amplitude += creal(rsamp) * creal(rsamp);
       noise += cimag(rsamp) * cimag(rsamp);
+
+      // squaring loop
+      tbuf[loop_filter_pointer++] = rsamp * rsamp; // Square of sample
+      if(loop_filter_pointer == 65536){
+	fftwf_execute(loop_filter_plan);
+	loop_filter_pointer = 0;
+	int i;
+	float energy = 0;
+	int peak_index;
+	for(i=0;i<65536;i++){
+	  float e;
+
+	  e = cnrmf(fbuf[i]);
+	  if(e > energy){
+	    energy = e;
+	    peak_index = i;
+	  }
+	}
+	// Factor of 2 accounts for the doubling of frequency by squaring
+	if(peak_index < 32768)
+	  DSB_offset = demod->samprate * peak_index / (2 * 65536. * demod->decimate);
+	else
+	  DSB_offset = -demod->samprate * (65536 - peak_index) / (2 * 65536. * demod->decimate);	  
+	DSB_phase = cargf(fbuf[peak_index]) / 2;
+      }
     }
     // RMS signal+noise and noise amplitudes
     amplitude /= demod->filter->blocksize_out;
@@ -65,13 +97,6 @@ void *demod_dsb(void *arg){
     demod->amplitude = sqrtf(amplitude); // RMS amplitude of I channel
     demod->noise = sqrtf(noise);         // RMS amplitude of Q channel
     demod->snr = demod->amplitude / demod->noise; // (S+N)/N ratio
-
-    // Complete PLL feedback loop - adjust LO
-    // Positive phase means signal is positive frequency, so increase LO frequency
-    // to catch up with it
-    phase = phase / (noise + amplitude);
-    double freqerror = 0.00001 * phase * M_1_2PI * demod->samprate/demod->filter->blocksize_in;
-    set_second_LO(demod,freqerror + demod->second_LO,0);
 
     if(demod->gain * demod->amplitude > Headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
