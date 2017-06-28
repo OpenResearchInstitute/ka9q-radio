@@ -1,16 +1,19 @@
-# $Id: Makefile,v 1.28 2017/06/21 21:57:42 karn Exp karn $
+# $Id: Makefile,v 1.29 2017/06/24 23:51:35 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
-all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay
+all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay gentone
 
 install: all
 	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay
 
 clean:
-	rm -f *.o radio control funcube monitor iqrecord iqplay bandplan.txt help.txt libfcd.a
+	rm -f *.o radio control funcube monitor iqrecord iqplay gentone bandplan.txt help.txt libfcd.a
 	rcsclean
+
+gentone: gentone.o misc.o
+	$(CC) -g -o $@ $^ -lpthread -lm
 
 funcube: funcube.o gr.o libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lm
@@ -34,6 +37,7 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
+gentone.o: gentone.c dsp.h
 am.o: am.c dsp.h filter.h radio.h audio.h
 audio.o: audio.c dsp.h audio.h rtp.h
 cam.o: cam.c dsp.h filter.h radio.h audio.h
