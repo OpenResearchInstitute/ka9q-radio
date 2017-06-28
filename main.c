@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.40 2017/06/21 21:57:09 karn Exp karn $
+// $Id: main.c,v 1.41 2017/06/24 23:51:22 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -214,6 +214,8 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,locale);
 
   demod->samprate = ADC_samprate * (1 + demod->calibrate);
+  demod->min_IF = -80000; // Hardwired for Funcube
+  demod->max_IF = +80000;
   demod->decimate = ADC_samprate / DAC_samprate;
   // Verify decimation ratio
   if((ADC_samprate % DAC_samprate) != 0)
