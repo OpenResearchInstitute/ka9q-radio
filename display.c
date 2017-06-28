@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.42 2017/06/20 03:37:55 karn Exp karn $
+// $Id: display.c,v 1.43 2017/06/24 23:51:32 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #define _GNU_SOURCE 1
 #include <stdio.h>
@@ -161,7 +161,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     if(demod->frequency_lock){
       // See how much we'll have to retune LO2 to stay on frequency
       double new_lo2 = get_second_LO(demod,0) + tunestep * (1 + demod->calibrate);
-      if(LO2_in_range(demod,new_lo2)){
+      if(LO2_in_range(demod,new_lo2,0)){
 	// This waits for it to actually change, minimizing the glitch that would
 	// otherwise happen if we changed LO2 first
 	set_first_LO(demod, get_first_LO(demod) + tunestep * (1 + demod->calibrate),0);
@@ -181,13 +181,13 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
 	break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
       
       new_lo2 -= tunestep * (1 + demod->calibrate); // Accomodate actual change in LO1
-      if(!LO2_in_range(demod,new_lo2))
+      if(!LO2_in_range(demod,new_lo2,0))
 	break; // Ignore command to tune IF out of range
       set_first_LO(demod, get_first_LO(demod) - tunestep * (1 + demod->calibrate),0);
     } else {
       new_lo2 -= tunestep;
     }
-    if(LO2_in_range(demod,new_lo2))
+    if(LO2_in_range(demod,new_lo2,0))
       set_second_LO(demod,new_lo2,0); // Ignore if out of range
     break;
   case 3: // Dial offset
@@ -208,8 +208,10 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     break;
   case 7: // Kaiser beta
     get_filter(demod,&low,&high);
-    Kaiser_beta += tunestep;
-    set_filter(demod,low,high);
+    if(Kaiser_beta + tunestep >= 0.0){
+      Kaiser_beta += tunestep;
+      set_filter(demod,low,high);
+    }
     break;
   }
 }
@@ -269,7 +271,16 @@ void *display(void *arg){
     wprintw(fw,"\n");
       
     wprintw(fw,"First LO    %'17.2f Hz\n",get_first_LO(demod));
-    wprintw(fw,"IF          %'17.2f Hz\n",-get_second_LO(demod,0));
+    wprintw(fw,"IF          %'17.2f Hz",-get_second_LO(demod,0));
+    if(!LO2_in_range(demod,get_second_LO(demod,0),1)){
+      double alias;
+      if(get_second_LO(demod,0) > 0)
+	alias = get_first_LO(demod) - get_second_LO(demod,0) + demod->samprate;
+      else
+	alias = get_first_LO(demod) - get_second_LO(demod,0) - demod->samprate;	
+      wprintw(fw," alias %'.2f Hz",alias);
+    }
+    wprintw(fw,"\n");
     wprintw(fw,"Dial offset %'17.2f Hz\n",demod->dial_offset);
     wprintw(fw,"Calibrate   %'17.2f ppm\n",get_cal(demod)*1e6);
     wprintw(fw,"Filter low  %'17.2f Hz\n",low);
@@ -314,11 +325,14 @@ void *display(void *arg){
 #endif
     if(!isnan(demod->snr) && demod->snr != 0)
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
-    if(!isnan(demod->foffset))
+    if(demod->mode == FM || demod->mode == NFM){
       wprintw(sig,"offset  %+7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset * M_1_2PI);
-    if(!isnan(demod->pdeviation))
       wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation * M_1_2PI);
-
+    } else if(demod->mode == DSB){
+      extern float DSB_offset,DSB_phase;
+      wprintw(sig,  "DSBoffs %7.1f Hz\n",DSB_offset);
+      wprintw(sig,  "DSBphase %7.1f rad\n",DSB_phase);
+    }      
     wnoutrefresh(sig);
     
     wmove(sdr,0,0);
@@ -499,6 +513,9 @@ void *display(void *arg){
 	if(f > 0)
 	  set_freq(demod,f,0);
       }
+      break;
+    case 'i':    // Recenter IF
+      set_freq(demod,get_freq(demod),1);
       break;
     case 'u': // Display update rate
       getentry("Enter update interval, ms [<=0 means no auto update]: ",str,sizeof(str));
