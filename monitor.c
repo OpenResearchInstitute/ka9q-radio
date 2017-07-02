@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.2 2017/06/24 23:51:59 karn Exp karn $
+// $Id: monitor.c,v 1.3 2017/06/28 04:32:14 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -127,13 +127,14 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
   if(LL != L)
     fprintf(stderr,"D/A periods: requested %d, got %d\n",(int)L,(int)LL);
 
-  buffer_size = 32*LL;
+  snd_pcm_uframes_t requested_buffer_size = 65536;
+  buffer_size = requested_buffer_size;
   if(snd_pcm_hw_params_set_buffer_size_near(ap->handle,hw_params,&buffer_size)<0){
     fprintf(stderr,"Error setting D/A buffersize on %s\n",ap->name);
     return -1;
   }
-  if(buffer_size != 32*LL)
-    fprintf(stderr,"D/A buffer: requested %d, got %d\n",(int)(32*LL),(int)buffer_size);
+  if(buffer_size != requested_buffer_size)
+    fprintf(stderr,"D/A buffer: requested %d, got %d\n",(int)requested_buffer_size,(int)buffer_size);
 
   if(snd_pcm_hw_params(ap->handle,hw_params)<0){
     fprintf(stderr,"Error setting D/A HW params on %s\n",ap->name);
@@ -290,7 +291,7 @@ int main(int argc,char *argv[]){
       mcast_address_string = optarg;
       break;
     case 'P':
-      dport = atoi(optarg);
+      dport = strtol(optarg,NULL,0);
       break;
     default:
       fprintf(stderr,"Usage: %s [-v] [-S audioname] [-I mcast_address] [-P dport]\n",argv[0]);

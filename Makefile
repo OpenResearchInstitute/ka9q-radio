@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.29 2017/06/24 23:51:35 karn Exp karn $
+# $Id: Makefile,v 1.30 2017/06/28 04:32:54 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -38,16 +38,16 @@ libfcd.a: fcd.o hid-libusb.o
 	ranlib $@
 
 gentone.o: gentone.c dsp.h
-am.o: am.c dsp.h filter.h radio.h audio.h
+am.o: am.c dsp.h filter.h radio.h audio.h command.h
 audio.o: audio.c dsp.h audio.h rtp.h
-cam.o: cam.c dsp.h filter.h radio.h audio.h
+cam.o: cam.c dsp.h filter.h radio.h audio.h command.h
 control.o: control.c command.h
 demod.o: demod.c radio.h
 display.o: display.c radio.h command.h audio.h dsp.h filter.h bandplan.h
-dsb.o: dsb.c dsp.h filter.h radio.h audio.h
+dsb.o: dsb.c dsp.h filter.h radio.h audio.h command.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c dsp.h filter.h
-fm.o: fm.c dsp.h filter.h radio.h audio.h
+fm.o: fm.c dsp.h filter.h radio.h audio.h command.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h command.h dsp.h rtp.h
 gr.o: gr.c sdr.h
 hid-libusb.o: hid-libusb.c hidapi.h
@@ -56,8 +56,8 @@ misc.o: misc.c
 modes.o: modes.c command.h
 monitor.o: monitor.c rtp.h dsp.h
 radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
-ssb.o: ssb.c dsp.h filter.h radio.h audio.h
-iq.o: iq.c dsp.h filter.h radio.h audio.h
+ssb.o: ssb.c dsp.h filter.h radio.h audio.h command.h
+iq.o: iq.c dsp.h filter.h radio.h audio.h command.h
 bandplan.o: bandplan.c bandplan.h
 iqrecord.o: iqrecord.c command.h rtp.h
 iqplay.o: iqplay.c command.h rtp.h

@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.41 2017/06/24 23:51:22 karn Exp karn $
+// $Id: main.c,v 1.42 2017/06/28 04:31:14 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -158,7 +158,7 @@ int main(int argc,char *argv[]){
       locale = optarg;
       break;
     case 'L':
-      demod->L = atoi(optarg);
+      demod->L = strtol(optarg,NULL,0);
       break;
     case 'm':
       for(i = 0; i < Nmodes;i++){
@@ -169,17 +169,17 @@ int main(int argc,char *argv[]){
       }
       break;
     case 'M':
-      demod->M = atoi(optarg);
+      demod->M = strtol(optarg,NULL,0);
       break;
       break;
     case 'p':
-      Ctl_port = atoi(optarg);
+      Ctl_port = strtol(optarg,NULL,0);
       break;
     case 'q':
       Quiet++; // Suppress display
       break;
     case 'r':
-      OPUS_bitrate = atoi(optarg); 
+      OPUS_bitrate = strtol(optarg,NULL,0);
       break;
     case 'R':
       if(BB_mcast_address_text)
@@ -187,7 +187,7 @@ int main(int argc,char *argv[]){
       BB_mcast_address_text = strdup(optarg);
       break;
     case 't':
-      Nthreads = atoi(optarg);
+      Nthreads = strtol(optarg,NULL,0);
       fftwf_init_threads();
       fftwf_plan_with_nthreads(Nthreads);
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
@@ -328,7 +328,7 @@ int main(int argc,char *argv[]){
   }
 
   set_mode(demod,mode);
-  set_second_LO(demod,-second_IF,1);
+  set_second_LO(demod,-second_IF);
   input_loop(demod); // Doesn't return
 
   exit(0);
@@ -442,7 +442,7 @@ int process_command(struct demod *demod,char *cmdbuf,int len){
 	set_first_LO(demod,command.first_LO,0);
 
       if(command.second_LO >= -demod->samprate/2 && command.second_LO <= demod->samprate/2)
-	set_second_LO(demod,command.second_LO,0);
+	set_second_LO(demod,command.second_LO);
       if(fabs(command.second_LO_rate) < 1e9)
 	set_second_LO_rate(demod,command.second_LO_rate,0);
       if(command.mode >= 0 && command.mode < Nmodes)

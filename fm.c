@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.18 2017/06/17 00:24:11 karn Exp karn $
+// $Id: fm.c,v 1.19 2017/06/20 03:01:01 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -64,7 +64,6 @@ void fm_cleanup(void *arg){
 void *demod_fm(void *arg){
   complex float state = 0;
   struct demod *demod = arg;
-  int devhold = 0;
 
   pthread_setname_np(pthread_self(),"fm");
   const float dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
@@ -78,9 +77,6 @@ void *demod_fm(void *arg){
 
   pthread_cleanup_push(fm_cleanup,demod);
 
-  const int squelchstart = squelchtail * demod->samprate / demod->filter->blocksize_in;
-  int squelchtime = 0;
-
   while(1){
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
@@ -93,26 +89,27 @@ void *demod_fm(void *arg){
 
     // If squelch is closed, just let the output drain
     demod->snr = fm_snr(demod,demod->filter->output.c,demod->filter->blocksize_out);
-    if(demod->snr > 2 || squelchtime > 0){
+    if(demod->snr > 2){
       float audio[demod->filter->blocksize_out];
       do_fm(audio,demod->filter->output.c,demod->filter->blocksize_out,&state);
-      if(demod->snr > 2){
-	int n;
-	for(n=0;n<demod->filter->blocksize_out;n++){
-	  demod->foffset += 0.00005 * (audio[n] - demod->foffset);
-	  if(devhold == 0 || (fabsf(audio[n] - demod->foffset)) > demod->pdeviation){
-	    demod->pdeviation = fabsf(audio[n] - demod->foffset);
-	    devhold = 0.5 * dsamprate;
-	  } else {
-	    devhold--;
-	  }
-	}
-	squelchtime = squelchstart;
-      } else if(squelchtime != 0)
-	squelchtime--;
 
-      // Scale and send to audio thread
+      float pdev = 0;
+      float avg = 0;
+
       int n;
+      for(n=0;n<demod->filter->blocksize_out;n++)
+	avg += audio[n];
+      
+      avg /= demod->filter->blocksize_out;
+      
+      for(n=0;n<demod->filter->blocksize_out;n++){
+	if(fabsf(audio[n] - avg) > pdev)
+	  pdev = fabsf(audio[n] - avg);
+      }
+      demod->foffset = (avg / (2*M_PI)) * (demod->samprate / demod->decimate);
+      demod->pdeviation = (pdev / (2*M_PI)) * (demod->samprate / demod->decimate);
+      
+      // Scale and send to audio thread
       for(n=0;n<demod->filter->blocksize_out;n++)
 	audio[n] *= demod->gain;
       

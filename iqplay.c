@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.1 2017/06/17 07:21:37 karn Exp karn $
+// $Id: iqplay.c,v 1.2 2017/06/17 08:15:28 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -53,7 +53,7 @@ int main(int argc,char *argv[]){
       dest = optarg;
       break;
     case 'P':
-      dest_port = atoi(optarg);
+      dest_port = strtol(optarg,NULL,0);
       break;
     case 'v':
       Verbose++;
@@ -62,7 +62,7 @@ int main(int argc,char *argv[]){
       locale = optarg;
       break;
     case 'b':
-      blocksize = atoi(optarg);
+      blocksize = strtol(optarg,NULL,0);
       break;
     }
   }
@@ -177,12 +177,12 @@ int main(int argc,char *argv[]){
     int n;
     if((n = getxattr(argv[i],"user.samplerate",temp,sizeof(temp))) > 0){
       temp[n] = '\0';
-      status.samprate = atol(temp);
+      status.samprate = strtol(temp,NULL,0);
     } else
       status.samprate = ADC_samprate; // Use default
     if((n = getxattr(argv[i],"user.frequency",temp,sizeof(temp))) > 0){
       temp[n] = '\0';
-      status.frequency = atof(temp);
+      status.frequency = strtod(temp,NULL);
     } else
       status.frequency = 0; // Unknown
     

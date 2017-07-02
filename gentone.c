@@ -24,13 +24,13 @@ int main(int argc,char *argv[]){
   while((c = getopt(argc,argv,"f:a:s:")) != EOF){
     switch(c){
     case 'f':
-      frequency = atof(optarg);
+      frequency = strtod(optarg,NULL);
       break;
     case 'a':
-      amplitude = atof(optarg);
+      amplitude = strtod(optarg,NULL);
       break;
     case 's':
-      sweep = atof(optarg); // sweep rate, Hz/sec
+      sweep = strtod(optarg,NULL); // sweep rate, Hz/sec
       break;
     }
   }

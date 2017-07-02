@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.7 2017/05/11 10:31:05 karn Exp karn $
+// $Id: control.c,v 1.8 2017/06/24 23:52:10 karn Exp karn $
 // Send remote commands
 #define _GNU_SOURCE 1 // Get NAN macro
 #include <stdio.h>
@@ -75,16 +75,16 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     case 'r':
-      Samprate = atoi(optarg);
+      Samprate = strtol(optarg,NULL,0);
       break;
     case 'p':
-      Ctl_port = atoi(optarg);
+      Ctl_port = strtol(optarg,NULL,0);
       break;
     case 'i':
-      first_if = atof(optarg);
+      first_if = strtod(optarg,NULL);
       break;
     case 's':
-      command.second_LO_rate = atof(optarg);
+      command.second_LO_rate = strtod(optarg,NULL);
       break;
     case 'm':
       for(i=0;i< Nmodes;i++){
@@ -95,10 +95,10 @@ int main(int argc,char *argv[]){
       }
       break;
     case 'f':
-      freq = atof(optarg);
+      freq = strtod(optarg,NULL);
       break;
     case 'c':
-      command.calibrate = atof(optarg) * 1e-6;
+      command.calibrate = strtod(optarg,NULL) * 1e-6;
       break;
     case 'd':
       destination = optarg;

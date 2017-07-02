@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.8 2017/06/17 00:24:53 karn Exp karn $
+// $Id: filter.c,v 1.9 2017/06/28 04:34:00 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -76,7 +76,6 @@ int execute_filter(struct filter *f){
   fftwf_execute(f->fwd_plan);  // Forward transform
   // Save for next block - non-destructive copy
   memmove(f->input_buffer,f->input_buffer + f->blocksize_in,(f->impulse_length - 1)*sizeof(*f->input_buffer));
-
   f->fdomain[0] *= f->response[0];      // DC same for all types
   if(f->type == COMPLEX){ // Actually the simplest!
     int n,p,dn; // negative, positive and decimated negative frequency indices
@@ -218,7 +217,7 @@ int window_filter(const int L,const int M,complex float *response,const float be
   fftwf_destroy_plan(rev_filter_plan);
   
   // Shift to beginning of buffer, apply window and scale (N*N)
-  const float scale = 1./(N*N);
+  const float scale = 1./((float)N*N);
   float kaiser_window[M];
   make_kaiser(kaiser_window,M,beta);
   int n;
@@ -268,7 +267,7 @@ int window_rfilter(const int L,const int M,complex float *response,const float b
   // Shift to beginning of buffer, apply window and scale (N*N)
   float kaiser_window[M];
   make_kaiser(kaiser_window,M,beta);
-  const float scale = 1./(N*N);
+  const float scale = 1./((float)N*N);
   int n;
   for(n = M - 1; n >= 0; n--)
     timebuf[n] = timebuf[(n-M/2+N)%N] * kaiser_window[n] * scale;

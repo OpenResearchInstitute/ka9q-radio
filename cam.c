@@ -71,7 +71,7 @@ void *demod_cam(void *arg){
     // Only move a fraction of the error at one time
     freqerror = -0.01 * carg(phase * conj(lastphase)) * M_1_2PI * demod->samprate/demod->filter->blocksize_in;
     lastphase = phase;
-    set_second_LO(demod,-freqerror + demod->second_LO,0);
+    set_second_LO(demod,-freqerror + demod->second_LO);
 
     // Remove carrier DC
     // AM AGC is carrier-driven

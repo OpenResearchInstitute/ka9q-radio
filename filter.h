@@ -43,4 +43,5 @@ int window_rfilter(const int L,const int M,complex float *response,const float b
 struct filter *create_filter(const int,const int,complex float *,const int,const enum filtertype);
 int execute_filter(struct filter *);
 int delete_filter(struct filter *);
+int make_kaiser(float *window,const int M,const float beta);
 #endif

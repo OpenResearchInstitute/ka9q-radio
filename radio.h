@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.24 2017/06/24 23:52:01 karn Exp karn $
+// $Id: radio.h,v 1.25 2017/06/28 04:29:56 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -60,6 +60,7 @@ struct demod {
   float gain;       // Current audio gain (linear modes only)
   float foffset;    // Frequency offset (FM)
   float pdeviation; // Peak frequency deviation (FM)
+  float cphase;     // Carrier phase (DSB/PSK)
 };
 extern struct demod Demod;
 extern int Demod_sock;
@@ -71,7 +72,7 @@ const double get_freq(const struct demod *);
 double set_freq(struct demod *,const double,const int);
 double set_first_LO(struct demod *demod,const double first_LO,const int);
 const double get_first_LO(const struct demod *demod);
-double set_second_LO(struct demod *demod,const double second_LO,const int);
+double set_second_LO(struct demod *demod,const double second_LO);
 const double get_second_LO(const struct demod *demod,const int);
 double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int);
 const double get_exact_samprate(const struct demod *);

@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.14 2017/06/21 09:08:55 karn Exp karn $
+// $Id: funcube.c,v 1.15 2017/06/21 21:55:26 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -80,13 +80,13 @@ int main(int argc,char *argv[]){
       dest = optarg;
       break;
     case 'P':
-      dest_port = atoi(optarg);
+      dest_port = strtol(optarg,NULL,0);
       break;
     case 'o':
       No_hold_open++; // Close USB control port between commands so fcdpp can be used
       break;
     case 'd':
-      Dongle = atoi(optarg);
+      Dongle = strtol(optarg,NULL,0);
       break;
     case 'v':
       Verbose++;
@@ -95,7 +95,7 @@ int main(int argc,char *argv[]){
       locale = optarg;
       break;
     case 'b':
-      blocksize = atoi(optarg);
+      blocksize = strtol(optarg,NULL,0);
       break;
     }
   }
