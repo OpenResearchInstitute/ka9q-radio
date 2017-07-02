@@ -13,14 +13,11 @@
 #include "radio.h"
 #include "audio.h"
 
-void am_cleanup(void *arg){
-  struct demod *demod = arg;
-  delete_filter(demod->filter);
-  demod->filter = NULL;
-}
 
 
 void *demod_am(void *arg){
+  assert(arg != NULL);
+
   int n;
   struct demod *demod = arg;
 
@@ -28,34 +25,35 @@ void *demod_am(void *arg){
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 
-  demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
+  struct filter * filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
+  demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
-  pthread_cleanup_push(am_cleanup,demod);
 
-  while(1){
-    fillbuf(demod->input,(char *)demod->filter->input,
-	    demod->filter->blocksize_in*sizeof(complex float));
-    spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
-    execute_filter(demod->filter);
+  while(!demod->terminate){
+    fillbuf(demod->input,(char *)filter->input,
+	    filter->blocksize_in*sizeof(complex float));
+    spindown(demod,filter->input,filter->blocksize_in); // 2nd LO
+    execute_filter(filter);
 
     float average;
-    float audio[demod->filter->blocksize_out];
+    float audio[filter->blocksize_out];
     
     average = 0;
-    for(n=0; n < demod->filter->blocksize_out; n++)
-      average += audio[n] = cabs(demod->filter->output.c[n]);
-    average /= demod->filter->blocksize_out;
+    for(n=0; n < filter->blocksize_out; n++)
+      average += audio[n] = cabs(filter->output.c[n]);
+    average /= filter->blocksize_out;
     demod->amplitude = average;
     float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
     demod->snr = (snn*snn) -1; // S/N as power ratio
     
     // AM AGC is carrier-driven
     demod->gain = Headroom / average;
-    for(n=0; n<demod->filter->blocksize_out; n++)
+    for(n=0; n<filter->blocksize_out; n++)
       audio[n] = (audio[n] - average) * demod->gain;
     
     send_mono_audio(audio,n);
   }
-  pthread_cleanup_pop(1);
+  delete_filter(filter);
+  demod->filter = NULL;
   pthread_exit(NULL);
 }

@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.34 2017/06/28 04:30:32 karn Exp karn $
+// $Id: radio.c,v 1.35 2017/07/02 04:29:56 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -30,8 +30,7 @@ const float Headroom = 0.1778; // -15 dB
 
 // Get true first LO frequency
 const double get_first_LO(const struct demod *demod){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
   return demod->first_LO * (1 + demod->calibrate);  // True frequency, as adjusted
 }
 
@@ -39,8 +38,8 @@ const double get_first_LO(const struct demod *demod){
 // Return current frequency of carrier frequency at current first IF
 // If sweeping, return second LO freq at "offset" samples ahead of current sample
 const double get_second_LO(const struct demod *demod,const int offset){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
+
   if(cimag(demod->second_LO_phase_accel) != 0){
     // sweeping, get instantaneous frequency
     return M_1_2PI * demod->samprate
@@ -51,8 +50,7 @@ const double get_second_LO(const struct demod *demod,const int offset){
 
 // Set frequency with optional front end tuning
 double set_freq(struct demod *demod,const double f,const int force){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
 
   double change = f - get_freq(demod);
 
@@ -90,8 +88,7 @@ double set_freq(struct demod *demod,const double f,const int force){
 
 // Return current frequency, including effects of any sweep & dial offset
 const double get_freq(const struct demod *demod){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
   return get_first_LO(demod) - get_second_LO(demod,0) + demod->dial_offset;
 }
 
@@ -100,8 +97,7 @@ const double get_freq(const struct demod *demod){
 // demod->first_LO isn't updated here, but by the
 // incoming status frames so it don't change right away
 double set_first_LO(struct demod *demod,const double first_LO,const int force){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
 
   if(!force && first_LO == get_first_LO(demod))
     return first_LO;
@@ -137,8 +133,7 @@ double set_first_LO(struct demod *demod,const double first_LO,const int force){
 //
 // If avoid_alias is false, simply test that specified frequency is between +/- samplerate/2
 const int LO2_in_range(const struct demod *demod,const double f,int avoid_alias){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
   if(avoid_alias)
     return f >= demod->min_IF + max(0,demod->high)
 	    && f <= demod->max_IF + min(0,demod->low);
@@ -150,8 +145,7 @@ const int LO2_in_range(const struct demod *demod,const double f,int avoid_alias)
 // Set second local oscillator (the one in software)
 // Only limit range to +/- samprate/2; the caller must avoid the alias region, e.g., with LO2_in_range()
 double set_second_LO(struct demod *demod,const double second_LO){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
 
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
   if(second_LO < -demod->samprate/2 || second_LO > demod->samprate/2)
@@ -165,8 +159,7 @@ double set_second_LO(struct demod *demod,const double second_LO){
   return second_LO;
 }
 double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int force){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
 
   if(!force && second_LO_rate == demod->second_LO_rate)
     return second_LO_rate;
@@ -183,12 +176,12 @@ double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const 
   return second_LO_rate;
 }
 int set_mode(struct demod *demod,const enum mode mode){
-  if(demod == NULL)
-    return -1;
+  assert(demod != NULL);
 
-  pthread_cancel(demod->demod_thread); // what if it's not running?
+  demod->terminate = 1;
   pthread_join(demod->demod_thread,NULL); // Wait for it to finish
   
+  demod->terminate = 0;
   demod->mode = mode;
   demod->dial_offset = Modes[mode].dial;
   demod->low = Modes[mode].low;
@@ -235,8 +228,8 @@ int set_mode(struct demod *demod,const enum mode mode){
 }      
 
 const int get_filter(const struct demod *demod,float *low,float *high){
-  if(demod == NULL)
-    return -1;
+  assert(demod != NULL);
+
   if(low != NULL)
     *low = demod->low;
   if(high != NULL)
@@ -245,17 +238,14 @@ const int get_filter(const struct demod *demod,float *low,float *high){
 }
 
 int set_filter(struct demod *demod,const float low,const float high){
-  if(demod == NULL)
-    return -1;
+  assert(demod != NULL);
+  assert(demod->filter != NULL);
   
   int N = demod->L + demod->M - 1;
 
   if(high > demod->max_IF || low < demod->min_IF || high <= low)
     return -1;
 
-  if(demod->filter == NULL)
-    return -1;
-  
   float gain;
   if(demod->filter->type == REAL || demod->filter->type == CROSS_CONJ)
     gain = M_SQRT1_2;
@@ -284,8 +274,8 @@ int set_filter(struct demod *demod,const float low,const float high){
 
 
 int set_cal(struct demod *demod,const double cal){
-  if(demod == NULL)
-    return -1;
+  assert(demod != NULL);
+
   double f = get_freq(demod);
   demod->calibrate = cal;
   demod->samprate = ADC_samprate * (1 + cal);
@@ -293,15 +283,15 @@ int set_cal(struct demod *demod,const double cal){
   return 0;
 }
 const double get_cal(const struct demod *demod){
-  if(demod == NULL)
-    return 0;
+  assert(demod != NULL);
+
   return demod->calibrate;
 }
 
 
 int spindown(struct demod *demod,complex float *data,const int len){
-  if(demod == NULL || data == NULL)
-    return -1;
+  assert(demod != NULL);
+  assert(data != NULL);
 
   if(demod->second_LO_phase == 0) // Make sure it's been initalized
     demod->second_LO_phase = 1;

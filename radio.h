@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.25 2017/06/28 04:29:56 karn Exp karn $
+// $Id: radio.h,v 1.26 2017/07/02 04:29:57 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -30,6 +30,7 @@ struct demod {
   // Demod thread data
   int input;  // Input pipe fd
   pthread_t demod_thread;
+  int terminate;
 
   double dial_offset; // displayed dial frequency = carrier freq + dial_offset (useful for CW)
 

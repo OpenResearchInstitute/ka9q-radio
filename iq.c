@@ -17,16 +17,11 @@
 static const float hangtime = 1.1;    // Hang for 1.1 seconds after new peak
 static const float recovery_rate = 6; // Recover gain at 6 db/sec after hang finishes
 
-void iq_cleanup(void *arg){
-  struct demod *demod = arg;
-  delete_filter(demod->filter);
-  demod->filter = NULL;
-}
-
-
 void *demod_iq(void *arg){
+  assert(arg != NULL);
+
   int n;
-  struct demod *demod = arg;
+  struct demod * const demod = arg;
 
   pthread_setname_np(pthread_self(),"iq");
   demod->foffset = NAN; // not used
@@ -36,21 +31,20 @@ void *demod_iq(void *arg){
   const float agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
   int hangcount = 0;
 
-  demod->filter = create_filter(demod->L,demod->M,NULL,demod->decimate,
+  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,
 			       demod->mode == ISB ? CROSS_CONJ : COMPLEX);
   set_filter(demod,demod->low,demod->high);
   demod->gain = dB2voltage(70.); // Starting point
-  pthread_cleanup_push(iq_cleanup,demod);
 
-  while(1){
-    fillbuf(demod->input,(char *)demod->filter->input,
-	    demod->filter->blocksize_in*sizeof(complex float));
-    spindown(demod,demod->filter->input,demod->filter->blocksize_in); // 2nd LO
-    execute_filter(demod->filter);
+  while(!demod->terminate){
+    fillbuf(demod->input,(char *)filter->input,
+	    filter->blocksize_in*sizeof(complex float));
+    spindown(demod,filter->input,filter->blocksize_in); // 2nd LO
+    execute_filter(filter);
 
     // Automatic gain control
     // Find average amplitude for AGC
-    demod->amplitude = camplitude(demod->filter->output.c,demod->filter->blocksize_out);
+    demod->amplitude = camplitude(filter->output.c,filter->blocksize_out);
     float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
     demod->snr = (snn*snn) -1; // S/N as power ratio
 
@@ -67,11 +61,12 @@ void *demod_iq(void *arg){
 	demod->gain *= agcratio;
       }
     }
-    for(n=0;n<demod->filter->blocksize_out;n++)
-      demod->filter->output.c[n] *= demod->gain;
+    for(n=0;n<filter->blocksize_out;n++)
+      filter->output.c[n] *= demod->gain;
 
-    send_stereo_audio(demod->filter->output.c,n);
+    send_stereo_audio(filter->output.c,n);
   }
-  pthread_cleanup_pop(1);
+  delete_filter(demod->filter);
+  demod->filter = NULL;
   pthread_exit(NULL);
 }

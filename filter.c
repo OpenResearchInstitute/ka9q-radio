@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.9 2017/06/28 04:34:00 karn Exp karn $
+// $Id: filter.c,v 1.10 2017/07/02 04:29:50 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -69,13 +69,21 @@ struct filter *create_filter(const int L,const int M, complex float *response,co
 }
 
 int execute_filter(struct filter *f){
-  if(f == NULL || f->type == NONE || f->response == NULL)
-    return -1;
+  execute_filter_nocopy(f);
+  // Save for next block - non-destructive copy
+  memmove(f->input_buffer,f->input_buffer + f->blocksize_in,(f->impulse_length - 1)*sizeof(*f->input_buffer));
+  return 0;
+}
+
+
+int execute_filter_nocopy(struct filter *f){
+  assert(f != NULL);
+  assert(f->type != NONE);
+  assert(f->response != NULL);
+
   const int N = f->blocksize_in + f->impulse_length - 1; // points in input buffer
   const int N_dec = N / f->decimate;                     // points in (decimated) output buffer
   fftwf_execute(f->fwd_plan);  // Forward transform
-  // Save for next block - non-destructive copy
-  memmove(f->input_buffer,f->input_buffer + f->blocksize_in,(f->impulse_length - 1)*sizeof(*f->input_buffer));
   f->fdomain[0] *= f->response[0];      // DC same for all types
   if(f->type == COMPLEX){ // Actually the simplest!
     int n,p,dn; // negative, positive and decimated negative frequency indices
@@ -111,7 +119,7 @@ int delete_filter(struct filter *f){
     fftwf_destroy_plan(f->fwd_plan);
     fftwf_destroy_plan(f->rev_plan);  
     fftwf_free(f->input_buffer);
-    fftwf_free(f->output_buffer.c);
+    fftwf_free(f->output_buffer.v);
     fftwf_free(f->response);
     fftwf_free(f->fdomain);
     free(f);
@@ -207,7 +215,7 @@ int make_kaiser(float *window,const int M,const float beta){
 int window_filter(const int L,const int M,complex float *response,const float beta){
   const int N = L + M - 1;
   // fftw_plan can overwrite its buffers, so we're forced to make a temp. Ugh.
-  complex float *buffer = fftwf_alloc_complex(N);
+  complex float * const buffer = fftwf_alloc_complex(N);
   fftwf_plan fwd_filter_plan = fftwf_plan_dft_1d(N,buffer,buffer,FFTW_FORWARD,FFTW_ESTIMATE);
   fftwf_plan rev_filter_plan = fftwf_plan_dft_1d(N,buffer,buffer,FFTW_BACKWARD,FFTW_ESTIMATE);
 
@@ -217,7 +225,7 @@ int window_filter(const int L,const int M,complex float *response,const float be
   fftwf_destroy_plan(rev_filter_plan);
   
   // Shift to beginning of buffer, apply window and scale (N*N)
-  const float scale = 1./((float)N*N);
+  const float scale = 1./((float)N*N);  // Integer will overflow if too large
   float kaiser_window[M];
   make_kaiser(kaiser_window,M,beta);
   int n;
@@ -254,8 +262,8 @@ int window_filter(const int L,const int M,complex float *response,const float be
 // Negative frequencies are inplicitly the conjugate of the positive frequencies
 int window_rfilter(const int L,const int M,complex float *response,const float beta){
   const int N = L + M - 1;
-  complex float *buffer = fftwf_alloc_complex(N/2 + 1); // plan destroys its input
-  float *timebuf = fftwf_alloc_real(N);
+  complex float * const buffer = fftwf_alloc_complex(N/2 + 1); // plan destroys its input
+  float * const timebuf = fftwf_alloc_real(N);
   fftwf_plan rev_filter_plan = fftwf_plan_dft_c2r_1d(N,buffer,timebuf,FFTW_ESTIMATE);
   fftwf_plan fwd_filter_plan = fftwf_plan_dft_r2c_1d(N,timebuf,buffer,FFTW_ESTIMATE);
   
@@ -267,7 +275,7 @@ int window_rfilter(const int L,const int M,complex float *response,const float b
   // Shift to beginning of buffer, apply window and scale (N*N)
   float kaiser_window[M];
   make_kaiser(kaiser_window,M,beta);
-  const float scale = 1./((float)N*N);
+  const float scale = 1./((float)N*N); // Integer will overflow if too large
   int n;
   for(n = M - 1; n >= 0; n--)
     timebuf[n] = timebuf[(n-M/2+N)%N] * kaiser_window[n] * scale;
