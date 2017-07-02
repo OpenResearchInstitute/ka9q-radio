@@ -1,6 +1,7 @@
-// $Id: display.c,v 1.43 2017/06/24 23:51:32 karn Exp karn $
+// $Id: display.c,v 1.44 2017/06/28 04:35:47 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #define _GNU_SOURCE 1
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -42,16 +43,15 @@ int Update_interval = 100;
 
 const double parse_frequency(const char *s){
   char *ss = alloca(strlen(s));
-  char *sp;
-  int i;
-  double mult,f;
-  char *endptr;
 
+  int i;
   for(i=0;i<strlen(s);i++)
     ss[i] = tolower(s[i]);
 
   ss[i] = '\0';
   
+  char *sp;
+  double mult = 1.0;
   if((sp = strchr(ss,'g')) != NULL){
     mult = 1e9;
     *sp = '.';
@@ -64,8 +64,24 @@ const double parse_frequency(const char *s){
   } else
     mult = 1;
 
-  f = strtod(ss,&endptr);
-  return mult * f;
+  char *endptr;
+  double f = strtod(ss,&endptr);
+  if(endptr != ss)
+    return mult * f;
+  else
+    return 0;
+}
+
+
+void chomp(char *s){
+  char *cp;
+
+  if(s == NULL)
+    return;
+  if((cp = strchr(s,'\r')) != NULL)
+    *cp = '\0';
+  if((cp = strchr(s,'\n')) != NULL)
+    *cp = '\0';
 }
 
 
@@ -81,9 +97,7 @@ void popup(const char *filename){
   int rows=0, cols=0;
   char line[MAXCOLS];
   while(fgets(line,sizeof(line),fp) != NULL){
-    char *cp;
-    if((cp = strchr(line,'\n')) != NULL)
-      *cp = '\0';
+    chomp(line);
     rows++;
     if(strlen(line) > cols)
       cols = strlen(line);
@@ -95,9 +109,7 @@ void popup(const char *filename){
   box(pop,0,0);
   int row = 0;
   while(fgets(line,sizeof(line),fp) != NULL){
-    char *cp;
-    if((cp = strchr(line,'\n')) != NULL)
-      *cp = '\0';
+    chomp(line);
     mvwprintw(pop,++row,1,line);
   }
   fclose(fp);
@@ -124,11 +136,7 @@ void getentry(char *prompt,char *response,int len){
   // null is stashed. Hard to believe it isn't, but this is to be sure
   memset(response,0,len);
   wgetnstr(pwin,response,len);
-  char *cp;
-  if((cp = strchr(response,'\r')) != NULL)
-    *cp = '\0';
-  if((cp = strchr(response,'\n')) != NULL)
-    *cp = '\0';
+  chomp(response);
   timeout(Update_interval);
   noecho();
   werase(pwin);
@@ -166,7 +174,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
 	// otherwise happen if we changed LO2 first
 	set_first_LO(demod, get_first_LO(demod) + tunestep * (1 + demod->calibrate),0);
 	// Change LO2 by actual amount of LO1 change
-	set_second_LO(demod,new_lo2,0);
+	set_second_LO(demod,new_lo2);
       } // else ignore; LO2 would be out-of-range
     } else
       set_first_LO(demod, get_first_LO(demod) + tunestep * (1 + demod->calibrate),0);
@@ -188,7 +196,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
       new_lo2 -= tunestep;
     }
     if(LO2_in_range(demod,new_lo2,0))
-      set_second_LO(demod,new_lo2,0); // Ignore if out of range
+      set_second_LO(demod,new_lo2); // Ignore if out of range
     break;
   case 3: // Dial offset
     demod->dial_offset += tunestep;
@@ -323,16 +331,17 @@ void *display(void *arg){
     float n0 = ((demod->power_i + demod->power_q) - (demod->amplitude * demod->amplitude))
       / (demod->samprate - fabs(high-low));
 #endif
-    if(!isnan(demod->snr) && demod->snr != 0)
+    if(!isnan(demod->snr))
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
-    if(demod->mode == FM || demod->mode == NFM){
-      wprintw(sig,"offset  %+7.1f Hz\n",demod->samprate/demod->decimate * demod->foffset * M_1_2PI);
-      wprintw(sig,"deviat  %7.1f Hz\n",demod->samprate/demod->decimate * demod->pdeviation * M_1_2PI);
-    } else if(demod->mode == DSB){
-      extern float DSB_offset,DSB_phase;
-      wprintw(sig,  "DSBoffs %7.1f Hz\n",DSB_offset);
-      wprintw(sig,  "DSBphase %7.1f rad\n",DSB_phase);
-    }      
+    if(!isnan(demod->foffset))
+      wprintw(sig,"offset  %+7.1f Hz\n",demod->foffset);
+
+    if(!isnan(demod->pdeviation))
+      wprintw(sig,"deviat  %7.1f Hz\n",demod->pdeviation);
+
+    if(!isnan(demod->cphase))
+      wprintw(sig,"cphase  %7.3f rad\n",demod->cphase);
+
     wnoutrefresh(sig);
     
     wmove(sdr,0,0);
@@ -364,15 +373,11 @@ void *display(void *arg){
 	      OPUS_bitrate,OPUS_blocktime);
 
     } else {
-      wprintw(net,"PCM audio  -> %s:%d\n",BB_mcast_address_text,Mcast_dest_port);
+      wprintw(net,"PCM audio -> %s:%d\n",BB_mcast_address_text,Mcast_dest_port);
     }
     wnoutrefresh(net);
     doupdate();
 
-
-    double f;
-    char str[160];
-    int i,j;
 
     // Redefine stuff we need from linux/input.h
     // We can't include it because it conflicts with ncurses.h!
@@ -423,15 +428,18 @@ void *display(void *arg){
       popup("help.txt");
       break;
     case 'I':
-      getentry("IQ input IP dest address: ",str,sizeof(str));
-      i = setup_input(str);
-      j = Input_fd;
-      Input_fd = i;
-      if(j != -1)
-	close(j);
-      if(IQ_mcast_address_text != NULL)
-	free(IQ_mcast_address_text);
-      IQ_mcast_address_text = strdup(str);
+      {
+	char str[160];
+	getentry("IQ input IP dest address: ",str,sizeof(str));
+	int i = setup_input(str);
+	int j = Input_fd;
+	Input_fd = i;
+	if(j != -1)
+	  close(j);
+	if(IQ_mcast_address_text != NULL)
+	  free(IQ_mcast_address_text);
+	IQ_mcast_address_text = strdup(str);
+      }
       break;
     case 'l':
       demod->frequency_lock = !demod->frequency_lock;
@@ -472,44 +480,57 @@ void *display(void *arg){
       clearok(curscr,TRUE);
       break;
     case 'b':   // Blocksize - both data and impulse response-1
-      getentry("Enter blocksize in samples: ",str,sizeof(str));
-      if(strlen(str) > 0){
-	demod->L = atoi(str);
-	demod->M = demod->L + 1;
-	set_mode(demod,demod->mode); // Restart demod thread
+      {
+	char str[160];
+	char *ptr;
+	getentry("Enter blocksize in samples: ",str,sizeof(str));
+	int i = strtol(str,&ptr,0);
+	if(ptr != str){
+	  demod->L = i;
+	  demod->M = demod->L + 1;
+	  set_mode(demod,demod->mode); // Restart demod thread
+	}
       }
       break;
     case 'c':   // TCXO calibration offset
-      getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
-      if(strlen(str) > 0){
-	f = strtod(str,NULL);
-	set_cal(demod,f * 1e-6);
+      {
+	char str[160],*ptr;
+	getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
+	double f = strtod(str,&ptr);
+	if(ptr != str){
+	  set_cal(demod,f * 1e-6);
+	}
       }
       break;
     case 'n':   // Set noise reference to current amplitude; hit with no sig
       demod->noise = demod->amplitude;
       break;
     case 'm':   // Select demod mode from list
-      strncpy(str,"Enter mode [ ",sizeof(str));
-      for(i=0;i < Nmodes;i++){
-	strncat(str,Modes[i].name,sizeof(str) - strlen(str) - 1);
-	strncat(str," ",sizeof(str) - strlen(str) - 1);
-      }
-      strncat(str,"]: ",sizeof(str) - strlen(str) - 1);
-      getentry(str,str,sizeof(str));
-      if(strlen(str) > 0){
+      {
+	char str[160];
+	strncpy(str,"Enter mode [ ",sizeof(str));
+	int i;
 	for(i=0;i < Nmodes;i++){
-	  if(strcasecmp(str,Modes[i].name) == 0){
-	    set_mode(demod,Modes[i].mode);
-	    break;
+	  strncat(str,Modes[i].name,sizeof(str) - strlen(str) - 1);
+	  strncat(str," ",sizeof(str) - strlen(str) - 1);
+	}
+	strncat(str,"]: ",sizeof(str) - strlen(str) - 1);
+	getentry(str,str,sizeof(str));
+	if(strlen(str) > 0){
+	  for(i=0;i < Nmodes;i++){
+	    if(strcasecmp(str,Modes[i].name) == 0){
+	      set_mode(demod,Modes[i].mode);
+	      break;
+	    }
 	  }
-	} 
+	}
       }
       break;
     case 'f':   // Tune to new frequency
-      getentry("Enter frequency: ",str,sizeof(str));
-      if(strlen(str) > 0){
-	f = parse_frequency(str);
+      {
+	char str[160];
+	getentry("Enter frequency: ",str,sizeof(str));
+	double f = parse_frequency(str);
 	if(f > 0)
 	  set_freq(demod,f,0);
       }
@@ -518,30 +539,31 @@ void *display(void *arg){
       set_freq(demod,get_freq(demod),1);
       break;
     case 'u': // Display update rate
-      getentry("Enter update interval, ms [<=0 means no auto update]: ",str,sizeof(str));
-      if(strlen(str) > 0){
-	int u;
-
-	u = atoi(str);
-	if(u > 50){
-	  Update_interval = u;
-	  timeout(Update_interval);
-	} else if(u <= 0){
-	  Update_interval = -1; // No automatic update
-	  timeout(Update_interval);
+      {
+	char str[160],*ptr;
+	getentry("Enter update interval, ms [<=0 means no auto update]: ",str,sizeof(str));
+	int u = strtol(str,&ptr,0);
+	if(ptr != str){
+	  if(u > 50){
+	    Update_interval = u;
+	    timeout(Update_interval);
+	  } else if(u <= 0){
+	    Update_interval = -1; // No automatic update
+	    timeout(Update_interval);
+	  }
 	}
       }
       break;
     case 'k': // Kaiser window beta parameter
-      getentry("Enter Kaiser window beta: ",str,sizeof(str));
-      if(strlen(str) > 0){
-	double b = strtod(str,NULL);
-	double ob = Kaiser_beta;
-	if(b >= 0 && b < 100 && b != ob){
-	  Kaiser_beta = b;
-	  get_filter(demod,&low,&high);
-	  set_filter(demod,low,high);
-	}
+      {
+	char str[160],*ptr;
+	getentry("Enter Kaiser window beta: ",str,sizeof(str));
+	double b = strtod(str,&ptr);
+	  if(ptr != str && b >= 0 && b < 100 && b != Kaiser_beta){
+	    Kaiser_beta = b;
+	    get_filter(demod,&low,&high);
+	    set_filter(demod,low,high);
+	  }
       }
       break;
     default:
