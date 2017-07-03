@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.20 2017/07/02 04:29:51 karn Exp karn $
+// $Id: fm.c,v 1.21 2017/07/02 12:02:14 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -22,14 +22,15 @@ float fm_snr(struct demod *demod,complex float *buffer,int L){
   float avg = 0;
   int n;
   for(n=0;n<L;n++){
-    const float magsq = cnrmf(buffer[n]); // I^2 + Q^2
+    float const magsq = cnrmf(buffer[n]); // I^2 + Q^2
     avg_squares += magsq;
     avg += sqrtf(magsq);            // magnitude
   }
   avg_squares /= L; // Average square magnitude
   avg /= L;         // Average magnitude
   demod->amplitude = avg;
-  const float fm_variance = avg_squares - avg*avg;
+  float const fm_variance = avg_squares - avg*avg;
+  demod->noise = sqrtf(fm_variance);
   
   // Find SNR
   return avg*avg/(2*fm_variance) - 1;
@@ -38,7 +39,7 @@ float fm_snr(struct demod *demod,complex float *buffer,int L){
 
 // in-place FM demodulator
 // Note: output can range from -PI to +PI; do gain scaling appropriately
-int do_fm(float *output,const complex float *buffer,int L,complex float *state){
+int do_fm(float *output,complex float const *buffer,int L,float *state){
   int n;
 
   output[0] = cargf(buffer[0] * conjf(*state));
@@ -56,7 +57,8 @@ void *demod_fm(void *arg){
   struct demod * const demod = arg;  
   complex float state = 0;
   pthread_setname_np(pthread_self(),"fm");
-  const float dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
+  float const dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
+  float lastaudio = 0;
 
   demod->pdeviation = 0;
   demod->foffset = 0;
@@ -71,36 +73,40 @@ void *demod_fm(void *arg){
     // We do this in the loop because BW can change
     demod->gain = (Headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
 
-    fillbuf(demod->input,(char *)filter->input,
-	    filter->blocksize_in*sizeof(complex float));
-    spindown(demod,filter->input,filter->blocksize_in); // 2nd LO
+    fillbuf(demod->input,filter->input,filter->ilen*sizeof(complex float));
+    spindown(demod,filter->input,filter->ilen); // 2nd LO
     execute_filter(filter);
 
     // If squelch is closed, just let the output drain
-    demod->snr = fm_snr(demod,filter->output.c,filter->blocksize_out);
+    demod->snr = fm_snr(demod,filter->output.c,filter->olen);
     if(demod->snr > 2){
-      float audio[filter->blocksize_out];
-      do_fm(audio,filter->output.c,filter->blocksize_out,&state);
-
-      float pdev = 0;
-      float avg = 0;
-
+      float audio[filter->olen];
       int n;
-      for(n=0;n<filter->blocksize_out;n++)
+      float avg = 0;
+      float ampl = demod->amplitude * demod->amplitude;
+      for(n=0; n<filter->olen; n++){
+	complex float const prod = filter->output.c[n] * state;
+	if(cabsf(prod) > 0.5 * ampl)
+	  audio[n] = carg(prod);
+	else if(n != 0) // Discard weak sample
+	  audio[n] = audio[n-1];
+	else
+	  audio[n] = lastaudio;
+	state = conjf(filter->output.c[n]);
 	avg += audio[n];
+      }
+      lastaudio = audio[n-1];
+      avg /= filter->olen;
 
-      avg /= filter->blocksize_out;
-
-      for(n=0;n<filter->blocksize_out;n++){
+      // Find peak deviation, scale for output
+      float pdev = 0;
+      for(n=0;n<filter->olen;n++){
 	if(fabsf(audio[n] - avg) > pdev)
 	  pdev = fabsf(audio[n] - avg);
+	audio[n] *= demod->gain;
       }
       demod->foffset = (avg / (2*M_PI)) * (demod->samprate / demod->decimate);
       demod->pdeviation = (pdev / (2*M_PI)) * (demod->samprate / demod->decimate);
-      
-      // Scale and send to audio thread
-      for(n=0;n<filter->blocksize_out;n++)
-	audio[n] *= demod->gain;
       
       send_mono_audio(audio,n);
     }

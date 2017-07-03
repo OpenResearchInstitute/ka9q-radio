@@ -16,7 +16,7 @@ enum filtertype {
 
 struct filter {
   enum filtertype type;
-  int blocksize_in;
+  int ilen;
   int impulse_length;
   complex float *response;           // Filter response in frequency domain
   complex float *fdomain;            // Signal in frequency domain
@@ -35,7 +35,7 @@ struct filter {
   fftwf_plan fwd_plan;
   fftwf_plan rev_plan;
   int decimate;
-  int blocksize_out;
+  int olen;
 };
 int window_filter(const int L,const int M,complex float *response,const float beta);
 int window_rfilter(const int L,const int M,complex float *response,const float beta);

@@ -28,43 +28,37 @@ void *demod_cam(void *arg){
 
   complex float lastphase = 0;
   while(!demod->terminate){
-    fillbuf(demod->input,(char *)filter->input,
-	    filter->blocksize_in*sizeof(complex float));
-    spindown(demod,filter->input,filter->blocksize_in); // 2nd LO
+    fillbuf(demod->input,filter->input,filter->ilen*sizeof(complex float));
+    spindown(demod,filter->input,filter->ilen); // 2nd LO
     execute_filter(filter);
 
     // Automatic gain control
-    complex float phase;
-    int n;
-    float amplitude,noise;
-
-    double freqerror;
-    
-    phase = 0;
-    for(n=0; n < filter->blocksize_out; n++)
+    complex float phase = 0;
+    int n;    
+    for(n=0; n < filter->olen; n++)
       phase += filter->output.c[n];
 
     phase = conj(phase) / cabs(phase);
 
     // Rotate signal onto I axis, measure DC (carrier) level
-    amplitude = 0;
-    noise = 0;
-    for(n=0; n < filter->blocksize_out; n++){
+    float amplitude = 0;
+    float noise = 0;
+    for(n=0; n < filter->olen; n++){
       // Sample with signal rotated onto I axis
       complex float rsamp = filter->output.c[n] *= phase;
       amplitude += creal(rsamp) * creal(rsamp);
       noise += cimag(rsamp) * cimag(rsamp);
     }
     // RMS signal+noise and noise amplitudes
-    demod->amplitude = sqrtf(amplitude / filter->blocksize_out);
-    demod->noise = sqrtf(noise / filter->blocksize_out);
-    float snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
+    demod->amplitude = sqrtf(amplitude / filter->olen);
+    demod->noise = sqrtf(noise / filter->olen);
+    float const snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
     demod->snr = (snn*snn) -1; // S/N as power ratio
 
     // Frequency error is the phase of this block minus the last, times blocks/sec
     // Phase was already flipped, hence the minus
     // Only move a fraction of the error at one time
-    freqerror = -0.01 * carg(phase * conj(lastphase)) * M_1_2PI * demod->samprate/filter->blocksize_in;
+    double const freqerror = -0.01 * carg(phase * conj(lastphase)) * M_1_2PI * demod->samprate/filter->ilen;
     lastphase = phase;
     set_second_LO(demod,-freqerror + demod->second_LO);
 
@@ -72,8 +66,8 @@ void *demod_cam(void *arg){
     // AM AGC is carrier-driven
     demod->gain = Headroom / demod->amplitude;
 
-    float audio[filter->blocksize_out];
-    for(n=0; n < filter->blocksize_out; n++)
+    float audio[filter->olen];
+    for(n=0; n < filter->olen; n++)
       audio[n] = demod->gain * (creal(filter->output.c[n]) - demod->amplitude);
 
     send_mono_audio(audio,n);

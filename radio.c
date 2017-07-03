@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.35 2017/07/02 04:29:56 karn Exp karn $
+// $Id: radio.c,v 1.36 2017/07/02 12:02:19 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -311,7 +311,7 @@ int spindown(struct demod *demod,complex float *data,const int len){
 
   if(cimag(demod->second_LO_phase_accel) != 0){
     // We're sweeping, so ensure we won't run the passband past the edges of the first IF bandwidth
-    double first_if = -get_second_LO(demod,demod->filter->blocksize_in);  // first IF at end of *next* sample block
+    double first_if = -get_second_LO(demod,demod->filter->ilen);  // first IF at end of *next* sample block
     double new_first_if = first_if;
     if(first_if + max(Modes[demod->mode].high,0) >= demod->max_IF){
       // Will hit upper end

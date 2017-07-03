@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.10 2017/07/02 04:29:50 karn Exp karn $
+// $Id: filter.c,v 1.11 2017/07/02 12:02:13 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -32,7 +32,7 @@ struct filter *create_filter(const int L,const int M, complex float *response,co
 
   struct filter *f = calloc(1,sizeof(*f));
   f->type = type;
-  f->blocksize_in = L;
+  f->ilen = L;
   f->impulse_length = M;
   f->decimate = decimate;
 
@@ -54,7 +54,7 @@ struct filter *create_filter(const int L,const int M, complex float *response,co
   }
   
   f->fdomain = fftwf_alloc_complex(N);
-  f->blocksize_out = f->blocksize_in / decimate;
+  f->olen = f->ilen / decimate;
   f->fwd_plan = fftwf_plan_dft_1d(N,f->input_buffer,f->fdomain,FFTW_FORWARD,FFTW_ESTIMATE);
   if(type == REAL){
     f->output_buffer.r = fftwf_alloc_real(N_dec);
@@ -71,7 +71,7 @@ struct filter *create_filter(const int L,const int M, complex float *response,co
 int execute_filter(struct filter *f){
   execute_filter_nocopy(f);
   // Save for next block - non-destructive copy
-  memmove(f->input_buffer,f->input_buffer + f->blocksize_in,(f->impulse_length - 1)*sizeof(*f->input_buffer));
+  memmove(f->input_buffer,f->input_buffer + f->ilen,(f->impulse_length - 1)*sizeof(*f->input_buffer));
   return 0;
 }
 
@@ -81,7 +81,7 @@ int execute_filter_nocopy(struct filter *f){
   assert(f->type != NONE);
   assert(f->response != NULL);
 
-  const int N = f->blocksize_in + f->impulse_length - 1; // points in input buffer
+  const int N = f->ilen + f->impulse_length - 1; // points in input buffer
   const int N_dec = N / f->decimate;                     // points in (decimated) output buffer
   fftwf_execute(f->fwd_plan);  // Forward transform
   f->fdomain[0] *= f->response[0];      // DC same for all types

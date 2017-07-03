@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.24 2017/06/21 09:08:47 karn Exp karn $
+// $Id: audio.c,v 1.25 2017/06/21 09:26:44 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -28,7 +28,7 @@
 int Mcast_fd;
 
 struct sockaddr_in BB_mcast_sockaddr;
-#define PCM_BUFSIZE 700        // 16-bit word count; must fit in Ethernet MTU
+#define PCM_BUFSIZE 512        // 16-bit word count; must fit in Ethernet MTU
 
 
 inline short scaleclip(float x){

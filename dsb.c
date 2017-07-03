@@ -1,4 +1,4 @@
-// $Id$: DSB-AM / BPSK
+// $Id: dsb.c,v 1.4 2017/07/02 12:02:13 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -17,8 +17,8 @@
 #include "radio.h"
 #include "audio.h"
 
-static const float hangtime = 1.1;    // Hang for 1.1 seconds after new peak
-static const float recovery_rate = 6; // Recover gain at 6 db/sec after hang finishes
+static float const hangtime = 1.1;    // Hang for 1.1 seconds after new peak
+static float const recovery_rate = 6; // Recover gain at 6 db/sec after hang finishes
 
 
 void *demod_dsb(void *arg){
@@ -26,33 +26,31 @@ void *demod_dsb(void *arg){
   pthread_setname_np(pthread_self(),"dsb");
   struct demod * const demod = arg;
   int hangcount = 0;
-  const int ilen = demod->L;
-  const float agcratio = dB2voltage(recovery_rate * ((float)ilen/demod->samprate)); // 6 dB/sec
-  const int hangmax = hangtime * (demod->samprate/ilen); // 1.1 second hang before gain increase
-  const int olen = ilen / demod->decimate;
-  const int mm1 = demod->M - 1;
+  float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
+  int const hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
+  int const mm1 = demod->M - 1;
   float lastblock_phase = NAN;
-  const int N = ilen + mm1;
+  int const N = demod->L + mm1;
 
   demod->gain = dB2voltage(70.);
 
-  struct filter * const filter = create_filter(ilen,mm1+1,NULL,demod->decimate,COMPLEX);
+  struct filter * const filter = create_filter(demod->L,mm1+1,NULL,demod->decimate,COMPLEX);
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
   // Kaiser window and FFT used for coarse frequency acquision
-  complex float * const fftbuf = fftwf_alloc_complex(olen);
-  fftwf_plan fft_plan = fftwf_plan_dft_1d(olen,fftbuf,fftbuf,FFTW_FORWARD,FFTW_ESTIMATE);
-  float kaiser_window[olen];
-  make_kaiser(kaiser_window,olen,3.0);
+  complex float * const fftbuf = fftwf_alloc_complex(filter->olen);
+  fftwf_plan fft_plan = fftwf_plan_dft_1d(filter->olen,fftbuf,fftbuf,FFTW_FORWARD,FFTW_ESTIMATE);
+  float kaiser_window[filter->olen];
+  make_kaiser(kaiser_window,filter->olen,Kaiser_beta);
 
   // This filter is unconventional because we iterate on the second LO, which means we
   // have to recompute the *entire* filter input buffer every time
   complex float if_samples[N];
-  fillbuf(demod->input,if_samples+ilen,mm1 * sizeof(*if_samples)); // Prime the pump
+  fillbuf(demod->input,if_samples+filter->ilen,mm1 * sizeof(*if_samples)); // Prime the pump
   while(!demod->terminate){
-    memmove(if_samples,if_samples+ilen,mm1*sizeof(*if_samples)); // Re-copy the overlap so we can downconvert it again
-    fillbuf(demod->input,if_samples+mm1,ilen*sizeof(*if_samples)); // New samples
+    memmove(if_samples,if_samples+filter->ilen,mm1*sizeof(*if_samples)); // Re-copy the overlap so we can downconvert it again
+    fillbuf(demod->input,if_samples+mm1,filter->ilen*sizeof(*if_samples)); // New samples
 
     complex double LO_phase_step = demod->second_LO_phase_step;
     int tries;
@@ -73,32 +71,31 @@ void *demod_dsb(void *arg){
       execute_filter_nocopy(filter); // Stateless execution (no overlap)
       
       // Perform FFT on squares to ensure peak is in DC bin; extract phase
-      for(n=0; n < olen; n++){
-	const complex float s = filter->output.c[n];
+      for(n=0; n < filter->olen; n++){
+	complex float const s = filter->output.c[n];
 	fftbuf[n] = s * s * kaiser_window[n];
       }
       fftwf_execute(fft_plan);
       int maxbin = 0;
       float maxenergy = 0;
-      for(n=0;n<olen;n++){
-	float e = cnrmf(fftbuf[n]);
+      for(n=0;n<filter->olen;n++){
+	float const e = cnrmf(fftbuf[n]);
 	if(e > maxenergy){
 	  maxenergy = e;
 	  maxbin = n;
 	}
       }
-      if(maxbin >= olen/2)
-	maxbin -= olen; // negative frequency
+      if(maxbin >= filter->olen/2)
+	maxbin -= filter->olen; // negative frequency
       
       if(maxbin == 0)
 	break;
       // Coarse retune to correct bin and retry. Each bin is one full cycle per input buffer
-      double delta_f = maxbin / (double)ilen; // cycles per input sample
-      delta_f /= 2; // Undo doubling of frequency from squaring
+      double const delta_f = maxbin / (2.0 * filter->ilen); // cycles per input sample, with /2 for squaring
       LO_phase_step *= csincos(-delta_f * 2 * M_PI); // rad per input sample
       lastblock_phase = NAN; // Don't do fine tuning on next iteration
     }
-    float phase = cargf(fftbuf[0])/2; // DC carrier phase  in current block
+    float const phase = cargf(fftbuf[0])/2; // DC carrier phase  in current block
     if(!isnan(lastblock_phase)){ // Only if last block wasn't a coarse retune
       // Perform fine frequency adjustment
       // How much the phase changed from the last block gives us
@@ -110,7 +107,7 @@ void *demod_dsb(void *arg){
 	pdiff += 2*M_PI;
       
       demod->cphase = pdiff;
-      LO_phase_step *= csincos(-pdiff / ilen); // pdiff radians in one input blk
+      LO_phase_step *= csincos(-pdiff / filter->ilen); // pdiff radians in one input blk
     }
     lastblock_phase = phase; // Save for comparison with next block
     demod->second_LO_phase = updated_LO_phase /= cabs(updated_LO_phase); // Save renormalized
@@ -120,17 +117,17 @@ void *demod_dsb(void *arg){
     // Rotate already demodulated signal onto I axis, compute signal (I) and noise (Q) amplitudes
     float amplitude = 0;
     float noise = 0;
-    const complex float rot = csincosf(-phase);
+    complex float const rot = csincosf(-phase);
     int n;
-    for(n=0;n<olen;n++){
-      const complex float sample = filter->output.c[n] * rot;
+    for(n=0;n<filter->olen;n++){
+      complex float const sample = filter->output.c[n] * rot;
       filter->output.c[n] = sample;
       amplitude += crealf(sample) * crealf(sample);
       noise += cimagf(sample) * cimagf(sample);
     }
     // RMS signal+noise and noise amplitudes
-    amplitude /= olen;
-    noise /= olen;
+    amplitude /= filter->olen;
+    noise /= filter->olen;
     demod->amplitude = sqrtf(amplitude); // RMS amplitude of I channel
     demod->noise = sqrtf(noise);         // RMS amplitude of Q channel
     demod->snr = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
@@ -150,8 +147,8 @@ void *demod_dsb(void *arg){
 	demod->gain *= agcratio;
       }
     }
-    complex float audio[olen];
-    for(n=0;n<olen;n++)
+    complex float audio[filter->olen];
+    for(n=0;n<filter->olen;n++)
       audio[n] = filter->output.c[n] * demod->gain;
     send_stereo_audio(audio,n);
   }

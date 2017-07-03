@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.3 2017/06/28 04:32:14 karn Exp karn $
+// $Id: monitor.c,v 1.4 2017/07/02 04:29:55 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 
 #include "rtp.h"
 #include "dsp.h"
@@ -18,7 +19,7 @@
 // Maximum samples/words per packet
 // Bigger than Ethernet MTU because of network device fragmentation/reassembly
 const int Bufsize = 8192;
-#define Silence_size 960 // 10 ms @ 48 kHz
+#define Silence_size 7680 // 160 ms @ 48 kHz // Largest Opus frame??
 struct sockaddr_in PCM_mcast_sockaddr;
 int Input_fd;
 const int L=512;
@@ -119,13 +120,13 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
     return -1;
   }
   // We will generally write L-sample blocks at a time
-  snd_pcm_uframes_t LL = L;
-  if(snd_pcm_hw_params_set_period_size_near(ap->handle,hw_params,&LL,0)<0){
+  snd_pcm_uframes_t period_length = L;
+  if(snd_pcm_hw_params_set_period_size_near(ap->handle,hw_params,&period_length,0)<0){
     fprintf(stderr,"Error setting D/A periods on %s\n",ap->name);
     return -1;
   }
-  if(LL != L)
-    fprintf(stderr,"D/A periods: requested %d, got %d\n",(int)L,(int)LL);
+  if(period_length != L)
+    fprintf(stderr,"D/A periods: requested %d, got %d\n",(int)L,(int)period_length);
 
   snd_pcm_uframes_t requested_buffer_size = 65536;
   buffer_size = requested_buffer_size;
@@ -146,12 +147,13 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
     return -1;
   }
   // !!!
-  if(snd_pcm_sw_params_set_start_threshold(ap->handle,sw_params,2*LL) < 0){
+  if(snd_pcm_sw_params_set_start_threshold(ap->handle,sw_params,period_length) < 0){ // One PCM packet
     fprintf(stderr,"Can not configure start threshold for %s\n",ap->name);
     return -1;
   }
 #if 0
-  if(snd_pcm_sw_params_set_stop_threshold(ap->handle,sw_params,8*LL) < 0){
+  // Does this only apply to capture?
+  if(snd_pcm_sw_params_set_stop_threshold(ap->handle,sw_params,8*period_length) < 0){
     fprintf(stderr,"Can not configure stop threshold for %s\n",ap->name);
     return -1;
   }
@@ -165,69 +167,99 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 }
 
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
-int play_stereo_pcm(struct audio *sp,int16_t *outsamps,int size){
+int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int size){
 
-  static int16_t silence[Silence_size]; // Play this when we underrun; 10 ms @ 48 kHz stereo
+  static const int16_t silence[Silence_size]; // Play this when we underrun; 10 ms @ 48 kHz stereo
+  static struct timeval lastcall;
+  int remain = size;
+
+  if(Verbose){
+    struct timeval tv;
+    gettimeofday(&tv,NULL);
+    fprintf(stderr,"%ld.%06ld (%06ld usec) ssrc %lx write %d samps\n",
+	    (long)tv.tv_sec,(long)tv.tv_usec,1000000*(tv.tv_sec - lastcall.tv_sec) + (tv.tv_usec - lastcall.tv_usec),
+	    (unsigned long)sp->ssrc,size);
+    lastcall = tv;
+  }
 
   snd_pcm_state_t state = snd_pcm_state(sp->handle);
   // Underruns can deliberately happen when the demodulator thread simply
   // stops sending data, e.g., when a FM squelch is closed
   if(state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED){
-    snd_pcm_prepare(sp->handle);
-    if(Verbose)
-      fprintf(stderr,"ssrc %lx state %d\n",(unsigned long)sp->ssrc,state);
-
     if(state == SND_PCM_STATE_XRUN)
       sp->underrun++;
+
+    snd_pcm_prepare(sp->handle);
+    if(Verbose){
+      struct timeval tv;
+      gettimeofday(&tv,NULL);
+      fprintf(stderr,"%ld.%06ld ssrc %lx not running, state %d\n",(long)tv.tv_sec,(long)tv.tv_usec,(unsigned long)sp->ssrc,state);
+    }
+    usleep(500);
   }
 
-  while(size > 0){
+  snd_pcm_sframes_t delay = 0;
+  snd_pcm_sframes_t chunk = 0;
+
+  while(1){
     int r;
     
-    snd_pcm_sframes_t delay = 0;
-    snd_pcm_sframes_t chunk = 0;
     if((r = snd_pcm_avail_delay(sp->handle,&chunk,&delay)) != 0){
       snd_pcm_prepare(sp->handle);
-      if(Verbose > 1)
-	fprintf(stderr,"ssrc %lx snd_pcm_avail_delay error: %s %d\n",
+      if(Verbose){
+	struct timeval tv;
+	gettimeofday(&tv,NULL);
+
+	fprintf(stderr,"%ld.%06ld ssrc %lx snd_pcm_avail_delay error: %s %d\n",(long)tv.tv_sec,(long)tv.tv_usec,
 		(long unsigned int)sp->ssrc,snd_strerror(r),r);
-      usleep(500);
+      }
+      usleep(500); // Wait and try again - iterations should probably be limited
       continue;
     }
-    if(Verbose > 1)
-      fprintf(stderr,"ssrc %lx chunk %d delay %f ms\n",
+    if(Verbose > 1){
+      struct timeval tv;
+      gettimeofday(&tv,NULL);
+
+      fprintf(stderr,"%ld.%06ld ssrc %lx chunk %d delay %f ms\n",(long)tv.tv_sec,(long)tv.tv_usec,
 	      (long unsigned int)sp->ssrc,(int)chunk,1000.*delay/sp->samprate);
-
-    if(1000.*delay/sp->samprate < 10){
-      // Less than 10 ms in buffer, we risk underrrun. Inject silence
-      if(Verbose)
-	fprintf(stderr,"ssrc %lx: delay %.1f, injecting silence\n",
-		(long unsigned int)sp->ssrc,
-		1000.*delay/sp->samprate);
-      snd_pcm_writei(sp->handle,silence,Silence_size);
     }
-
     if(chunk == 0){
       sp->overrun++;
       if(Verbose)
 	fprintf(stderr,"ssrc %lx overrun, drop %.1f ms\n",(long unsigned int)sp->ssrc,
-		1000. * size/sp->samprate);
+		1000. * remain/sp->samprate);
       return 0; // Drop audio to let it catch up
     }
     // Size of the buffer, or the max available in the device, whichever is less
-    chunk = min(chunk,size);
+    if(remain == 0)
+      break; // No more to send
+    chunk = min(chunk,remain);
     if((r = snd_pcm_writei(sp->handle,outsamps,chunk)) != chunk){
-      // What errors could occur here? probably just underruns
-      if(Verbose)
-	fprintf(stderr,"ssrc %lx snd_pcm_writei fail: %s %d. Injecting silence\n",
+      // Seems like mostly underrun errors happen here
+      if(Verbose){
+	struct timeval tv;
+	gettimeofday(&tv,NULL);
+
+	fprintf(stderr,"%ld.%06ld ssrc %lx snd_pcm_writei fail: %s %d\n",(long)tv.tv_sec,(long)tv.tv_usec,
 		(long unsigned int)sp->ssrc,snd_strerror(r),r);
+      }
       snd_pcm_prepare(sp->handle);
       usleep(500);
-      snd_pcm_writei(sp->handle,silence,Silence_size);
       continue;
     }
-    size -= r; // stereo samples left (2 16 bit words, 4 bytes)
+    remain -= r; // stereo samples left (2 16 bit words, 4 bytes)
     outsamps += 2*r; // Each stereo sample is 2 16-bit words
+  }
+  if(delay < size){ // Less than one write size left, we risk underrrun. (try to) inject one call's worth of silence
+    if(Verbose){
+      struct timeval tv;
+      gettimeofday(&tv,NULL);
+      
+      fprintf(stderr,"%ld.%06ld ssrc %lx: delay %.1f, injecting silence\n",(long)tv.tv_sec,(long)tv.tv_usec,
+	      (long unsigned int)sp->ssrc,
+	      1000.*delay/sp->samprate);
+    }
+    snd_pcm_writei(sp->handle,silence,size);
   }
   return 0;
 }
