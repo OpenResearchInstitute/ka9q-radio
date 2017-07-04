@@ -29,6 +29,7 @@ void *demod_iq(void *arg){
 
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,
 			       demod->mode == ISB ? CROSS_CONJ : COMPLEX);
+  demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
   demod->gain = dB2voltage(70.); // Starting point
 

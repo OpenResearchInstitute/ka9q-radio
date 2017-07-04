@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.4 2017/07/02 04:29:55 karn Exp karn $
+// $Id: monitor.c,v 1.5 2017/07/03 23:24:22 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -169,7 +169,7 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
 int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int size){
 
-  static const int16_t silence[Silence_size]; // Play this when we underrun; 10 ms @ 48 kHz stereo
+  static const int16_t silence[Silence_size]; // Insert this when we underrun
   static struct timeval lastcall;
   int remain = size;
 
@@ -182,6 +182,7 @@ int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int si
     lastcall = tv;
   }
 
+#if 0
   snd_pcm_state_t state = snd_pcm_state(sp->handle);
   // Underruns can deliberately happen when the demodulator thread simply
   // stops sending data, e.g., when a FM squelch is closed
@@ -199,11 +200,13 @@ int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int si
   }
 
   snd_pcm_sframes_t delay = 0;
-  snd_pcm_sframes_t chunk = 0;
+#endif
+  snd_pcm_sframes_t chunk = 65536;
 
   while(1){
+
     int r;
-    
+#if 0    
     if((r = snd_pcm_avail_delay(sp->handle,&chunk,&delay)) != 0){
       snd_pcm_prepare(sp->handle);
       if(Verbose){
@@ -230,6 +233,7 @@ int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int si
 		1000. * remain/sp->samprate);
       return 0; // Drop audio to let it catch up
     }
+#endif
     // Size of the buffer, or the max available in the device, whichever is less
     if(remain == 0)
       break; // No more to send
@@ -244,12 +248,14 @@ int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int si
 		(long unsigned int)sp->ssrc,snd_strerror(r),r);
       }
       snd_pcm_prepare(sp->handle);
-      usleep(500);
+      snd_pcm_writei(sp->handle,silence,chunk);
+      //      usleep(500);
       continue;
     }
     remain -= r; // stereo samples left (2 16 bit words, 4 bytes)
     outsamps += 2*r; // Each stereo sample is 2 16-bit words
   }
+#if 0
   if(delay < size){ // Less than one write size left, we risk underrrun. (try to) inject one call's worth of silence
     if(Verbose){
       struct timeval tv;
@@ -261,6 +267,7 @@ int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int si
     }
     snd_pcm_writei(sp->handle,silence,size);
   }
+#endif
   return 0;
 }
 
@@ -271,18 +278,16 @@ struct audio *lookup_session(const uint32_t ssrc,const struct sockaddr_in *sende
   for(sp = Audio[ssrc & 0xff]; sp != NULL; sp = sp->next){
     if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
       // Found it
-      // Move to top of hash chain as we'll probably use it again soon
-      if(sp->next != NULL)
-	sp->next->prev = sp->prev;
-
       if(sp->prev != NULL){
+	// Not at top of bucket chain; move it there
+	if(sp->next != NULL)
+	  sp->next->prev = sp->prev;
+
 	sp->prev->next = sp->next;
 	sp->prev = NULL;
+	sp->next = Audio[ssrc & 0xff];
+	Audio[ssrc & 0xff] = sp;
       }
-
-      sp->next = Audio[ssrc & 0xff];
-      Audio[ssrc & 0xff] = sp;
-
       sp->lastused = time(NULL); // Update last used time
       return sp;
     }
@@ -298,6 +303,7 @@ struct audio *make_session(const uint32_t ssrc){
   
   sp->lastused = time(NULL);
   // Partly initialize entry; caller has to do other fields
+  // Put at head of bucket chain
   sp->ssrc = ssrc;
   sp->next = Audio[ssrc & 0xff];
   if(sp->next != NULL)
