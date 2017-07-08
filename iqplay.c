@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.2 2017/06/17 08:15:28 karn Exp karn $
+// $Id: iqplay.c,v 1.3 2017/07/02 04:29:54 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -17,9 +17,12 @@
 #include <getopt.h>
 #include <attr/xattr.h>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "command.h"
 #include "rtp.h"
+#include "dsp.h"
 
 const int ADC_samprate = 192000;
 int Verbose;
@@ -37,7 +40,7 @@ int main(int argc,char *argv[]){
   int c;
   struct timeval ltv,ntv;
   struct rtp_header rtp;
-  FILE *fp;
+  int fd;
   struct status status;
 
   memset(&status,0,sizeof(status));
@@ -169,7 +172,7 @@ int main(int argc,char *argv[]){
   int i;
   gettimeofday(&ltv,NULL);
   for(i=optind;i<argc;i++){
-    if((fp = fopen(argv[i],"r")) == NULL){
+    if((fd = open(argv[i],O_RDONLY)) == -1){
       fprintf(stderr,"Can't read %s\n",argv[i]);
       continue;
     }
@@ -189,7 +192,7 @@ int main(int argc,char *argv[]){
     if(Verbose)
       fprintf(stderr,"Playing %s: %'.1lf Hz, %'d samp/s\n",argv[i],status.frequency,status.samprate);
 
-    while(fread(sampbuf,sizeof(short),2*blocksize,fp) > 0){
+    while(fillbuf(fd,sampbuf,sizeof(sampbuf)) > 0){
       rtp.seq = htons(seq++);
       rtp.timestamp = htonl(timestamp);
       timestamp += blocksize;
@@ -213,8 +216,8 @@ int main(int argc,char *argv[]){
 	ltv.tv_sec++;
       }
     }
-    fclose(fp);
-    fp = NULL;
+    close(fd);
+    fd = -1;
   }
   close(Rtp_sock);
   exit(0);
