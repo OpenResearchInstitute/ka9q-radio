@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.44 2017/06/28 04:35:47 karn Exp karn $
+// $Id: display.c,v 1.45 2017/07/02 04:29:47 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #define _GNU_SOURCE 1
 #include <errno.h>
@@ -32,6 +32,9 @@
 #include "bandplan.h"
 
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
+
+float Misc; // General purpose knob
+
 
 int Update_interval = 100;
 
@@ -221,6 +224,9 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
       set_filter(demod,low,high);
     }
     break;
+  case 8: // Misc
+    Misc += tunestep;
+    break;
   }
 }
 
@@ -245,10 +251,10 @@ void *display(void *arg){
   deb = newwin(5,40,14,40);
   scrollok(deb,1);
 #endif
-  fw = newwin(9,70,0,0);
-  sig = newwin(7,25,10,0);
-  sdr = newwin(7,30,10,25);
-  net = newwin(6,70,18,0);
+  fw = newwin(10,70,0,0);
+  sig = newwin(8,25,11,0);
+  sdr = newwin(7,30,11,25);
+  net = newwin(6,70,19,0);
   
   dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
 
@@ -294,6 +300,7 @@ void *display(void *arg){
     wprintw(fw,"Filter low  %'17.2f Hz\n",low);
     wprintw(fw,"Filter high %'17.2f Hz\n",high);
     wprintw(fw,"Kaiser Beta %'17.2f\n",Kaiser_beta);
+    wprintw(fw,"MISC        %'17.2f\n",Misc);
     wprintw(fw,"Blocksize   %17d\n",demod->L);
     // Tuning step highlight
     // A little messy because of the commas in the frequencies
@@ -341,6 +348,9 @@ void *display(void *arg){
 
     if(!isnan(demod->cphase))
       wprintw(sig,"cphase  %7.3f rad\n",demod->cphase);
+
+    if(!isnan(demod->plfreq))
+      wprintw(sig,"plfreq  %7.1f Hz\n",demod->plfreq);
 
     wnoutrefresh(sig);
     
@@ -446,11 +456,11 @@ void *display(void *arg){
       break;
     case KEY_NPAGE: // Page Down
     case '\t':  // tab: cycle through tuning fields
-      tuneitem = (tuneitem + 1) % 8;
+      tuneitem = (tuneitem + 1) % 9;
       break;
     case KEY_BTAB: // Backtab, i.e., shifted tab: cycle backwards through tuning fields
     case KEY_PPAGE: // Page Up
-      tuneitem = (8 + tuneitem - 1) % 8;
+      tuneitem = (9 + tuneitem - 1) % 9;
       break;
     case KEY_HOME: // Go back to starting spot
       tuneitem = 0;
