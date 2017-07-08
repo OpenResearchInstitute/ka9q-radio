@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.26 2017/07/02 04:29:57 karn Exp karn $
+// $Id: radio.h,v 1.27 2017/07/02 12:02:20 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -62,6 +62,7 @@ struct demod {
   float foffset;    // Frequency offset (FM)
   float pdeviation; // Peak frequency deviation (FM)
   float cphase;     // Carrier phase (DSB/PSK)
+  float plfreq;     // PL tone frequency (FM);
 };
 extern struct demod Demod;
 extern int Demod_sock;
