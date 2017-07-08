@@ -1,6 +1,7 @@
-# $Id: Makefile,v 1.30 2017/06/28 04:32:54 karn Exp karn $
+# $Id: Makefile,v 1.31 2017/07/02 04:29:57 karn Exp karn $
 INCLUDES=-I /opt/local/include
-COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
+#COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
 all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay gentone
@@ -12,13 +13,13 @@ clean:
 	rm -f *.o radio control funcube monitor iqrecord iqplay gentone bandplan.txt help.txt libfcd.a
 	rcsclean
 
-gentone: gentone.o misc.o
-	$(CC) -g -o $@ $^ -lpthread -lm
+gentone: gentone.o misc.o filter.o
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lm
 
 funcube: funcube.o gr.o libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lm
 
-iqplay: iqplay.o
+iqplay: iqplay.o misc.o
 	$(CC) -g -o $@ $^ -lpthread -lm
 
 control: control.o modes.o
