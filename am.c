@@ -22,13 +22,13 @@ void *demod_am(void *arg){
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
 
-  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX);
+  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
   while(!demod->terminate){
-    fillbuf(demod->input,filter->input,filter->ilen*sizeof(complex float));
-    spindown(demod,filter->input,filter->ilen); // 2nd LO
+    fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
+    spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
     float average = 0;

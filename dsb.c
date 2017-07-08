@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.4 2017/07/02 12:02:13 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.5 2017/07/03 23:24:17 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -34,7 +34,7 @@ void *demod_dsb(void *arg){
 
   demod->gain = dB2voltage(70.);
 
-  struct filter * const filter = create_filter(demod->L,mm1+1,NULL,demod->decimate,COMPLEX);
+  struct filter * const filter = create_filter(demod->L,mm1+1,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
@@ -63,7 +63,7 @@ void *demod_dsb(void *arg){
       int n;
       for(n=0; n < N; n++){
 	assert(!isnan(crealf(if_samples[n])) && !isnan(cimagf(if_samples[n])));
-	filter->input_buffer[n] = if_samples[n] * LO_phase;
+	filter->input_buffer.c[n] = if_samples[n] * LO_phase;
 	LO_phase *= LO_phase_step;
 	if(n == mm1 - 1)
 	  updated_LO_phase = LO_phase; // Starting LO phase for next block if we're successful

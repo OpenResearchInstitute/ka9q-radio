@@ -14,7 +14,7 @@
 #include "audio.h"
 
 static const float hangtime = 1.1;    // Hang for 1.1 seconds after new peak
-static const float recovery_rate = 6; // Recover gain at 6 db/sec after hang finishes
+static const float recovery_rate = 10; // Recover gain at this many db/sec after hang finishes
 
 
 void *demod_ssb(void *arg){
@@ -25,18 +25,18 @@ void *demod_ssb(void *arg){
   demod->pdeviation = NAN;
   demod->gain = dB2voltage(70.); // 70 dB starting point, will adjust with ssb_agc
   int const hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
-  float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
+  float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate));
   int hangcount = hangmax;
 
   // Set up pre-demodulation filter
-  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,REAL);
+  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,REAL);
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
   while(!demod->terminate){
-    fillbuf(demod->input,filter->input,filter->ilen*sizeof(complex float));
+    fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
 
-    spindown(demod,filter->input,filter->ilen); // 2nd LO
+    spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
     // Automatic gain control
     demod->amplitude = amplitude(filter->output.r,filter->olen);

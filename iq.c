@@ -27,15 +27,15 @@ void *demod_iq(void *arg){
   const float agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
   int hangcount = 0;
 
-  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,
+  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
 			       demod->mode == ISB ? CROSS_CONJ : COMPLEX);
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
   demod->gain = dB2voltage(70.); // Starting point
 
   while(!demod->terminate){
-    fillbuf(demod->input,filter->input,filter->ilen*sizeof(complex float));
-    spindown(demod,filter->input,filter->ilen); // 2nd LO
+    fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
+    spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
     // Automatic gain control
