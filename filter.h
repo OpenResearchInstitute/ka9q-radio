@@ -14,24 +14,23 @@ enum filtertype {
   REAL,
 };
 
+union rc {
+  float *r;
+  complex float *c;
+};
+
 struct filter {
-  enum filtertype type;
+  enum filtertype in_type;
+  enum filtertype out_type;
   int ilen;
   int impulse_length;
   complex float *response;           // Filter response in frequency domain
   complex float *fdomain;            // Signal in frequency domain
-  complex float *input_buffer;       // Actual time-domain input buffer, length N
-  complex float *input;              // Beginning of user input area, length L
-  union {
-    float *r;
-    complex float *c;
-    void *v;
-  } output_buffer;
-  union {
-    float *r;
-    complex float *c;
-    void *v;
-  } output;
+  complex float *f_fdomain;          // Filtered signal in frequency domain
+  union rc input_buffer;             // Actual time-domain input buffer, length N
+  union rc input;                    // Beginning of user input area, length L
+  union rc output_buffer;
+  union rc output;
   fftwf_plan fwd_plan;
   fftwf_plan rev_plan;
   int decimate;
@@ -40,7 +39,7 @@ struct filter {
 int window_filter(const int L,const int M,complex float *response,const float beta);
 int window_rfilter(const int L,const int M,complex float *response,const float beta);
 
-struct filter *create_filter(const int,const int,complex float *,const int,const enum filtertype);
+struct filter *create_filter(const int,const int,complex float *,const int,const enum filtertype,const enum filtertype);
 int execute_filter(struct filter *);
 int execute_filter_nocopy(struct filter *);
 int delete_filter(struct filter *);
