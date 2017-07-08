@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.25 2017/06/21 09:26:44 karn Exp karn $
+// $Id: audio.c,v 1.26 2017/07/03 23:24:14 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -31,7 +31,7 @@ struct sockaddr_in BB_mcast_sockaddr;
 #define PCM_BUFSIZE 512        // 16-bit word count; must fit in Ethernet MTU
 
 
-inline short scaleclip(float x){
+short scaleclip(float x){
   if(x >= 1.0)
     return SHRT_MAX;
   else if(x <= -1.0)
@@ -45,9 +45,6 @@ int PCM_mono_read_fd;
 int PCM_mono_write_fd;
 int PCM_stereo_read_fd;
 int PCM_stereo_write_fd;
-
-
-
 
 int send_stereo_audio(complex float *buffer,int size){
   if(OPUS_bitrate != 0)
@@ -72,16 +69,15 @@ int send_mono_audio(float *buffer,int size){
 
 float OPUS_blocktime;
 int OPUS_bitrate;
-int OPUS_blocksize;
 
 void *stereo_opus_audio(void *arg){
   uint32_t timestamp = 0;
   uint16_t seq = 0;
-  uint32_t ssrc;
   time_t tt = time(NULL);
-  ssrc = tt & 0xffffffff;
+  uint32_t const ssrc = tt & 0xffffffff;
 
   pthread_setname_np(pthread_self(),"opus");
+
   // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
   // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
   // opus 1.2 also supports 80, 100 and 120 ms
@@ -94,20 +90,23 @@ void *stereo_opus_audio(void *arg){
     fprintf(stderr,"80/100/120 supported only on opus 1.2 and later\n");
     return NULL;
   }
-  OPUS_blocksize = round(OPUS_blocktime * DAC_samprate / 1000.);
+  int const opus_blocksize = round(OPUS_blocktime * DAC_samprate / 1000.);
+  complex float * const opusbuf = malloc(sizeof(complex float) * opus_blocksize);
+  if(opusbuf == NULL){
+    fprintf(stderr,"opus buffer malloc failed\n");
+    return NULL;
+  }
 
   int error;
   struct OpusEncoder *Opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
   if(Opus == NULL){
     fprintf(stderr,"opus_encoder_create failed, error %d\n",error);
-    return NULL;
-  }
-  complex float *opusbuf = malloc(sizeof(complex float) * OPUS_blocksize);
-  if(opusbuf == NULL){
-    fprintf(stderr,"opus buffer malloc failed\n");
+    free(opusbuf);
     return NULL;
   }
   opus_encoder_ctl(Opus,OPUS_SET_BITRATE(OPUS_bitrate));
+  opus_encoder_ctl(Opus,OPUS_SET_DTX(1));
+  opus_encoder_ctl(Opus,OPUS_SET_LSB_DEPTH(16));
 
   struct rtp_header rtp;
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
@@ -131,31 +130,36 @@ void *stereo_opus_audio(void *arg){
   message.msg_flags = 0;
 
   while(1){
-    if(fillbuf(OPUS_stereo_read_fd,opusbuf,sizeof(complex float) * OPUS_blocksize) < 0){
+    if(fillbuf(OPUS_stereo_read_fd,opusbuf,sizeof(complex float) * opus_blocksize) < 0){
       perror("stereo_opus_audio: pipe read error");
       break;
     }
     
-    int dlen;
-    dlen = opus_encode_float(Opus,(float *)opusbuf,OPUS_blocksize,data,sizeof(data));
+    // Encoder accepts stereo, which we represent as complex, but it wants an array of floats
+    int dlen = opus_encode_float(Opus,(float *)opusbuf,opus_blocksize,data,sizeof(data));
     if(dlen < 0){
       fprintf(stderr,"opus encode error %d\n",dlen);
       continue;
     }
-    rtp.seq = htons(seq++);
-    rtp.timestamp = htonl(timestamp);
-    timestamp += OPUS_blocksize;
-    iovec[1].iov_len = dlen; // Length varies
-    sendmsg(Mcast_fd,&message,0);
+    if(dlen > 2){
+      // Discontinuous transmission; don't send frames of 2 bytes or less,
+      // but update timestamp so decoder will know how much was dropped
+      rtp.seq = htons(seq++);
+      rtp.timestamp = htonl(timestamp);
+      iovec[1].iov_len = dlen; // Length varies
+      sendmsg(Mcast_fd,&message,0);
+    }
+    timestamp += opus_blocksize;
   }
+  opus_encoder_destroy(Opus);
+  free(opusbuf);
   return NULL;
 }
 void *stereo_pcm_audio(void *arg){
   uint32_t timestamp = 0;
   uint16_t seq = 0;
-  uint32_t ssrc;
   time_t tt = time(NULL);
-  ssrc = tt & 0xffffffff;
+  uint32_t const ssrc = tt & 0xffffffff;
 
   pthread_setname_np(pthread_self(),"stereo-pcm");
   struct rtp_header rtp;
@@ -205,9 +209,8 @@ void *stereo_pcm_audio(void *arg){
 void *mono_pcm_audio(void *arg){
   uint32_t timestamp = 0;
   uint16_t seq = 0;
-  uint32_t ssrc;
   time_t tt = time(NULL);
-  ssrc = tt & 0xffffffff;
+  uint32_t const ssrc = tt & 0xffffffff;
 
   pthread_setname_np(pthread_self(),"mono-pcm");
   struct rtp_header rtp;
