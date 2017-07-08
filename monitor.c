@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.6 2017/07/04 09:47:43 karn Exp karn $
+// $Id: monitor.c,v 1.7 2017/07/05 03:13:48 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -180,6 +180,8 @@ int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int si
 	    (unsigned long)sp->ssrc,size);
     lastcall = tv;
   }
+  if(size <= 0)
+    return 0;
 
   int r;
   if((r = snd_pcm_writei(sp->handle,outsamps,size)) != size){
