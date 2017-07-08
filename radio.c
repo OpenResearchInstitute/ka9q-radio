@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.36 2017/07/02 12:02:19 karn Exp karn $
+// $Id: radio.c,v 1.37 2017/07/03 23:24:23 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -179,7 +179,7 @@ int set_mode(struct demod *demod,const enum mode mode){
   assert(demod != NULL);
 
   demod->terminate = 1;
-  pthread_join(demod->demod_thread,NULL); // Wait for it to finish
+  pthread_join(demod->demod_thread,NULL); // Wait for it to finish (if any)
   
   demod->terminate = 0;
   demod->mode = mode;
@@ -240,29 +240,39 @@ const int get_filter(const struct demod *demod,float *low,float *high){
 int set_filter(struct demod *demod,const float low,const float high){
   assert(demod != NULL);
   assert(demod->filter != NULL);
+  struct filter * const filter = demod->filter;
   
-  int N = demod->L + demod->M - 1;
+  float const dsamprate = demod->samprate / filter->decimate; // Decimated (output) sample rate
+  int const L_dec = filter->olen;
+  int const M_dec = (filter->impulse_length - 1) / filter->decimate + 1;
+  int const N_dec = L_dec + M_dec - 1;
 
   if(high > demod->max_IF || low < demod->min_IF || high <= low)
     return -1;
 
   float gain;
-  if(demod->filter->type == REAL || demod->filter->type == CROSS_CONJ)
+  if(demod->filter->out_type == REAL || demod->filter->out_type == CROSS_CONJ)
     gain = M_SQRT1_2;
   else
     gain = 1; // Complex
 
-  complex float *response = (complex float *)fftwf_alloc_complex(N);
-  // posix_memalign((void **)&response,16,N*sizeof(complex float));
-  memset(response,0,N*sizeof(*response));
+  complex float * const response = fftwf_alloc_complex(N_dec);
   int n;
-  for(n=N*low/demod->samprate; n <= N*high/demod->samprate; n++)
-    response[(n+N)%N] = gain;
-  
-  window_filter(demod->L,demod->M,response,Kaiser_beta);
+  float f;
+  for(n=0;n<N_dec;n++){
+    if(n <= N_dec/2)
+      f = (float)n * dsamprate / N_dec;
+    else
+      f = (float)(n-N_dec) * dsamprate / N_dec;
+    if(f >= low && f <= high)
+      response[n] = gain;
+    else
+      response[n] = 0;
+  }
+  window_filter(L_dec,M_dec,response,Kaiser_beta);
 
-  // We don't do any mutual exclusion with the demod thread so
-  // never let the response pointer be invalid
+  // We hot swap with the response array already in the filter (if any) without mutual exclusion
+  // so never let the response pointer in the filter be invalid
   complex float *tmp = demod->filter->response;
   demod->filter->response = response;
   fftwf_free(tmp);
