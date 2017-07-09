@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.45 2017/07/02 04:29:47 karn Exp karn $
+// $Id: display.c,v 1.46 2017/07/08 20:32:25 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #define _GNU_SOURCE 1
 #include <errno.h>
@@ -266,7 +266,7 @@ void *display(void *arg){
     // Update display
     wmove(fw,0,0);
     get_filter(demod,&low,&high);
-    wprintw(fw,"Frequency   %'17.2f Hz",get_freq(demod));
+    wprintw(fw,"Frequency   %'17.3f Hz",get_freq(demod));
     if(demod->frequency_lock)
       wprintw(fw," LOCK");
     if((bp = lookup_frequency(get_freq(demod))) != NULL){
@@ -284,39 +284,39 @@ void *display(void *arg){
     }
     wprintw(fw,"\n");
       
-    wprintw(fw,"First LO    %'17.2f Hz\n",get_first_LO(demod));
-    wprintw(fw,"IF          %'17.2f Hz",-get_second_LO(demod,0));
+    wprintw(fw,"First LO    %'17.3f Hz\n",get_first_LO(demod));
+    wprintw(fw,"IF          %'17.3f Hz",-get_second_LO(demod,0));
     if(!LO2_in_range(demod,get_second_LO(demod,0),1)){
       double alias;
       if(get_second_LO(demod,0) > 0)
 	alias = get_first_LO(demod) - get_second_LO(demod,0) + demod->samprate;
       else
 	alias = get_first_LO(demod) - get_second_LO(demod,0) - demod->samprate;	
-      wprintw(fw," alias %'.2f Hz",alias);
+      wprintw(fw," alias %'.3f Hz",alias);
     }
     wprintw(fw,"\n");
-    wprintw(fw,"Dial offset %'17.2f Hz\n",demod->dial_offset);
-    wprintw(fw,"Calibrate   %'17.2f ppm\n",get_cal(demod)*1e6);
-    wprintw(fw,"Filter low  %'17.2f Hz\n",low);
-    wprintw(fw,"Filter high %'17.2f Hz\n",high);
-    wprintw(fw,"Kaiser Beta %'17.2f\n",Kaiser_beta);
-    wprintw(fw,"MISC        %'17.2f\n",Misc);
+    wprintw(fw,"Dial offset %'17.3f Hz\n",demod->dial_offset);
+    wprintw(fw,"Calibrate   %'17.3f ppm\n",get_cal(demod)*1e6);
+    wprintw(fw,"Filter low  %'17.3f Hz\n",low);
+    wprintw(fw,"Filter high %'17.3f Hz\n",high);
+    wprintw(fw,"Kaiser Beta %'17.3f\n",Kaiser_beta);
+    wprintw(fw,"MISC        %'17.3f\n",Misc);
     wprintw(fw,"Blocksize   %17d\n",demod->L);
     // Tuning step highlight
     // A little messy because of the commas in the frequencies
     // They come from the ' option in the printf formats
     int x;
 
-    if(tunestep >= -2 && tunestep <= -1){ // .01 or .1
-      x = 25 - tunestep + 1;
+    if(tunestep >= -3 && tunestep <= -1){ // .001 or .01 or .1
+      x = 24 - tunestep + 1;
     } else if(tunestep >= 0 && tunestep <= 2){
-      x = 25 - tunestep;  // 1, 10, 100
+      x = 24 - tunestep;  // 1, 10, 100
     } else if(tunestep >= 3 && tunestep <= 5){
-      x = 25 - tunestep - 1; // 1,000; 10,000; 100,000
+      x = 24 - tunestep - 1; // 1,000; 10,000; 100,000
     } else if(tunestep >= 6 && tunestep <= 8){
-      x = 25 - tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
+      x = 24 - tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
     } else if(tunestep >= 9 && tunestep <= 9){
-      x = 25 - tunestep - 3; // 1,000,000,000
+      x = 24 - tunestep - 3; // 1,000,000,000
     } else
       x = 0; // can't happen, but shuts up compiler
     // Highlight digit for current tuning step
@@ -475,7 +475,7 @@ void *display(void *arg){
       }
       break;
     case KEY_RIGHT:     // Cursor right: decrease tuning step /10
-      if(tunestep > -2){
+      if(tunestep > -3){
 	tunestep--;
 	tunestep10 /= 10;
       }
