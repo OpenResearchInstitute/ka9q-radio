@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.22 2017/07/03 23:24:19 karn Exp karn $
+// $Id: fm.c,v 1.23 2017/07/08 20:35:27 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -80,14 +80,14 @@ void *demod_fm(void *arg){
   // Positive frequencies only
   complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
   memset(aresponse,0,(AN/2+1) * sizeof(*aresponse));
+  float gain = 1./AN;
   int j;
   for(j=0;j<=AN/2;j++){
     float const f = (float)j * dsamprate / AN;
     if(f >= 300 && f <= 6000)
-      aresponse[j] = 300./f; // -6 dB/octave de-emphasis to handle PM (indirect FM) transmission
+      aresponse[j] = gain * 300./f; // -6 dB/octave de-emphasis to handle PM (indirect FM) transmission
   }
   // Window scaling for REAL input, REAL output
-  // NB: this also applies 1/N scaling, so you can't just remove it
   window_rfilter(AL,AM,aresponse,Kaiser_beta);
 
   struct filter * const afilter = create_filter(AL,AM,aresponse,1,REAL,REAL); // Real input, real output, same sample rate
@@ -102,10 +102,11 @@ void *demod_fm(void *arg){
   complex float * const plresponse = fftwf_alloc_complex(PL_N);
   memset(plresponse,0,PL_N*sizeof(*plresponse));
   // Positive frequencies only, so we generate the analytic signal between 0 and 300 Hz
+  // Gain is still 1./AN
   for(j=0;j<=PL_N/2;j++){
     float const f = (float)j * dsamprate / AN; // frequencies relative to INPUT sampling rate
     if(f > 0 && f < 300)
-      plresponse[j] = 1;
+      plresponse[j] = gain;
   }
   window_filter(PL_L,PL_M,plresponse,1.0);
   // Create analytic signal of PL tone range in baseband
