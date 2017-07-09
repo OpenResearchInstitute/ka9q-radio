@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.31 2017/07/02 04:29:57 karn Exp karn $
+# $Id: Makefile,v 1.32 2017/07/08 20:31:40 karn Exp karn $
 INCLUDES=-I /opt/local/include
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -13,7 +13,7 @@ clean:
 	rm -f *.o radio control funcube monitor iqrecord iqplay gentone bandplan.txt help.txt libfcd.a
 	rcsclean
 
-gentone: gentone.o misc.o filter.o
+gentone: gentone.o misc.o filter.o modes.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lm
 
 funcube: funcube.o gr.o libfcd.a
@@ -38,7 +38,7 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
-gentone.o: gentone.c dsp.h
+gentone.o: gentone.c dsp.h filter.h command.h
 am.o: am.c dsp.h filter.h radio.h audio.h command.h
 audio.o: audio.c dsp.h audio.h rtp.h
 cam.o: cam.c dsp.h filter.h radio.h audio.h command.h
