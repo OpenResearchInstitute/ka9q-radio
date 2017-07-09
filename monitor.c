@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.7 2017/07/05 03:13:48 karn Exp karn $
+// $Id: monitor.c,v 1.8 2017/07/08 20:31:23 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -168,18 +168,6 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
 int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int size){
-  static struct timeval lastcall; // Time of last call
-  
-  if(Verbose > 1){
-    struct timeval tv;
-    gettimeofday(&tv,NULL);
-    if(lastcall.tv_sec == 0 && lastcall.tv_usec == 0)
-      lastcall = tv; // Avoid garbage on first call
-    fprintf(stderr,"%ld.%06ld (%06ld usec) ssrc %lx write %d samps\n",
-	    (long)tv.tv_sec,(long)tv.tv_usec,1000000*(tv.tv_sec - lastcall.tv_sec) + (tv.tv_usec - lastcall.tv_usec),
-	    (unsigned long)sp->ssrc,size);
-    lastcall = tv;
-  }
   if(size <= 0)
     return 0;
 
@@ -342,6 +330,13 @@ int main(int argc,char *argv[]){
     }
   }
 
+  struct timeval last_receive_time;
+  struct timeval receive_time;
+  gettimeofday(&receive_time,NULL);
+  last_receive_time = receive_time;
+  int recentbytes = 0;
+  float bitrate = 0;
+
   while(1){
     ssize_t size;
 
@@ -381,30 +376,29 @@ int main(int argc,char *argv[]){
     if(rtp.seq != sp->eseq){
       int diff = (int)(rtp.seq - sp->eseq);
       fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
-      if(diff < 0 && diff > -10){
+      if(diff < 0 && diff > -10)
 	continue;	// Drop probable duplicate
-      }
       drop = diff; // Apparent # packets dropped
     }
     sp->eseq = (rtp.seq + 1) & 0xffff;
-
-    size -= sizeof(rtp); // Bytes in data
+    size -= sizeof(rtp); // Bytes in payload
+    recentbytes += size;
     int16_t outsamps[2*Bufsize];
     int i,error;
+    int samples = 0;
+
     switch(rtp.mpt){
     case 10: // Stereo
-      size /= 2;           // # 16-bit word samples
-      for(i=0;i<size;i++)
+      samples = size / 4;  // # 32-bit word samples
+      for(i=0;i<2*samples;i++)
 	outsamps[i] = ntohs(data[i]); // RTP profile specifies big-endian samples
-      size /= 2;           // # 32-bit stereo samples
       break;
     case 11: // Mono; send to both stereo channels
-      size /= 2;
-      for(i=0;i<size;i++)
+      samples = size / 2;
+      for(i=0;i<samples;i++)
 	outsamps[2*i] = outsamps[2*i+1] = ntohs(data[i]);
       break;
     case 20: // Opus codec decode - arbitrary choice
-
       if(sp->opus == NULL){ // Create if it doesn't already exist
 	sp->opus = opus_decoder_create(sp->samprate,2,&error);
 	if(sp->opus == NULL)
@@ -413,16 +407,30 @@ int main(int argc,char *argv[]){
       }
       if(drop != 0){
 	// packet dropped; conceal
-	size = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
-	play_stereo_pcm(sp,outsamps,size);
+	samples = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
+	if(samples > 0)
+	  play_stereo_pcm(sp,outsamps,samples);
       }
-      size = opus_decode(sp->opus,(unsigned char *)data,size,(opus_int16 *)outsamps,sizeof(outsamps),0);
+      samples = opus_decode(sp->opus,(unsigned char *)data,size,(opus_int16 *)outsamps,sizeof(outsamps),0);
       break;
     default:
       continue; // ignore
     }
-    sp->etime = rtp.timestamp + size;
-    play_stereo_pcm(sp,outsamps,size);
+    sp->etime = rtp.timestamp + samples;
+    if(Verbose){
+      gettimeofday(&receive_time,NULL);
+      long interval;
+      interval = 1000000. * (receive_time.tv_sec - last_receive_time.tv_sec) + (receive_time.tv_usec - last_receive_time.tv_usec);
+      if(interval > 1000000){
+	bitrate = (1000000. * 8 * recentbytes)/interval;
+	last_receive_time = receive_time;
+	recentbytes = 0;
+      }
+      fprintf(stderr,"%06ld usec: ssrc %lx read %d bytes bitrate %'8.1f b/s write %d samps\n",
+	      interval,(unsigned long)sp->ssrc,(int)size,bitrate,(int)samples);
+    }
+    if(samples > 0)
+      play_stereo_pcm(sp,outsamps,samples);
   }
   exit(0);
 }
