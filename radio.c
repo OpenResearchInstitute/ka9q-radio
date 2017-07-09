@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.37 2017/07/03 23:24:23 karn Exp karn $
+// $Id: radio.c,v 1.38 2017/07/08 20:30:49 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -246,15 +246,15 @@ int set_filter(struct demod *demod,const float low,const float high){
   int const L_dec = filter->olen;
   int const M_dec = (filter->impulse_length - 1) / filter->decimate + 1;
   int const N_dec = L_dec + M_dec - 1;
+  int const N = filter->ilen + filter->impulse_length - 1;
 
   if(high > demod->max_IF || low < demod->min_IF || high <= low)
     return -1;
 
-  float gain;
+  float gain = 1./((float)N);
   if(demod->filter->out_type == REAL || demod->filter->out_type == CROSS_CONJ)
-    gain = M_SQRT1_2;
-  else
-    gain = 1; // Complex
+    gain *= M_SQRT1_2;
+
 
   complex float * const response = fftwf_alloc_complex(N_dec);
   int n;
