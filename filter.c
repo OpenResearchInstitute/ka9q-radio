@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.12 2017/07/03 23:24:18 karn Exp karn $
+// $Id: filter.c,v 1.13 2017/07/08 20:26:32 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -296,13 +296,15 @@ int window_filter(int const L,int const M,complex float * const response,float c
   fftwf_execute(rev_filter_plan);
   fftwf_destroy_plan(rev_filter_plan);
   
-  // Shift to beginning of buffer, apply window and scale (N*N)
-  float const scale = 1./((float)N*N);  // Integer * integer will overflow if too large
+  // Shift to beginning of buffer, apply window and gain
   float kaiser_window[M];
   make_kaiser(kaiser_window,M,beta);
+
+  // Round trip through FFT/IFFT scales by N
+  float const gain = 1./N;
   int n;
   for(n = M - 1; n >= 0; n--)
-    buffer[n] = buffer[(n-M/2+N)%N] * kaiser_window[n] * scale;
+    buffer[n] = buffer[(n-M/2+N)%N] * kaiser_window[n] * gain;
 
   // Pad with zeroes on right side
   memset(buffer+M,0,(N-M)*sizeof(*buffer));
@@ -349,10 +351,11 @@ int window_rfilter(const int L,const int M,complex float * const response,const 
   // Shift to beginning of buffer, apply window and scale (N*N)
   float kaiser_window[M];
   make_kaiser(kaiser_window,M,beta);
-  float const scale = 1./((float)N*N); // Integer will overflow if too large
+  // Round trip through FFT/IFFT scales by N
+  float const gain = 1./N;
   int n;
   for(n = M - 1; n >= 0; n--)
-    timebuf[n] = timebuf[(n-M/2+N)%N] * kaiser_window[n] * scale;
+    timebuf[n] = timebuf[(n-M/2+N)%N] * kaiser_window[n] * gain;
   
   // Pad with zeroes on right side
   memset(timebuf+M,0,(N-M)*sizeof(*timebuf));
