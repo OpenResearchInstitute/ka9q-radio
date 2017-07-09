@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.3 2017/07/02 04:29:54 karn Exp karn $
+// $Id: iqplay.c,v 1.4 2017/07/08 20:32:56 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -42,15 +42,16 @@ int main(int argc,char *argv[]){
   struct rtp_header rtp;
   int fd;
   struct status status;
+  double frequency = 0;
 
   memset(&status,0,sizeof(status));
-  int blocksize = 350;
+  int blocksize = 256;
   char *dest = "239.1.2.10"; // Default for testing
   int dest_port = 5004;     // Default for testing; recommended default RTP port
   int dest_is_ipv6 = -1;
   locale = getenv("LANG");
 
-  while((c = getopt(argc,argv,"vl:b:R:P:")) != EOF){
+  while((c = getopt(argc,argv,"vl:b:R:P:f:")) != EOF){
     switch(c){
     case 'R':
       dest = optarg;
@@ -66,6 +67,9 @@ int main(int argc,char *argv[]){
       break;
     case 'b':
       blocksize = strtol(optarg,NULL,0);
+      break;
+    case 'f':
+      frequency = strtod(optarg,NULL);
       break;
     }
   }
@@ -88,7 +92,7 @@ int main(int argc,char *argv[]){
     // Destination is IPv4
     dest_is_ipv6 = 0;
     if((Rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
-      perror("funcube: can't create IPv4 output socket");
+      perror("can't create IPv4 output socket");
       exit(1);
     }
     address4.sin_family = AF_INET;
@@ -171,26 +175,35 @@ int main(int argc,char *argv[]){
   int d = round(1000000. * blocksize / ADC_samprate); // microsec between packets
   int i;
   gettimeofday(&ltv,NULL);
-  for(i=optind;i<argc;i++){
-    if((fd = open(argv[i],O_RDONLY)) == -1){
-      fprintf(stderr,"Can't read %s\n",argv[i]);
-      continue;
+  for(i=optind;i<=argc;i++){
+    char *filename;
+    if(optind == argc){
+      // No arguments, open stdin
+      filename = "stdin";
+      fd = 0;
+    } else {
+      filename = argv[i];
+      if((fd = open(filename,O_RDONLY)) == -1){
+	fprintf(stderr,"Can't read %s\n",filename);
+	continue;
+      }
     }
     char temp[PATH_MAX+1];
     int n;
-    if((n = getxattr(argv[i],"user.samplerate",temp,sizeof(temp))) > 0){
+    if((n = getxattr(filename,"user.samplerate",temp,sizeof(temp))) > 0){
       temp[n] = '\0';
       status.samprate = strtol(temp,NULL,0);
     } else
       status.samprate = ADC_samprate; // Use default
-    if((n = getxattr(argv[i],"user.frequency",temp,sizeof(temp))) > 0){
+    if(frequency != 0 || (n = getxattr(filename,"user.frequency",temp,sizeof(temp))) <= 0){
+      status.frequency = frequency;
+    } else {
       temp[n] = '\0';
       status.frequency = strtod(temp,NULL);
-    } else
-      status.frequency = 0; // Unknown
-    
+    }
     if(Verbose)
-      fprintf(stderr,"Playing %s: %'.1lf Hz, %'d samp/s\n",argv[i],status.frequency,status.samprate);
+      fprintf(stderr,"Transmitting %s at %'d samp/s upconverted %'.1lf Hz to %s:%d\n",
+	      filename,status.samprate,status.frequency,dest,dest_port);
 
     while(fillbuf(fd,sampbuf,sizeof(sampbuf)) > 0){
       rtp.seq = htons(seq++);
