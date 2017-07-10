@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.13 2017/07/08 20:26:32 karn Exp karn $
+// $Id: filter.c,v 1.14 2017/07/09 03:26:13 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -75,10 +75,12 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
 	for(n=0;n<=N_dec/2;n++)
 	  f->response[n] *= M_SQRT1_2;
       } else {
+#if 0
 	assert(malloc_usable_size(response) >= N_dec * sizeof(*response));
 	int n;
 	for(n=0;n<N_dec;n++)
 	  f->response[n] *= M_SQRT1_2;
+#endif
       }
     }
   }
