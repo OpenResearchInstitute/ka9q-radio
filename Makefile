@@ -1,13 +1,13 @@
-# $Id: Makefile,v 1.34 2017/07/09 05:50:05 karn Exp karn $
+# $Id: Makefile,v 1.35 2017/07/09 12:17:02 karn Exp karn $
 INCLUDES=-I /opt/local/include
-#COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
+COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+#COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
 all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay gentone wwvsim
 
 install: all
-	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay wwvsim
+	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay gentone wwvsim
 
 clean:
 	rm -f *.o radio control funcube monitor iqrecord iqplay gentone wwvsim bandplan.txt help.txt libfcd.a
