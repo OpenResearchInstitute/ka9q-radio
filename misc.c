@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.9 2017/06/20 03:01:01 karn Exp karn $
+// $Id: misc.c,v 1.10 2017/07/10 18:34:57 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -84,7 +84,7 @@ int fillbuf(const int fd,void *buffer,const int cnt){
       break;
    i += n;
   }
-  return cnt;
+  return i;
 
 }
 

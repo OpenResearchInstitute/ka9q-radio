@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.35 2017/07/09 12:17:02 karn Exp karn $
+# $Id: Makefile,v 1.36 2017/07/10 08:13:18 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -65,4 +65,5 @@ iq.o: iq.c dsp.h filter.h radio.h audio.h command.h
 bandplan.o: bandplan.c bandplan.h
 iqrecord.o: iqrecord.c command.h rtp.h
 iqplay.o: iqplay.c command.h rtp.h dsp.h
+wwvsim.o: wwvsim.c
 
