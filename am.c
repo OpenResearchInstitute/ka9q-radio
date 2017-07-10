@@ -43,7 +43,8 @@ void *demod_am(void *arg){
     demod->snr = (snn*snn) -1; // S/N as power ratio
     
     // AM AGC is carrier-driven
-    demod->gain = Headroom / average;
+    //    demod->gain = Headroom / average;
+    demod->gain = 0.5/average;
     for(n=0; n<filter->olen; n++)
       audio[n] = (audio[n] - average) * demod->gain;
     

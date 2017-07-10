@@ -64,7 +64,8 @@ void *demod_cam(void *arg){
 
     // Remove carrier DC
     // AM AGC is carrier-driven
-    demod->gain = Headroom / demod->amplitude;
+    //    demod->gain = Headroom / demod->amplitude;
+    demod->gain = 0.5/demod->amplitude;
 
     float audio[filter->olen];
     for(n=0; n < filter->olen; n++)
