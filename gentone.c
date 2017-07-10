@@ -10,7 +10,7 @@
 #include "dsp.h"
 #include "command.h"
 
-#define BLOCKSIZE 32768
+#define BLOCKSIZE 4096
 
 float const scale = 1./SHRT_MAX;
 
@@ -100,8 +100,8 @@ int main(int argc,char *argv[]){
   while(1){
     int i,j;
     int16_t samp[L/4];
-    if(read(0,samp,sizeof(samp)) != sizeof(samp))
-      exit(0);
+    if(fillbuf(0,samp,sizeof(samp)) <= 0)
+      break;
     // Filter will upsample by 4x
     for(j=i=0;i<L;){
       filter->input.r[i++] = samp[j++] * scale;
@@ -133,5 +133,6 @@ int main(int argc,char *argv[]){
     }
     write(1,output,sizeof(output));
   }
+  delete_filter(filter);
   exit(0);
 }
