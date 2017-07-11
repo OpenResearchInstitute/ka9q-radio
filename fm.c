@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.23 2017/07/08 20:35:27 karn Exp karn $
+// $Id: fm.c,v 1.24 2017/07/09 03:27:55 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -127,8 +127,13 @@ void *demod_fm(void *arg){
     if(demod->snr > 2){
       int n;
       float avg = 0;
+#if 0
       extern float Misc;
       float const ampl = Misc * demod->amplitude;
+#else
+      float const ampl = 0;
+#endif
+      
       assert(filter->olen == afilter->ilen);
       for(n=0; n<filter->olen; n++){
 	complex float samp = filter->output.c[n];
