@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.4 2017/07/08 20:32:56 karn Exp karn $
+// $Id: iqplay.c,v 1.5 2017/07/09 03:27:37 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -38,7 +38,7 @@ void closedown(int a){
 int main(int argc,char *argv[]){
   char *locale;
   int c;
-  struct timeval ltv,ntv;
+  struct timeval start_time;
   struct rtp_header rtp;
   int fd;
   struct status status;
@@ -172,9 +172,11 @@ int main(int argc,char *argv[]){
 
   int timestamp = 0;
   int seq = 0;
-  int d = round(1000000. * blocksize / ADC_samprate); // microsec between packets
+  double dt = (1000000. * blocksize) / ADC_samprate; // microsec between packets
+  double sked_time = 0; // Microseconds since start for next scheduled transmission
+  gettimeofday(&start_time,NULL);
+
   int i;
-  gettimeofday(&ltv,NULL);
   for(i=optind;i<=argc;i++){
     char *filename;
     if(optind == argc){
@@ -212,22 +214,25 @@ int main(int argc,char *argv[]){
       
       // Is it time yet?
       while(1){
-	gettimeofday(&ntv,NULL);
-	// Microseconds since clock was last updated
-	int dt = 1000000 * (ntv.tv_sec - ltv.tv_sec) + ntv.tv_usec - ltv.tv_usec;
-	if(dt >= d)
+	// Microseconds since start
+	struct timeval tv,diff;
+	gettimeofday(&tv,NULL);
+	timersub(&tv,&start_time,&diff);
+	double rt = 1000000. * diff.tv_sec + diff.tv_usec;
+	if(rt >= sked_time)
 	  break;
-	usleep(d-dt);
-      }    
+	if(sked_time > rt + 500){
+	  // Use care here, s is unsigned
+	  useconds_t s = (sked_time - rt) - 500; // sleep until 500 microseconds before
+	  usleep(s);
+	}
+      }
+
       if(sendmsg(Rtp_sock,&message,0) == -1)
 	perror("sendmsg");
 
-      // Update to time of next scheduled transmission
-      ltv.tv_usec += d;
-      if(ltv.tv_usec >= 1000000){
-	ltv.tv_usec -= 1000000;
-	ltv.tv_sec++;
-      }
+      // Update time of next scheduled transmission
+      sked_time += dt;
     }
     close(fd);
     fd = -1;
