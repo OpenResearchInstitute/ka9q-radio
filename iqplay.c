@@ -221,9 +221,9 @@ int main(int argc,char *argv[]){
 	double rt = 1000000. * diff.tv_sec + diff.tv_usec;
 	if(rt >= sked_time)
 	  break;
-	if(sked_time > rt + 500){
+	if(sked_time > rt + 100){
 	  // Use care here, s is unsigned
-	  useconds_t s = (sked_time - rt) - 500; // sleep until 500 microseconds before
+	  useconds_t s = (sked_time - rt) - 100; // sleep until 100 microseconds before
 	  usleep(s);
 	}
       }
