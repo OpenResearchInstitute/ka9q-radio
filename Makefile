@@ -1,10 +1,11 @@
-# $Id: Makefile,v 1.37 2017/07/10 22:10:13 karn Exp karn $
+# $Id: Makefile,v 1.38 2017/07/15 18:11:19 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
 all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay gentone wwvsim wwv.txt wwvh.txt
+
 
 install: all
 	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay gentone wwvsim
@@ -13,7 +14,7 @@ clean:
 	rm -f *.o radio control funcube monitor iqrecord iqplay gentone wwvsim bandplan.txt help.txt wwv.txt wwvh.txt libfcd.a
 	rcsclean
 
-wwvsim: wwvsim.o wwv.txt wwvh.txt
+wwvsim: wwvsim.o
 	$(CC) -g -o $@ $^ -lm
 
 gentone: gentone.o misc.o filter.o modes.o
@@ -28,7 +29,7 @@ iqplay: iqplay.o misc.o
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
 
-radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o bandplan.o misc.o help.txt
+radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
 monitor: monitor.o
