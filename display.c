@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.46 2017/07/08 20:32:25 karn Exp karn $
+// $Id: display.c,v 1.47 2017/07/09 12:17:47 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 #define _GNU_SOURCE 1
 #include <errno.h>
@@ -37,55 +37,9 @@ float Misc; // General purpose knob
 
 
 int Update_interval = 100;
-
-// Parse a frequency entry in the form
-// 12345 (12345 Hz)
-// 12k345 (12.345 kHz)
-// 12m345 (12.345 MHz)
-// 12g345 (12.345 GHz)
-
-const double parse_frequency(const char *s){
-  char *ss = alloca(strlen(s));
-
-  int i;
-  for(i=0;i<strlen(s);i++)
-    ss[i] = tolower(s[i]);
-
-  ss[i] = '\0';
-  
-  char *sp;
-  double mult = 1.0;
-  if((sp = strchr(ss,'g')) != NULL){
-    mult = 1e9;
-    *sp = '.';
-  } else if((sp = strchr(ss,'m')) != NULL){
-    mult = 1e6;
-    *sp = '.';
-  } else if((sp = strchr(ss,'k')) != NULL){
-    mult = 1e3;
-    *sp = '.';
-  } else
-    mult = 1;
-
-  char *endptr;
-  double f = strtod(ss,&endptr);
-  if(endptr != ss)
-    return mult * f;
-  else
-    return 0;
-}
+extern int Tunestep;
 
 
-void chomp(char *s){
-  char *cp;
-
-  if(s == NULL)
-    return;
-  if((cp = strchr(s,'\r')) != NULL)
-    *cp = '\0';
-  if((cp = strchr(s,'\n')) != NULL)
-    *cp = '\0';
-}
 
 
 // Pop up a temporary window with the contents of a file,
@@ -157,9 +111,6 @@ void display_cleanup(void *arg){
 WINDOW *deb;
 
 static void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
-
-  float low,high;
-
   switch(tuneitem){
   case 0: // Dial frequency
     if(!demod->frequency_lock) // Ignore if locked
@@ -208,20 +159,17 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     set_cal(demod,get_cal(demod) + tunestep * 1e-6); // ppm
     break;
   case 5: // Filter low edge
-    get_filter(demod,&low,&high);
-    low += tunestep;
-    set_filter(demod,low,high);
+    demod->low += tunestep;
+    set_filter(demod,demod->low,demod->high);
     break;
   case 6: // Filter high edge
-    get_filter(demod,&low,&high);
-    high += tunestep;
-    set_filter(demod,low,high);
+    demod->high += tunestep;
+    set_filter(demod,demod->low,demod->high);
     break;
   case 7: // Kaiser beta
-    get_filter(demod,&low,&high);
     if(Kaiser_beta + tunestep >= 0.0){
       Kaiser_beta += tunestep;
-      set_filter(demod,low,high);
+      set_filter(demod,demod->low,demod->high); // Recreate filters
     }
     break;
   case 8: // Misc
@@ -233,8 +181,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
 void *display(void *arg){
   int c;
   struct demod *demod = &Demod;
-  int tunestep = 0;
-  double tunestep10 = 1;
+  double tunestep10 = pow(10.,Tunestep);
   int tuneitem = 0;
   int dial_fd;
   WINDOW *fw,*sig,*sdr,*net;
@@ -260,12 +207,10 @@ void *display(void *arg){
 
 
   for(;;){
-    float low,high;
     const struct bandplan *bp;
     
     // Update display
     wmove(fw,0,0);
-    get_filter(demod,&low,&high);
     wprintw(fw,"Frequency   %'17.3f Hz",get_freq(demod));
     if(demod->frequency_lock)
       wprintw(fw," LOCK");
@@ -297,8 +242,8 @@ void *display(void *arg){
     wprintw(fw,"\n");
     wprintw(fw,"Dial offset %'17.3f Hz\n",demod->dial_offset);
     wprintw(fw,"Calibrate   %'17.3f ppm\n",get_cal(demod)*1e6);
-    wprintw(fw,"Filter low  %'17.3f Hz\n",low);
-    wprintw(fw,"Filter high %'17.3f Hz\n",high);
+    wprintw(fw,"Filter low  %'17.3f Hz\n",demod->low);
+    wprintw(fw,"Filter high %'17.3f Hz\n",demod->high);
     wprintw(fw,"Kaiser Beta %'17.3f\n",Kaiser_beta);
     wprintw(fw,"MISC        %'17.3f\n",Misc);
     wprintw(fw,"Blocksize   %17d\n",demod->L);
@@ -307,16 +252,16 @@ void *display(void *arg){
     // They come from the ' option in the printf formats
     int x;
 
-    if(tunestep >= -3 && tunestep <= -1){ // .001 or .01 or .1
-      x = 24 - tunestep + 1;
-    } else if(tunestep >= 0 && tunestep <= 2){
-      x = 24 - tunestep;  // 1, 10, 100
-    } else if(tunestep >= 3 && tunestep <= 5){
-      x = 24 - tunestep - 1; // 1,000; 10,000; 100,000
-    } else if(tunestep >= 6 && tunestep <= 8){
-      x = 24 - tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
-    } else if(tunestep >= 9 && tunestep <= 9){
-      x = 24 - tunestep - 3; // 1,000,000,000
+    if(Tunestep >= -3 && Tunestep <= -1){ // .001 or .01 or .1
+      x = 24 - Tunestep + 1;
+    } else if(Tunestep >= 0 && Tunestep <= 2){
+      x = 24 - Tunestep;  // 1, 10, 100
+    } else if(Tunestep >= 3 && Tunestep <= 5){
+      x = 24 - Tunestep - 1; // 1,000; 10,000; 100,000
+    } else if(Tunestep >= 6 && Tunestep <= 8){
+      x = 24 - Tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
+    } else if(Tunestep >= 9 && Tunestep <= 9){
+      x = 24 - Tunestep - 3; // 1,000,000,000
     } else
       x = 0; // can't happen, but shuts up compiler
     // Highlight digit for current tuning step
@@ -336,7 +281,7 @@ void *display(void *arg){
     // and the noise bandwidth of the filter is close to fabs(high-low), which is
     // probably not true for small bandwidths (should probably adjust for Kaiser beta)
     float n0 = ((demod->power_i + demod->power_q) - (demod->amplitude * demod->amplitude))
-      / (demod->samprate - fabs(high-low));
+      / (demod->samprate - fabs(demod->high-demod->low));
 #endif
     if(!isnan(demod->snr))
       wprintw(sig,"SNR     %7.1f dB\n",power2dB(demod->snr));
@@ -464,19 +409,19 @@ void *display(void *arg){
       break;
     case KEY_HOME: // Go back to starting spot
       tuneitem = 0;
-      tunestep = 0;
+      Tunestep = 0;
       tunestep10 = 1;
       break;
     case KEY_BACKSPACE: // Cursor left: increase tuning step 10x
     case KEY_LEFT:
-      if(tunestep < 9){
-	tunestep++;
+      if(Tunestep < 9){
+	Tunestep++;
 	tunestep10 *= 10;
       }
       break;
     case KEY_RIGHT:     // Cursor right: decrease tuning step /10
-      if(tunestep > -3){
-	tunestep--;
+      if(Tunestep > -3){
+	Tunestep--;
 	tunestep10 /= 10;
       }
       break;
@@ -571,8 +516,7 @@ void *display(void *arg){
 	double b = strtod(str,&ptr);
 	  if(ptr != str && b >= 0 && b < 100 && b != Kaiser_beta){
 	    Kaiser_beta = b;
-	    get_filter(demod,&low,&high);
-	    set_filter(demod,low,high);
+	    set_filter(demod,demod->low,demod->high);
 	  }
       }
       break;
@@ -584,6 +528,29 @@ void *display(void *arg){
   }
  done:;
   pthread_cleanup_pop(1);
+  {
+    char statefile[PATH_MAX];
+    snprintf(statefile,sizeof(statefile),"%s/.radiostate",getenv("HOME"));
+    FILE *fp = fopen(statefile,"w");
+    if(fp == NULL){
+      fprintf(stderr,"Can't write state file %s\n",statefile);
+    } else {
+      fprintf(fp,"#KA9Q DSP Receiver State dump\n");
+      fprintf(fp,"Source %s:%d\n",IQ_mcast_address_text,Mcast_dest_port);
+      fprintf(fp,"Frequency %.3f Hz\n",get_freq(demod));
+      fprintf(fp,"Mode %s\n",Modes[demod->mode].name);
+      fprintf(fp,"IF %.3f Hz\n",-get_second_LO(demod,0));
+      fprintf(fp,"Dial offset %.3f Hz\n",demod->dial_offset);
+      fprintf(fp,"Calibrate %.3f ppm\n",get_cal(demod)*1e6);
+      fprintf(fp,"Filter low %.3f Hz\n",demod->low);
+      fprintf(fp,"Filter high %.3f Hz\n",demod->high);
+      fprintf(fp,"Kaiser Beta %.3f\n",Kaiser_beta);
+      fprintf(fp,"Blocksize %d\n",demod->L);
+      fprintf(fp,"Tunestep %d\n",Tunestep);
+      fclose(fp);
+    }
+  }
+
+
   exit(0);
-  pthread_exit(NULL);
 }
