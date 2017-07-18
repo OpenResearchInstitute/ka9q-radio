@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.39 2017/07/09 03:27:18 karn Exp karn $
+// $Id: radio.c,v 1.40 2017/07/10 18:35:27 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -226,16 +226,6 @@ int set_mode(struct demod *demod,const enum mode mode){
   }
   return 0;
 }      
-
-const int get_filter(const struct demod *demod,float *low,float *high){
-  assert(demod != NULL);
-
-  if(low != NULL)
-    *low = demod->low;
-  if(high != NULL)
-    *high = demod->high;
-  return 0;
-}
 
 int set_filter(struct demod *demod,const float low,const float high){
   assert(demod != NULL);
