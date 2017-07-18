@@ -35,11 +35,13 @@ struct filter {
   fftwf_plan rev_plan;
   int decimate;
   int olen;
+  int slave;                         // Filter is a slave to another
 };
 int window_filter(const int L,const int M,complex float *response,const float beta);
 int window_rfilter(const int L,const int M,complex float *response,const float beta);
 
 struct filter *create_filter(const int,const int,complex float *,const int,const enum filtertype,const enum filtertype);
+struct filter *create_filter_slave(struct filter * const,complex float * const,int const);
 int execute_filter(struct filter *);
 int execute_filter_nocopy(struct filter *);
 int delete_filter(struct filter *);
