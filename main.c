@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.43 2017/07/02 04:29:54 karn Exp karn $
+// $Id: main.c,v 1.44 2017/07/18 00:41:41 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -154,6 +154,7 @@ int main(int argc,char *argv[]){
 	  for(i=0;i<Nmodes;i++){
 	    if(strncasecmp(Modes[i].name,str,strlen(Modes[i].name)) == 0){
 	      mode = Modes[i].mode;
+	      break;
 	    }
 	  }
 	} else if(sscanf(line,"IF %lf",&demod->second_LO) > 0 ){
