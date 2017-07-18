@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.14 2017/07/09 03:26:13 karn Exp karn $
+// $Id: filter.c,v 1.15 2017/07/10 18:36:46 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -37,6 +37,7 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
     fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,decimate);
 
   struct filter * const f = calloc(1,sizeof(*f));
+  f->slave = 0;
   f->in_type = in_type;
   f->out_type = out_type;
   f->decimate = decimate;
@@ -90,13 +91,77 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
   case CROSS_CONJ:
     f->f_fdomain = fftwf_alloc_complex(N_dec);
     f->output_buffer.c = fftwf_alloc_complex(N_dec);  
-    f->output.c = f->output_buffer.c + (M - 1)/decimate;
+    f->output.c = f->output_buffer.c + (f->impulse_length - 1)/decimate;
     f->rev_plan = fftwf_plan_dft_1d(N_dec,f->f_fdomain,f->output_buffer.c,FFTW_BACKWARD,FFTW_ESTIMATE);
     break;
   case REAL:
     f->f_fdomain = fftwf_alloc_complex(N_dec/2+1);
     f->output_buffer.r = fftwf_alloc_real(N_dec);
-    f->output.r = f->output_buffer.r + (M - 1)/decimate;
+    f->output.r = f->output_buffer.r + (f->impulse_length - 1)/decimate;
+    f->rev_plan = fftwf_plan_dft_c2r_1d(N_dec,f->f_fdomain,f->output_buffer.r,FFTW_ESTIMATE);
+    break;
+  }
+  return f;
+}
+// Filter that shares the forward FFT, useful when doing several filters on the same input data
+// Input buffer parameters obviously have to be the same
+// Input and output type must be the same
+// Output can be decimated differently from master filter
+// And of course the response can be different
+// Slaves must be deleted before their masters
+// Segfault will occur if master is deleted and slave is executed
+// Time-domain input buffer is NULL, so segfault will occur if written into
+struct filter *create_filter_slave(struct filter * const master,complex float * const response,int const decimate){
+
+  assert(master != NULL);
+
+  int const N = master->ilen + master->impulse_length - 1;
+  int const N_dec = N / decimate;
+
+  // Parameter sanity check
+  if((N % decimate) != 0)
+    fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,decimate);
+
+  struct filter * const f = calloc(1,sizeof(*f));
+  f->slave = 1;
+  // Share all but decimation ratio, response and output
+  f->in_type = master->in_type;
+  f->out_type = master->out_type;
+  f->ilen = master->ilen;
+  f->impulse_length = master->impulse_length;
+  f->fdomain = master->fdomain; // Share master's frequency domain
+  f->decimate = decimate;
+  f->olen = f->ilen / decimate;
+  f->input_buffer.c = NULL;
+  f->input.c = NULL;
+  f->response = response;
+  if(response != NULL){
+    // *response is always complex float, but it's shortened when filter input and output are both real
+    if(f->out_type == REAL || f->out_type == CROSS_CONJ){
+      // Originally for complex input; Check these for real input
+      // response[] has length N_dec/2+1 (for real input and output)
+      // and length N_dec (for all others).
+      if(f->in_type == REAL && f->out_type == REAL){
+	assert(malloc_usable_size(response) >= (N_dec/2+1) * sizeof(*response));
+	int n;
+	for(n=0;n<=N_dec/2;n++)
+	  f->response[n] *= M_SQRT1_2;
+      }
+    }
+  }
+  switch(f->out_type){
+  default:
+  case COMPLEX:
+  case CROSS_CONJ:
+    f->f_fdomain = fftwf_alloc_complex(N_dec);
+    f->output_buffer.c = fftwf_alloc_complex(N_dec);  
+    f->output.c = f->output_buffer.c + (f->impulse_length - 1)/decimate;
+    f->rev_plan = fftwf_plan_dft_1d(N_dec,f->f_fdomain,f->output_buffer.c,FFTW_BACKWARD,FFTW_ESTIMATE);
+    break;
+  case REAL:
+    f->f_fdomain = fftwf_alloc_complex(N_dec/2+1);
+    f->output_buffer.r = fftwf_alloc_real(N_dec);
+    f->output.r = f->output_buffer.r + (f->impulse_length - 1)/decimate;
     f->rev_plan = fftwf_plan_dft_c2r_1d(N_dec,f->f_fdomain,f->output_buffer.r,FFTW_ESTIMATE);
     break;
   }
@@ -105,6 +170,9 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
 
 int execute_filter(struct filter * const f){
   execute_filter_nocopy(f);
+  if(f->slave)
+    return 0; // done, no time domain input buffer
+
   // Save for next block - non-destructive copy
   switch(f->in_type){
   default:
@@ -130,7 +198,8 @@ int execute_filter_nocopy(struct filter * const f){
   int const N = f->ilen + f->impulse_length - 1; // points in input buffer
   int const N_dec = N / f->decimate;                     // points in (decimated) output buffer
 
-  fftwf_execute(f->fwd_plan);  // Forward transform
+  if(!f->slave)
+    fftwf_execute(f->fwd_plan);  // Forward transform only in master
 
   // DC and positive frequencies up to nyquist frequency are same for all types
   assert(malloc_usable_size(f->f_fdomain) >= (N_dec/2+1) * sizeof(*f->f_fdomain));
@@ -179,22 +248,24 @@ int execute_filter_nocopy(struct filter * const f){
       f->f_fdomain[dn] = neg - conjf(pos);
     }
   }
-  
   fftwf_execute(f->rev_plan); // Note: c2r version destroys f_fdomain[]
   return 0;
 }
 
 int delete_filter(struct filter * const f){
-  if(f != NULL){
+  if(f == NULL)
+    return 0;
+  
+  fftwf_destroy_plan(f->rev_plan);  
+  fftwf_free(f->output_buffer.c);
+  fftwf_free(f->response);
+  fftwf_free(f->f_fdomain);
+  if(!f->slave){
     fftwf_destroy_plan(f->fwd_plan);
-    fftwf_destroy_plan(f->rev_plan);  
     fftwf_free(f->input_buffer.c);
-    fftwf_free(f->output_buffer.c);
-    fftwf_free(f->response);
     fftwf_free(f->fdomain);
-    fftwf_free(f->f_fdomain);
-    free(f);
   }
+  free(f);
   return 0;
 }
 
