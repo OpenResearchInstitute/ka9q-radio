@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.42 2017/06/28 04:31:14 karn Exp karn $
+// $Id: main.c,v 1.43 2017/07/02 04:29:54 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -56,6 +56,10 @@ int Send_OPUS; // send OPUS audio if 1, PCM if 0
 int Input_fd;
 int Ctl_fd;
 int Demod_sock;
+int Tunestep;
+// We have to hold the requested startup frequency until we know the IP address
+// of the SDR front end to send it to
+double Startup_freq = 0;
 
 
 int setup_input(char *addr){
@@ -133,7 +137,47 @@ int main(int argc,char *argv[]){
   Send_OPUS = 0;
   OPUS_blocktime = 20;
 
-  while((c = getopt(argc,argv,"B:c:i:I:k:l:L:m:M:p:R:qr:t:v")) != EOF){
+  // Load state file, if it exists
+  {
+    char statefile[PATH_MAX];
+    snprintf(statefile,sizeof(statefile),"%s/.radiostate",getenv("HOME"));
+    FILE *fp = fopen(statefile,"r");
+    if(fp != NULL){
+      char line[PATH_MAX];
+      while(fgets(line,sizeof(line),fp) != NULL){
+	double f;
+	int a,b,c,d,e;
+	char str[PATH_MAX];
+	if(sscanf(line,"Frequency %lf",&Startup_freq) > 0){
+	} else if(sscanf(line,"Mode %s",str) > 0){	  
+	  int i;
+	  for(i=0;i<Nmodes;i++){
+	    if(strncasecmp(Modes[i].name,str,strlen(Modes[i].name)) == 0){
+	      mode = Modes[i].mode;
+	    }
+	  }
+	} else if(sscanf(line,"IF %lf",&demod->second_LO) > 0 ){
+	  demod->second_LO = -demod->second_LO; // 2nd LO is negative of IF
+	} else if(sscanf(line,"Dial offset %lf",&demod->dial_offset) > 0){
+	} else if(sscanf(line,"Calibrate %lf",&f) > 0){
+	  set_cal(demod,f*1e-6);
+	} else if(sscanf(line,"Filter low %f",&demod->low) > 0){
+	} else if(sscanf(line,"Filter high %f",&demod->high) > 0){
+	} else if(sscanf(line,"Kaiser Beta %f",&Kaiser_beta) > 0){
+	} else if(sscanf(line,"Blocksize %d",&demod->L) > 0){
+	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
+	} else if(sscanf(line,"Source %d.%d.%d.%d:%d",&a,&b,&c,&d,&e) > 0){
+	  a &= 0xff; b &= 0xff; c &= 0xff; d &= 0xff;
+	  IQ_mcast_address_text = malloc(25); // Longer than any possible IPv4 address?
+	  snprintf(IQ_mcast_address_text,25,"%d.%d.%d.%d",a,b,c,d);
+	  Mcast_dest_port = e;
+	}
+      }
+
+      fclose(fp);
+    }
+  }
+  while((c = getopt(argc,argv,"B:c:f:i:I:k:l:L:m:M:p:R:qr:t:v")) != EOF){
     int i;
 
     switch(c){
@@ -142,6 +186,9 @@ int main(int argc,char *argv[]){
       break;
     case 'c':
       demod->calibrate = 1e-6 * strtod(optarg,NULL);
+      break;
+    case 'f':
+      Startup_freq = parse_frequency(optarg);
       break;
     case 'i':
       second_IF = strtod(optarg,NULL);
@@ -401,6 +448,11 @@ void *input_loop(struct demod *demod){
       if(cnt < sizeof(rtp) + sizeof(status))
 	continue; // Too small, ignore
       
+      if(Startup_freq != 0){
+	set_freq(demod,Startup_freq,1);
+	Startup_freq = 0;
+      }
+
       // Host byte order
       rtp.ssrc = ntohl(rtp.ssrc);
       rtp.seq = ntohs(rtp.seq);
