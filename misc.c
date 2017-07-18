@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.10 2017/07/10 18:34:57 karn Exp karn $
+// $Id: misc.c,v 1.11 2017/07/10 22:10:27 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -8,6 +8,9 @@
 #include <math.h>
 #include <assert.h>
 #include <unistd.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -88,3 +91,53 @@ int fillbuf(const int fd,void *buffer,const int cnt){
 
 }
 
+// Remove return or newline from end of string
+void chomp(char *s){
+  char *cp;
+
+  if(s == NULL)
+    return;
+  if((cp = strchr(s,'\r')) != NULL)
+    *cp = '\0';
+  if((cp = strchr(s,'\n')) != NULL)
+    *cp = '\0';
+}
+
+
+// Parse a frequency entry in the form
+// 12345 (12345 Hz)
+// 12k345 (12.345 kHz)
+// 12m345 (12.345 MHz)
+// 12g345 (12.345 GHz)
+
+
+const double parse_frequency(const char *s){
+  char *ss = alloca(strlen(s));
+
+  int i;
+  for(i=0;i<strlen(s);i++)
+    ss[i] = tolower(s[i]);
+
+  ss[i] = '\0';
+  
+  char *sp;
+  double mult = 1.0;
+  if((sp = strchr(ss,'g')) != NULL){
+    mult = 1e9;
+    *sp = '.';
+  } else if((sp = strchr(ss,'m')) != NULL){
+    mult = 1e6;
+    *sp = '.';
+  } else if((sp = strchr(ss,'k')) != NULL){
+    mult = 1e3;
+    *sp = '.';
+  } else
+    mult = 1;
+
+  char *endptr;
+  double f = strtod(ss,&endptr);
+  if(endptr != ss)
+    return mult * f;
+  else
+    return 0;
+}
