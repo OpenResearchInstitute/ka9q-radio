@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.8 2017/07/08 20:31:23 karn Exp karn $
+// $Id: monitor.c,v 1.9 2017/07/09 03:27:02 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -27,6 +27,10 @@ const int Samprate = 48000;
 char *Audioname = "default";
 
 int Verbose;
+snd_pcm_t *Handle;
+int Underrun;
+int Overrun;
+
 
 
 #define NSESSIONS 20
@@ -40,11 +44,6 @@ struct audio {
   time_t lastused;
   struct sockaddr_in sender;
   OpusDecoder *opus;
-  char *name;
-  snd_pcm_t *handle;
-  unsigned int samprate;
-  int underrun;
-  int overrun;
 };
 
 struct audio *Audio[256]; // Hash chains
@@ -57,15 +56,14 @@ void close_audio(struct audio *ap){
     opus_decoder_destroy(ap->opus);
     ap->opus = NULL;
   }
-  if(ap->handle){
-    snd_pcm_drop(ap->handle);
-    snd_pcm_close(ap->handle);
-    ap->handle = NULL;
-  }
   free(ap);
 }
 
 void closedown(){
+  if(Handle){
+    snd_pcm_drop(Handle);
+    snd_pcm_close(Handle);
+  }
 
   if(Input_fd != -1)
     close(Input_fd);
@@ -75,54 +73,53 @@ void closedown(){
 
 
 // Set up or change ALSA for demodulated sound output
-int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
+int audio_init(unsigned samprate,int channels,int L){
   snd_pcm_uframes_t buffer_size;
   snd_pcm_hw_params_t *hw_params;
   snd_pcm_sw_params_t *sw_params;
 
   if(Verbose)
-    fprintf(stderr,"audio_init(%s,rate=%u,blksize=%d,chans=%d)\n",ap->name,samprate,L,channels);
+    fprintf(stderr,"audio_init(rate=%u,blksize=%d,chans=%d)\n",samprate,L,channels);
 
-  if(ap->handle != NULL){
-    snd_pcm_drop(ap->handle);
-    snd_pcm_close(ap->handle);
-    ap->handle = NULL;
+  if(Handle){
+    snd_pcm_drop(Handle);
+    snd_pcm_close(Handle);
+    Handle = NULL;
   }
-
-  if(snd_pcm_open(&ap->handle,ap->name,SND_PCM_STREAM_PLAYBACK,0) < 0){
-    fprintf(stderr,"Error opening D/A %s\n",ap->name);
+  if(snd_pcm_open(&Handle,Audioname,SND_PCM_STREAM_PLAYBACK,0) < 0){
+    fprintf(stderr,"Error opening D/A %s\n",Audioname);
     return -1;
   }
 
   snd_pcm_hw_params_alloca(&hw_params);
-  if(snd_pcm_hw_params_any(ap->handle,hw_params) < 0){
-    fprintf(stderr,"Can not configure D/A %s\n",ap->name);
+  if(snd_pcm_hw_params_any(Handle,hw_params) < 0){
+    fprintf(stderr,"Can not configure D/A %s\n",Audioname);
     return -1;
   }
-  if(snd_pcm_hw_params_set_access(ap->handle,hw_params,SND_PCM_ACCESS_RW_INTERLEAVED) < 0){
-    fprintf(stderr,"Error setting D/A access on %s\n",ap->name);
+  if(snd_pcm_hw_params_set_access(Handle,hw_params,SND_PCM_ACCESS_RW_INTERLEAVED) < 0){
+    fprintf(stderr,"Error setting D/A access on %s\n",Audioname);
     return -1;
   }
-  if(snd_pcm_hw_params_set_format(ap->handle,hw_params,SND_PCM_FORMAT_S16_LE)<0){
-    fprintf(stderr,"Error setting D/A format on %s\n",ap->name);
+  if(snd_pcm_hw_params_set_format(Handle,hw_params,SND_PCM_FORMAT_S16_LE)<0){
+    fprintf(stderr,"Error setting D/A format on %s\n",Audioname);
     return -1;
   }
-  ap->samprate = samprate;
-  if(snd_pcm_hw_params_set_rate_near(ap->handle,hw_params,&ap->samprate,0)<0){
-    fprintf(stderr,"Error setting D/A sample rate on %s\n",ap->name);
+  unsigned int stmp = samprate;
+  if(snd_pcm_hw_params_set_rate_near(Handle,hw_params,&stmp,0)<0){
+    fprintf(stderr,"Error setting D/A sample rate on %s\n",Audioname);
     return -1;
   }
-  if(ap->samprate != samprate)
-    fprintf(stderr,"Warning: actual D/A sample rate is %u\n",ap->samprate);
+  if(stmp != samprate)
+    fprintf(stderr,"Warning: actual D/A sample rate is %u\n",stmp);
 
-  if(snd_pcm_hw_params_set_channels(ap->handle,hw_params,channels)<0){ // stereo
-    fprintf(stderr,"Error setting D/A channels on %s\n",ap->name);
+  if(snd_pcm_hw_params_set_channels(Handle,hw_params,channels)<0){ // stereo
+    fprintf(stderr,"Error setting D/A channels on %s\n",Audioname);
     return -1;
   }
   // We will generally write L-sample blocks at a time
   snd_pcm_uframes_t period_length = L;
-  if(snd_pcm_hw_params_set_period_size_near(ap->handle,hw_params,&period_length,0)<0){
-    fprintf(stderr,"Error setting D/A periods on %s\n",ap->name);
+  if(snd_pcm_hw_params_set_period_size_near(Handle,hw_params,&period_length,0)<0){
+    fprintf(stderr,"Error setting D/A periods on %s\n",Audioname);
     return -1;
   }
   if(period_length != L)
@@ -130,61 +127,61 @@ int audio_init(struct audio *ap,unsigned samprate,int channels,int L){
 
   snd_pcm_uframes_t requested_buffer_size = 65536;
   buffer_size = requested_buffer_size;
-  if(snd_pcm_hw_params_set_buffer_size_near(ap->handle,hw_params,&buffer_size)<0){
-    fprintf(stderr,"Error setting D/A buffersize on %s\n",ap->name);
+  if(snd_pcm_hw_params_set_buffer_size_near(Handle,hw_params,&buffer_size)<0){
+    fprintf(stderr,"Error setting D/A buffersize on %s\n",Audioname);
     return -1;
   }
   if(buffer_size != requested_buffer_size)
     fprintf(stderr,"D/A buffer: requested %d, got %d\n",(int)requested_buffer_size,(int)buffer_size);
 
-  if(snd_pcm_hw_params(ap->handle,hw_params)<0){
-    fprintf(stderr,"Error setting D/A HW params on %s\n",ap->name);
+  if(snd_pcm_hw_params(Handle,hw_params)<0){
+    fprintf(stderr,"Error setting D/A HW params on %s\n",Audioname);
     return -1;
   }
   snd_pcm_sw_params_alloca(&sw_params);
-  if(snd_pcm_sw_params_current(ap->handle,sw_params) < 0){
-    fprintf(stderr,"Can not configure driver for %s\n",ap->name);
+  if(snd_pcm_sw_params_current(Handle,sw_params) < 0){
+    fprintf(stderr,"Can not configure driver for %s\n",Audioname);
     return -1;
   }
   // !!!
-  if(snd_pcm_sw_params_set_start_threshold(ap->handle,sw_params,period_length) < 0){ // One PCM packet
-    fprintf(stderr,"Can not configure start threshold for %s\n",ap->name);
+  if(snd_pcm_sw_params_set_start_threshold(Handle,sw_params,period_length) < 0){ // One PCM packet
+    fprintf(stderr,"Can not configure start threshold for %s\n",Audioname);
     return -1;
   }
 #if 0
   // Does this only apply to capture?
-  if(snd_pcm_sw_params_set_stop_threshold(ap->handle,sw_params,8*period_length) < 0){
-    fprintf(stderr,"Can not configure stop threshold for %s\n",ap->name);
+  if(snd_pcm_sw_params_set_stop_threshold(Handle,sw_params,8*period_length) < 0){
+    fprintf(stderr,"Can not configure stop threshold for %s\n",Audioname);
     return -1;
   }
 #endif
-  if(snd_pcm_sw_params(ap->handle,sw_params) < 0)
-    fprintf(stderr,"Can not set sw params %s\n",ap->name);
+  if(snd_pcm_sw_params(Handle,sw_params) < 0)
+    fprintf(stderr,"Can not set sw params %s\n",Audioname);
 
-  ap->underrun = 0;
-  ap->overrun = 0;
+  Underrun = 0;
+  Overrun = 0;
   return 0;
 }
 
 // play buffer of 'size' samples, each 16 bit stereo (4*size bytes)
-int play_stereo_pcm(struct audio * const sp,const int16_t *outsamps,const int size){
+int play_stereo_pcm(const int16_t *outsamps,const int size){
   if(size <= 0)
     return 0;
 
   int r;
-  if((r = snd_pcm_writei(sp->handle,outsamps,size)) != size){
+  if((r = snd_pcm_writei(Handle,outsamps,size)) != size){
     // Seems like mostly underrun errors happen here
     if(Verbose){
       struct timeval tv;
       gettimeofday(&tv,NULL);
       
-      fprintf(stderr,"%ld.%06ld ssrc %lx snd_pcm_writei fail: %s %d\n",(long)tv.tv_sec,(long)tv.tv_usec,
-	      (long unsigned int)sp->ssrc,snd_strerror(r),r);
+      fprintf(stderr,"%ld.%06ld snd_pcm_writei fail: %s %d\n",(long)tv.tv_sec,(long)tv.tv_usec,
+	      snd_strerror(r),r);
     }
-    snd_pcm_prepare(sp->handle);
+    snd_pcm_prepare(Handle);
     int16_t silence[2*size][2];
     memset(silence,0,sizeof(silence));
-    snd_pcm_writei(sp->handle,silence,2*size);
+    snd_pcm_writei(Handle,silence,2*size);
   }
   return 0;
 }
@@ -295,6 +292,8 @@ int main(int argc,char *argv[]){
   }
   fprintf(stderr,"Listening on %s:%d\n",mcast_address_string,dport);
 
+  audio_init(Samprate,2,L); // sets up audio device, opus encoder
+
   struct iovec iovec[2];
   struct rtp_header rtp;
   int16_t data[Bufsize];
@@ -366,8 +365,6 @@ int main(int argc,char *argv[]){
 	continue;
       }
       // Initialize entry
-      sp->name = Audioname;
-      audio_init(sp,Samprate,2,L); // sets up audio device, opus encoder
       memcpy(&sp->sender,&sender,sizeof(struct sockaddr_in));
       sp->eseq = rtp.seq;
       sp->etime = rtp.timestamp;
@@ -400,7 +397,7 @@ int main(int argc,char *argv[]){
       break;
     case 20: // Opus codec decode - arbitrary choice
       if(sp->opus == NULL){ // Create if it doesn't already exist
-	sp->opus = opus_decoder_create(sp->samprate,2,&error);
+	sp->opus = opus_decoder_create(Samprate,2,&error);
 	if(sp->opus == NULL)
 	  fprintf(stderr,"Opus decoder error %d\n",error);
 	break;
@@ -409,7 +406,7 @@ int main(int argc,char *argv[]){
 	// packet dropped; conceal
 	samples = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
 	if(samples > 0)
-	  play_stereo_pcm(sp,outsamps,samples);
+	  play_stereo_pcm(outsamps,samples);
       }
       samples = opus_decode(sp->opus,(unsigned char *)data,size,(opus_int16 *)outsamps,sizeof(outsamps),0);
       break;
@@ -430,7 +427,7 @@ int main(int argc,char *argv[]){
 	      interval,(unsigned long)sp->ssrc,(int)size,bitrate,(int)samples);
     }
     if(samples > 0)
-      play_stereo_pcm(sp,outsamps,samples);
+      play_stereo_pcm(outsamps,samples);
   }
   exit(0);
 }
