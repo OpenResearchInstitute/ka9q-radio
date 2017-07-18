@@ -1,10 +1,11 @@
-// $Id: fm.c,v 1.24 2017/07/09 03:27:55 karn Exp karn $
+// $Id: fm.c,v 1.25 2017/07/11 11:58:22 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <malloc.h>
 #include <math.h>
 #include <complex.h>
 #include <fftw3.h>
@@ -14,43 +15,6 @@
 #include "filter.h"
 #include "radio.h"
 #include "audio.h"
-
-// Estimate FM SNR
-float fm_snr(struct demod *demod,complex float *buffer,int L){
-  // Find average magnitude and magnitude^2
-  // Approximate because magnitude has a chi-squared distribution with 2 degrees of freedom
-  float avg_squares = 0;
-  float avg = 0;
-  int n;
-  for(n=0;n<L;n++){
-    float const magsq = cnrmf(buffer[n]); // I^2 + Q^2
-    avg_squares += magsq;
-    avg += sqrtf(magsq);            // magnitude
-  }
-  avg_squares /= L; // Average square magnitude
-  avg /= L;         // Average magnitude
-  demod->amplitude = avg;
-  float const fm_variance = avg_squares - avg*avg;
-  demod->noise = sqrtf(fm_variance);
-  
-  // Find SNR
-  return avg*avg/(2*fm_variance) - 1;
-}
-
-
-// in-place FM demodulator
-// Note: output can range from -PI to +PI; do gain scaling appropriately
-int do_fm(float *output,complex float const *buffer,int L,float *state){
-  int n;
-
-  output[0] = cargf(buffer[0] * conjf(*state));
-  for(n=1; n<L; n++)
-    output[n] = cargf(buffer[n] * conj(buffer[n-1]));
-
-  *state = buffer[L-1];
-  return 0;
-}
-
 
 
 void *demod_fm(void *arg){
@@ -92,27 +56,31 @@ void *demod_fm(void *arg){
 
   struct filter * const afilter = create_filter(AL,AM,aresponse,1,REAL,REAL); // Real input, real output, same sample rate
 
-  // PL decoder
+  // Low pass filter to isolate PL tone at low sample rate
   const int PL_decimate = 32; // 48 kHz in, 1500 Hz out
   const int PL_samprate = dsamprate / PL_decimate;
   const int PL_L = AL / PL_decimate;
   const int PL_M = (AM - 1) / PL_decimate + 1;
   const int PL_N = PL_L + PL_M - 1;
-
-  complex float * const plresponse = fftwf_alloc_complex(PL_N);
-  memset(plresponse,0,PL_N*sizeof(*plresponse));
-  // Positive frequencies only, so we generate the analytic signal between 0 and 300 Hz
+  complex float * const plresponse = fftwf_alloc_complex(PL_N/2+1);
+  memset(plresponse,0,(PL_N/2+1)*sizeof(*plresponse));
+  // Positive frequencies only
   // Gain is still 1./AN
   for(j=0;j<=PL_N/2;j++){
-    float const f = (float)j * dsamprate / AN; // frequencies relative to INPUT sampling rate
+    float const f = (float)j * dsamprate / AN; // frequencies are relative to INPUT sampling rate
     if(f > 0 && f < 300)
       plresponse[j] = gain;
   }
-  window_filter(PL_L,PL_M,plresponse,1.0);
-  // Create analytic signal of PL tone range in baseband
-  struct filter * const plfilter = create_filter(AL,AM,plresponse,PL_decimate,REAL,COMPLEX);
+  window_rfilter(PL_L,PL_M,plresponse,2.0); // What's the optimum Kaiser window beta here?
+  struct filter * const plfilter = create_filter_slave(afilter,plresponse,PL_decimate);
 
-  float lastaudio = 0;
+  // Set up long FFT to which we feed the PL tone for frequency analysis
+  int const pl_fft_size = 524288 / PL_decimate;
+  float * const pl_input = fftwf_alloc_real(pl_fft_size);
+  complex float * const pl_spectrum = fftwf_alloc_complex(pl_fft_size/2+1);
+  fftwf_plan pl_plan = fftwf_plan_dft_r2c_1d(pl_fft_size,pl_input,pl_spectrum,FFTW_ESTIMATE);
+
+  float lastaudio = 0; // state for impulse noise removal
 
   while(!demod->terminate){
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
@@ -123,56 +91,96 @@ void *demod_fm(void *arg){
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
-    demod->snr = fm_snr(demod,filter->output.c,filter->olen);
+    // Find average magnitude and magnitude^2
+    // Approximate for SNR because magnitude has a chi-squared distribution with 2 degrees of freedom
+    float avg_squares = 0;
+    float avg = 0;
+    int n;
+    for(n=0;n<filter->olen;n++){
+      float const magsq = cnrmf(filter->output.c[n]); // I^2 + Q^2
+      avg_squares += magsq;
+      avg += sqrtf(magsq);            // magnitude
+    }
+    avg_squares /= filter->olen; // Average square magnitude
+    avg /= filter->olen;         // Average magnitude
+    demod->amplitude = avg;
+    float const fm_variance = avg_squares - avg*avg;
+    demod->noise = sqrtf(fm_variance);
+    demod->snr = avg*avg/(2*fm_variance) - 1;
     if(demod->snr > 2){
-      int n;
       float avg = 0;
 #if 0
       extern float Misc;
       float const ampl = Misc * demod->amplitude;
 #else
-      float const ampl = 0;
+      float const ampl = 0.55 * demod->amplitude; // Empirical constant, 0.5 to 0.6 seems to sound good
 #endif
-      
       assert(filter->olen == afilter->ilen);
+      // Actual FM demodulation, with optional impulse noise blanking
+      float pdev_pos = 0;
+      float pdev_neg = 0;
+      int n;      
       for(n=0; n<filter->olen; n++){
 	complex float samp = filter->output.c[n];
 	if(cabsf(samp) > ampl){
-	  avg += lastaudio = plfilter->input.r[n] = afilter->input.r[n] = carg(samp * state);
+	  lastaudio = afilter->input.r[n] = carg(samp * state);
 	  state = conjf(samp);
+	  // Keep track of peak deviation
+	  if(n == 0)
+	    pdev_pos = pdev_neg = lastaudio;
+	  else if(lastaudio > pdev_pos)
+	    pdev_pos = lastaudio;
+	  else if(lastaudio < pdev_neg)
+	    pdev_neg = lastaudio;
 	} else {
-	  plfilter->input.r[n] = afilter->input.r[n] = lastaudio;
+	  afilter->input.r[n] = lastaudio;
 	}
+	avg += lastaudio;
       }
-      avg /= filter->olen;
+      avg /= filter->olen;  // freq offset
       demod->foffset = dsamprate  * avg * M_1_2PI;
 
-      // Find peak deviation, scale for output
-      float pdev = 0;
-      for(n=0; n < afilter->ilen; n++){
-	if(fabsf(afilter->input.r[n] - avg) > pdev)
-	  pdev = fabsf(afilter->input.r[n] - avg);
-      }
-      demod->pdeviation = dsamprate * pdev * M_1_2PI;
+      // Find peak deviation allowing for frequency offset, scale for output
+      pdev_pos -= avg;
+      pdev_neg -= avg;
+      demod->pdeviation = dsamprate * max(pdev_pos,-pdev_neg) * M_1_2PI;
     } else {
       // Squelch is closed
       memset(afilter->input.r,0,afilter->ilen*sizeof(*afilter->input.r));
-      memset(plfilter->input.r,0,plfilter->ilen*sizeof(*plfilter->input.r));
     }
     execute_filter(afilter);
-    send_mono_audio(afilter->output.r,afilter->olen);
+    execute_filter(plfilter); // Now slave to afilter
+    // Determine PL tone frequency with a long FFT operating at the low PL filter sample rate
+    assert(malloc_usable_size(pl_input) >= pl_fft_size * sizeof(float));
+    memmove(pl_input,pl_input+plfilter->olen,(pl_fft_size-plfilter->olen)*sizeof(float));
+    memcpy(pl_input+pl_fft_size-plfilter->olen,plfilter->output.r,plfilter->olen*sizeof(*pl_input));
 
-    // Determine PL tone frequency
-    execute_filter(plfilter);
-    double avgpl = 0;
-    int n;
-    for(n = 1;n < plfilter->olen;n++)
-      avgpl += cargf(conjf(plfilter->output.c[n-1]) * plfilter->output.c[n]);
-    avgpl /= (plfilter->olen-1);
-    if(avgpl != 0)
-      demod->plfreq = PL_samprate * avgpl * M_1_2PI;
+    // Let the filter tail leave after the squelch is closed, but don't send pure silence
+    for(n=0; n<afilter->olen; n++)
+      if(afilter->output.r[n] != 0)
+	break;
+
+    if(n < afilter->olen){
+      send_mono_audio(afilter->output.r,afilter->olen);
+      fftwf_execute(pl_plan);
+      int peakbin = -1;
+      float peakenergy = 0;
+      assert(malloc_usable_size(pl_spectrum) >= pl_fft_size/2 * sizeof(complex float));
+      for(n=1;n<pl_fft_size/2;n++){
+	if(cnrmf(pl_spectrum[n]) > peakenergy){
+	  peakenergy = cnrmf(pl_spectrum[n]);
+	  peakbin = n;
+	}
+      }
+      if(peakbin >= 0)
+	demod->plfreq = (float)peakbin * PL_samprate / pl_fft_size;
+    }
   }
-  delete_filter(plfilter);
+  fftwf_destroy_plan(pl_plan);
+  fftwf_free(pl_input);
+  fftwf_free(pl_spectrum);
+
+  delete_filter(plfilter); // Must delete first
   delete_filter(afilter);
   delete_filter(filter);
   demod->filter = NULL;
