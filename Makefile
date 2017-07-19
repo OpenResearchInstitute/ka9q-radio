@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.39 2017/07/16 16:08:47 karn Exp karn $
+# $Id: Makefile,v 1.40 2017/07/19 09:46:53 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -29,7 +29,7 @@ iqplay: iqplay.o misc.o
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
 
-radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o notch.o bandplan.o misc.o
+radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
 monitor: monitor.o
@@ -64,7 +64,6 @@ main.o: main.c radio.h filter.h dsp.h audio.h command.h rtp.h
 misc.o: misc.c
 modes.o: modes.c command.h
 monitor.o: monitor.c rtp.h dsp.h
-notch.o: notch.c dsp.h
 radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
 ssb.o: ssb.c dsp.h filter.h radio.h audio.h command.h
 wwvsim.o: wwvsim.c
