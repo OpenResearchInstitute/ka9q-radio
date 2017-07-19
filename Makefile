@@ -1,23 +1,23 @@
-# $Id: Makefile,v 1.38 2017/07/15 18:11:19 karn Exp karn $
+# $Id: Makefile,v 1.39 2017/07/16 16:08:47 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
 
-all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay gentone wwvsim wwv.txt wwvh.txt
+all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay modulate wwvsim wwv.txt wwvh.txt
 
 
 install: all
-	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay gentone wwvsim
+	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay modulate wwvsim
 
 clean:
-	rm -f *.o radio control funcube monitor iqrecord iqplay gentone wwvsim bandplan.txt help.txt wwv.txt wwvh.txt libfcd.a
+	rm -f *.o radio control funcube monitor iqrecord iqplay modulate wwvsim bandplan.txt help.txt wwv.txt wwvh.txt libfcd.a
 	rcsclean
 
 wwvsim: wwvsim.o
 	$(CC) -g -o $@ $^ -lm
 
-gentone: gentone.o misc.o filter.o modes.o
+modulate: modulate.o misc.o filter.o modes.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lm
 
 funcube: funcube.o gr.o libfcd.a
@@ -29,7 +29,7 @@ iqplay: iqplay.o misc.o
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
 
-radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o bandplan.o misc.o
+radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o notch.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
 monitor: monitor.o
@@ -54,7 +54,7 @@ fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c dsp.h filter.h
 fm.o: fm.c dsp.h filter.h radio.h audio.h command.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h command.h dsp.h rtp.h
-gentone.o: gentone.c dsp.h filter.h command.h
+modulate.o: modulate.c dsp.h filter.h command.h
 gr.o: gr.c sdr.h
 hid-libusb.o: hid-libusb.c hidapi.h
 iq.o: iq.c dsp.h filter.h radio.h audio.h command.h
@@ -64,6 +64,7 @@ main.o: main.c radio.h filter.h dsp.h audio.h command.h rtp.h
 misc.o: misc.c
 modes.o: modes.c command.h
 monitor.o: monitor.c rtp.h dsp.h
+notch.o: notch.c dsp.h
 radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
 ssb.o: ssb.c dsp.h filter.h radio.h audio.h command.h
 wwvsim.o: wwvsim.c
