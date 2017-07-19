@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.9 2017/07/18 00:40:39 karn Exp karn $
+// $Id: dsp.h,v 1.10 2017/07/19 09:45:09 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -8,18 +8,6 @@
 #include <math.h> // Get M_PI
 
 #define M_1_2PI (0.5 * M_1_PI) // fraction of a rotation in one radian
-
-// Experimental complex notch filter
-struct notchfilter {
-  complex double osc_phase;
-  complex double osc_step;
-  complex float dcstate;
-  float tc;
-};
-
-struct notchfilter *notch_create(double,float);
-void notch_delete(struct notchfilter *);
-complex float notch(struct notchfilter *,complex float);
 
 const complex float csincosf(const float x);
 const complex double csincos(const double x);
