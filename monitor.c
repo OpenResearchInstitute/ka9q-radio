@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.9 2017/07/09 03:27:02 karn Exp karn $
+// $Id: monitor.c,v 1.10 2017/07/18 00:42:16 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -169,7 +169,7 @@ int play_stereo_pcm(const int16_t *outsamps,const int size){
     return 0;
 
   int r;
-  if((r = snd_pcm_writei(Handle,outsamps,size)) != size){
+  while((r = snd_pcm_writei(Handle,outsamps,size)) != size){
     // Seems like mostly underrun errors happen here
     if(Verbose){
       struct timeval tv;
@@ -179,9 +179,9 @@ int play_stereo_pcm(const int16_t *outsamps,const int size){
 	      snd_strerror(r),r);
     }
     snd_pcm_prepare(Handle);
-    int16_t silence[2*size][2];
+    int16_t silence[size][2];
     memset(silence,0,sizeof(silence));
-    snd_pcm_writei(Handle,silence,2*size);
+    snd_pcm_writei(Handle,silence,size);
   }
   return 0;
 }
