@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.45 2017/07/18 04:00:26 karn Exp karn $
+// $Id: main.c,v 1.46 2017/07/19 00:06:37 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -268,7 +268,7 @@ int main(int argc,char *argv[]){
     if((Ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
       perror("can't open control socket");
 
-    if(bind(Ctl_fd,&sock,sizeof(struct sockaddr_in)) != 0)
+    if(bind(Ctl_fd,(struct sockaddr *)&sock,sizeof(struct sockaddr_in)) != 0)
       perror("control bind failed");
   }
   // Set up audio output stream(s)
@@ -458,7 +458,7 @@ int process_command(struct demod *demod,char *cmdbuf,int len){
 	set_second_LO(demod,command.second_LO);
       if(fabs(command.second_LO_rate) < 1e9)
 	set_second_LO_rate(demod,command.second_LO_rate,0);
-      if(command.mode >= 0 && command.mode < Nmodes)
+      if(command.mode < Nmodes)
 	set_mode(demod,command.mode);
       if(fabs(command.calibrate) < 1)
 	set_cal(demod,command.calibrate);
