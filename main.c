@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.44 2017/07/18 00:41:41 karn Exp karn $
+// $Id: main.c,v 1.45 2017/07/18 04:00:26 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -56,11 +56,10 @@ int Send_OPUS; // send OPUS audio if 1, PCM if 0
 int Input_fd;
 int Ctl_fd;
 int Demod_sock;
-int Tunestep;
+
 // We have to hold the requested startup frequency until we know the IP address
 // of the SDR front end to send it to
 double Startup_freq = 0;
-
 
 int setup_input(char *addr){
   int fd = -1;
@@ -112,23 +111,36 @@ int Delayed;
 
 int main(int argc,char *argv[]){
   int c,N;
-  char *locale;
+  struct demod * const demod = &Demod;
 
-  enum mode mode;
-  double second_IF;
-  struct demod *demod = &Demod;
-
-  locale = getenv("LANG");
+  char *locale = getenv("LANG");
   setlocale(LC_ALL,locale);
 
-
   // Defaults
-  Quiet = 0;
   // The FFT length will be L + M - 1 because of window overlapping
   demod->L = 4096;      // Number of samples in buffer
   demod->M = 4096+1;    // Length of filter impulse response
-  mode = FM;
-  second_IF = ADC_samprate/4;
+  demod->samprate = ADC_samprate;
+  demod->min_IF = -80000; // Hardwired for Funcube
+  demod->max_IF = +80000;
+  demod->decimate = ADC_samprate / DAC_samprate;
+  // Verify decimation ratio
+  if((ADC_samprate % DAC_samprate) != 0)
+    fprintf(stderr,"Warning: A/D rate %'u is not integer multiple of D/A rate %'u; decimation will probably fail\n",
+	    ADC_samprate,DAC_samprate);
+  
+  N = demod->L + demod->M - 1;
+  if((N % demod->decimate) != 0)
+    fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,demod->decimate);
+
+  if((demod->M - 1) % demod->decimate != 0)
+    fprintf(stderr,"Warning: Filter length %'u - 1 is not divisible by decimation ratio %d\n",demod->M,demod->decimate);
+
+  // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
+  fftwf_import_system_wisdom();
+
+  set_second_LO(demod,-ADC_samprate/4);
+  set_mode(demod,FM);
 
   IQ_mcast_address_text = strdup("239.1.2.1");
   BB_mcast_address_text = strdup("239.2.1.1");
@@ -138,46 +150,14 @@ int main(int argc,char *argv[]){
   OPUS_blocktime = 20;
 
   // Load state file, if it exists
+  // This overwrites hardwired defaults, but can be overridden with command line args
   {
     char statefile[PATH_MAX];
     snprintf(statefile,sizeof(statefile),"%s/.radiostate",getenv("HOME"));
-    FILE *fp = fopen(statefile,"r");
-    if(fp != NULL){
-      char line[PATH_MAX];
-      while(fgets(line,sizeof(line),fp) != NULL){
-	double f;
-	int a,b,c,d,e;
-	char str[PATH_MAX];
-	if(sscanf(line,"Frequency %lf",&Startup_freq) > 0){
-	} else if(sscanf(line,"Mode %s",str) > 0){	  
-	  int i;
-	  for(i=0;i<Nmodes;i++){
-	    if(strncasecmp(Modes[i].name,str,strlen(Modes[i].name)) == 0){
-	      mode = Modes[i].mode;
-	      break;
-	    }
-	  }
-	} else if(sscanf(line,"IF %lf",&demod->second_LO) > 0 ){
-	  demod->second_LO = -demod->second_LO; // 2nd LO is negative of IF
-	} else if(sscanf(line,"Dial offset %lf",&demod->dial_offset) > 0){
-	} else if(sscanf(line,"Calibrate %lf",&f) > 0){
-	  set_cal(demod,f*1e-6);
-	} else if(sscanf(line,"Filter low %f",&demod->low) > 0){
-	} else if(sscanf(line,"Filter high %f",&demod->high) > 0){
-	} else if(sscanf(line,"Kaiser Beta %f",&Kaiser_beta) > 0){
-	} else if(sscanf(line,"Blocksize %d",&demod->L) > 0){
-	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
-	} else if(sscanf(line,"Source %d.%d.%d.%d:%d",&a,&b,&c,&d,&e) > 0){
-	  a &= 0xff; b &= 0xff; c &= 0xff; d &= 0xff;
-	  IQ_mcast_address_text = malloc(25); // Longer than any possible IPv4 address?
-	  snprintf(IQ_mcast_address_text,25,"%d.%d.%d.%d",a,b,c,d);
-	  Mcast_dest_port = e;
-	}
-      }
-
-      fclose(fp);
-    }
+    loadstate(demod,statefile);
   }
+
+  Quiet = 0;
   while((c = getopt(argc,argv,"B:c:f:i:I:k:l:L:m:M:p:R:qr:t:v")) != EOF){
     int i;
 
@@ -186,13 +166,13 @@ int main(int argc,char *argv[]){
       OPUS_blocktime = strtod(optarg,NULL);
       break;
     case 'c':
-      demod->calibrate = 1e-6 * strtod(optarg,NULL);
+      set_cal(demod,1e-6*strtod(optarg,NULL));
       break;
     case 'f':
       Startup_freq = parse_frequency(optarg);
       break;
     case 'i':
-      second_IF = strtod(optarg,NULL);
+      set_second_LO(demod,-strtod(optarg,NULL));
       break;
     case 'I':
       if(IQ_mcast_address_text)
@@ -211,7 +191,7 @@ int main(int argc,char *argv[]){
     case 'm':
       for(i = 0; i < Nmodes;i++){
 	if(strcasecmp(optarg,Modes[i].name) == 0){
-	  mode = Modes[i].mode;
+	  set_mode(demod,Modes[i].mode);
 	  break;
 	}
       }
@@ -246,7 +226,7 @@ int main(int argc,char *argv[]){
     default:
       fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
       fprintf(stderr,"Default: %s -B %.1f -c %.2lf -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d\n",
-	      argv[0],OPUS_blocktime,demod->calibrate*1e6,IQ_mcast_address_text,locale,demod->L,Modes[mode].name,demod->M,
+	      argv[0],OPUS_blocktime,demod->calibrate*1e6,IQ_mcast_address_text,locale,demod->L,"FM",demod->M,
 	      BB_mcast_address_text,OPUS_bitrate,Nthreads);
       exit(1);
       break;
@@ -260,26 +240,6 @@ int main(int argc,char *argv[]){
     Send_OPUS = 0; // Force PCM
 
   setlocale(LC_ALL,locale);
-
-  demod->samprate = ADC_samprate * (1 + demod->calibrate);
-  demod->min_IF = -80000; // Hardwired for Funcube
-  demod->max_IF = +80000;
-  demod->decimate = ADC_samprate / DAC_samprate;
-  // Verify decimation ratio
-  if((ADC_samprate % DAC_samprate) != 0)
-    fprintf(stderr,"Warning: A/D rate %'u is not integer multiple of D/A rate %'u; decimation will probably fail\n",
-	    ADC_samprate,DAC_samprate);
-  
-  N = demod->L + demod->M - 1;
-  if((N % demod->decimate) != 0)
-    fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,demod->decimate);
-
-  if((demod->M - 1) % demod->decimate != 0)
-    fprintf(stderr,"Warning: Filter length %'u - 1 is not divisible by decimation ratio %d\n",demod->M,demod->decimate);
-
-  // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
-  fftwf_import_system_wisdom();
-
   if(Verbose){
     fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
     fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
@@ -293,21 +253,13 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
 	    Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
   }
-  if(!Quiet)
-    pthread_create(&Display_thread,NULL,display,NULL);
 
-  // Graceful signal catch
-  signal(SIGPIPE,closedown);
-  signal(SIGINT,closedown);
-  signal(SIGKILL,closedown);
-  signal(SIGQUIT,closedown);
-  signal(SIGTERM,closedown);        
-  signal(SIGPIPE,SIG_IGN);
+
 
   Input_fd = setup_input(IQ_mcast_address_text);
 
   {
-  // Set up control port
+    // Set up control port
     struct sockaddr_in sock;
     sock.sin_family = AF_INET;
     sock.sin_port = htons(Ctl_port);
@@ -362,8 +314,7 @@ int main(int argc,char *argv[]){
   Demod_sock = sv[1]; // write end
   demod->input = sv[0]; // read end
 #ifdef F_SETPIPE_SZ // Linux only
-  int sz;
-  sz = fcntl(Demod_sock,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+  int sz = fcntl(Demod_sock,F_SETPIPE_SZ,demod->L * sizeof(complex float));
 #if 0
   fprintf(stderr,"sock size %d\n",sz);
 #endif
@@ -374,9 +325,18 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
   }
+  if(!Quiet)
+    pthread_create(&Display_thread,NULL,display,demod);
 
-  set_mode(demod,mode);
-  set_second_LO(demod,-second_IF);
+  // Graceful signal catch
+  signal(SIGPIPE,closedown);
+  signal(SIGINT,closedown);
+  signal(SIGKILL,closedown);
+  signal(SIGQUIT,closedown);
+  signal(SIGTERM,closedown);        
+  signal(SIGPIPE,SIG_IGN);
+
+
   input_loop(demod); // Doesn't return
 
   exit(0);
