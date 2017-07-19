@@ -19,7 +19,7 @@ static const float recovery_rate = 10; // Recover gain at this many db/sec after
 
 void *demod_ssb(void *arg){
   assert(arg != NULL);
-  pthread_setname_np(pthread_self(),"ssb");
+  pthread_setname("ssb");
   struct demod * const demod = arg;
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
@@ -33,8 +33,19 @@ void *demod_ssb(void *arg){
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
+  // Experimental notch filter
+  struct notchfilter *nf = notch_create(48000./demod->samprate,0.001);
+
+
   while(!demod->terminate){
     fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
+
+    // experimental notch
+    {
+      int i;
+      for(i=0;i<filter->ilen;i++)
+	filter->input.c[i] = notch(nf,filter->input.c[i]);
+    }
 
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
