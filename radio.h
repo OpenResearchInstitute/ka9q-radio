@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.27 2017/07/02 12:02:20 karn Exp karn $
+// $Id: radio.h,v 1.28 2017/07/08 20:30:18 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -66,6 +66,8 @@ struct demod {
 };
 extern struct demod Demod;
 extern int Demod_sock;
+extern int Tunestep;
+extern double Startup_freq;
 
 extern const float Headroom; // Audio headroom ratio
 
@@ -87,6 +89,10 @@ const double get_cal(const struct demod *);
 int spindown(struct demod *demod,complex float *data,const int len);
 void closedown(const int a);
 void proc_samples(struct demod *,const int16_t *,const int);
+
+// Save and load (most) receiver state
+int savestate(struct demod *,char const *);
+int loadstate(struct demod *,char const *);
 
 // Thread entry points
 void *fcd_command(void *);
