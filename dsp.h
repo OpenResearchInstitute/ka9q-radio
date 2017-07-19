@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.8 2017/06/20 03:01:01 karn Exp karn $
+// $Id: dsp.h,v 1.9 2017/07/18 00:40:39 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -8,6 +8,18 @@
 #include <math.h> // Get M_PI
 
 #define M_1_2PI (0.5 * M_1_PI) // fraction of a rotation in one radian
+
+// Experimental complex notch filter
+struct notchfilter {
+  complex double osc_phase;
+  complex double osc_step;
+  complex float dcstate;
+  float tc;
+};
+
+struct notchfilter *notch_create(double,float);
+void notch_delete(struct notchfilter *);
+complex float notch(struct notchfilter *,complex float);
 
 const complex float csincosf(const float x);
 const complex double csincos(const double x);
@@ -34,5 +46,20 @@ void chomp(char *);
 
 #define DEGPRA (180./M_PI)
 #define RAPDEG (M_PI/180.)
+
+// I *hate* this sort of pointless, stupid, gratuitous incompatibility that
+// makes a lot of code impossible to read and debug
+// The Linux version of pthread_setname_np takes two args, the OSx version only one
+// The GNU malloc_usable_size() does exactly the same thing as the BSD/OSX malloc_size()
+// except that the former is defined in <malloc.h>, the latter is in <malloc/malloc.h>
+#ifdef __APPLE__
+#define pthread_setname(x) pthread_setname_np(x)
+#include <malloc/malloc.h>
+#define malloc_usable_size(x) malloc_size(x)
+#else
+#include <malloc.h>
+#define pthread_setname(x) pthread_setname_np(pthread_self(),x)
+#endif
+
 
 #endif
