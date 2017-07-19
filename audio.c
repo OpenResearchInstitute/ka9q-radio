@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.26 2017/07/03 23:24:14 karn Exp karn $
+// $Id: audio.c,v 1.27 2017/07/08 20:34:48 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -76,7 +76,7 @@ void *stereo_opus_audio(void *arg){
   time_t tt = time(NULL);
   uint32_t const ssrc = tt & 0xffffffff;
 
-  pthread_setname_np(pthread_self(),"opus");
+  pthread_setname("opus");
 
   // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
   // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
@@ -161,7 +161,7 @@ void *stereo_pcm_audio(void *arg){
   time_t tt = time(NULL);
   uint32_t const ssrc = tt & 0xffffffff;
 
-  pthread_setname_np(pthread_self(),"stereo-pcm");
+  pthread_setname("stereo-pcm");
   struct rtp_header rtp;
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
   rtp.ssrc = htonl(ssrc);
@@ -212,7 +212,7 @@ void *mono_pcm_audio(void *arg){
   time_t tt = time(NULL);
   uint32_t const ssrc = tt & 0xffffffff;
 
-  pthread_setname_np(pthread_self(),"mono-pcm");
+  pthread_setname("mono-pcm");
   struct rtp_header rtp;
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
   rtp.ssrc = htonl(ssrc);

@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.5 2017/07/03 23:24:17 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.6 2017/07/08 20:29:47 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -22,8 +22,9 @@ static float const recovery_rate = 6; // Recover gain at 6 db/sec after hang fin
 
 
 void *demod_dsb(void *arg){
+  pthread_setname("dsb");
   assert(arg != NULL);
-  pthread_setname_np(pthread_self(),"dsb");
+
   struct demod * const demod = arg;
   int hangcount = 0;
   float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec

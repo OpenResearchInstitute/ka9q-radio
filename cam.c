@@ -14,13 +14,9 @@
 #include "audio.h"
 
 void *demod_cam(void *arg){
+  pthread_setname("cam");
   assert(arg != NULL);
-
   struct demod * const demod = arg;
-
-  pthread_setname_np(pthread_self(),"cam");
-  demod->foffset = NAN; // not used
-  demod->pdeviation = NAN;
 
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;

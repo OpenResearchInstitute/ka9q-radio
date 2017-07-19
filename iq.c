@@ -19,7 +19,7 @@ static const float recovery_rate = 6; // Recover gain at 6 db/sec after hang fin
 
 void *demod_iq(void *arg){
   assert(arg != NULL);
-  pthread_setname_np(pthread_self(),"iq");
+  pthread_setname("iq");
   struct demod * const demod = arg;
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;

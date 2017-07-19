@@ -1,8 +1,9 @@
-// $Id: radio.c,v 1.41 2017/07/18 00:41:06 karn Exp karn $
+// $Id: radio.c,v 1.42 2017/07/19 00:05:42 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>

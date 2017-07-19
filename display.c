@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.48 2017/07/18 00:40:08 karn Exp karn $
+// $Id: display.c,v 1.49 2017/07/19 00:05:01 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -181,12 +181,12 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
 // Uses the ancient ncurses text windowing library
 // Also services keyboard and tuning knob, if present
 void *display(void *arg){
+  pthread_setname("display");
+  assert(arg != NULL);
   struct demod * const demod = arg;
   double tunestep10 = pow(10.,Tunestep);
   int tuneitem = 0;
 
-  assert(demod != NULL);
-  pthread_setname_np(pthread_self(),"display");
   pthread_cleanup_push(display_cleanup,demod);
 
   initscr();
