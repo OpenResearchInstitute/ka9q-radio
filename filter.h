@@ -46,4 +46,17 @@ int execute_filter(struct filter *);
 int execute_filter_nocopy(struct filter *);
 int delete_filter(struct filter *);
 int make_kaiser(float *window,const int M,const float beta);
+
+// Experimental complex notch filter
+struct notchfilter {
+  complex double osc_phase; // Phase of local complex mixer
+  complex double osc_step;  // mixer phase increment (frequency)
+  complex float dcstate;    // Average signal at mixer frequency
+  float bw;                 // Relative bandwidth of notch
+};
+
+struct notchfilter *notch_create(double,float);
+#define notch_delete(x) free(x)
+complex float notch(struct notchfilter *,complex float);
+
 #endif

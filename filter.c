@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.16 2017/07/18 00:45:11 karn Exp karn $
+// $Id: filter.c,v 1.17 2017/07/19 09:44:53 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -450,4 +450,23 @@ int window_rfilter(const int L,const int M,complex float * const response,const 
   memcpy(response,buffer,(N/2+1)*sizeof(*response));
   fftwf_free(buffer);
   return 0;
+}
+
+// Experimental IIR complex notch filter
+
+struct notchfilter *notch_create(double f,float bw){
+  struct notchfilter *nf = calloc(1,sizeof(struct notchfilter));
+  nf->osc_phase = 1;
+  nf->osc_step = csincos(2*M_PI*f);
+  nf->dcstate = 0;
+  nf->bw = bw;
+  return nf;
+}
+
+complex float notch(struct notchfilter *nf,complex float s){
+  s = s * conj(nf->osc_phase) - nf->dcstate; // Spin down and remove DC
+  nf->dcstate += nf->bw * s;   // Update smoothed estimate
+  s *= nf->osc_phase;          // Spin back up
+  nf->osc_phase *= nf->osc_step;
+  return s;
 }
