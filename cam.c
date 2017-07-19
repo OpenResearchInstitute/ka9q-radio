@@ -32,17 +32,13 @@ void *demod_cam(void *arg){
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
-    // Automatic gain control
-    complex float phase = 0;
-    int n;    
-    for(n=0; n < filter->olen; n++)
-      phase += filter->output.c[n];
-
+    // Grab carrier phase from DC bin of frequency domain
+    complex float phase = filter->f_fdomain[0];
     phase = conj(phase) / cabs(phase);
-
     // Rotate signal onto I axis, measure DC (carrier) level
     float amplitude = 0;
     float noise = 0;
+    int n;
     for(n=0; n < filter->olen; n++){
       // Sample with signal rotated onto I axis
       complex float rsamp = filter->output.c[n] *= phase;
