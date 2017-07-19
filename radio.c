@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.40 2017/07/10 18:35:27 karn Exp karn $
+// $Id: radio.c,v 1.41 2017/07/18 00:41:06 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -191,6 +191,7 @@ int set_mode(struct demod *demod,const enum mode mode){
   demod->foffset = NAN;
   demod->pdeviation = NAN;
   demod->cphase = NAN;
+  demod->plfreq = NAN;
 
   double lo2 = get_second_LO(demod,0);
   // Might now be out of range because of change in filter passband
@@ -243,7 +244,7 @@ int set_filter(struct demod *demod,const float low,const float high){
 
   float gain = 1./((float)N);
 #if 0
-  if(demod->filter->out_type == REAL || demod->filter->out_type == CROSS_CONJ)
+  if(filter->out_type == REAL || filter->out_type == CROSS_CONJ)
     gain *= M_SQRT1_2;
 #endif
 
@@ -264,8 +265,8 @@ int set_filter(struct demod *demod,const float low,const float high){
 
   // We hot swap with the response array already in the filter (if any) without mutual exclusion
   // so never let the response pointer in the filter be invalid
-  complex float *tmp = demod->filter->response;
-  demod->filter->response = response;
+  complex float *tmp = filter->response;
+  filter->response = response;
   fftwf_free(tmp);
   demod->low = low;
   demod->high = high;
@@ -328,4 +329,65 @@ int spindown(struct demod *demod,complex float *data,const int len){
     }
   }
   return 0;
+}
+// Save receiver state in file
+int savestate(struct demod *demod,char const * statefile){
+    // Dump receiver state to file
+    FILE * const fp = fopen(statefile,"w");
+    if(fp == NULL){
+      fprintf(stderr,"Can't write state file %s\n",statefile);
+    } else {
+      fprintf(fp,"#KA9Q DSP Receiver State dump\n");
+      fprintf(fp,"Source %s:%d\n",IQ_mcast_address_text,Mcast_dest_port);
+      fprintf(fp,"Frequency %.3f Hz\n",get_freq(demod));
+      fprintf(fp,"Mode %s\n",Modes[demod->mode].name);
+      fprintf(fp,"Dial offset %.3f Hz\n",demod->dial_offset);
+      fprintf(fp,"Calibrate %.3f ppm\n",get_cal(demod)*1e6);
+      fprintf(fp,"Filter low %.3f Hz\n",demod->low);
+      fprintf(fp,"Filter high %.3f Hz\n",demod->high);
+      fprintf(fp,"Kaiser Beta %.3f\n",Kaiser_beta);
+      fprintf(fp,"Blocksize %d\n",demod->L);
+      fprintf(fp,"Impulse len %d\n",demod->M);
+      fprintf(fp,"Tunestep %d\n",Tunestep);
+      fclose(fp);
+    }
+    return 0;
+}
+// Load receiver state from file
+int loadstate(struct demod *demod,char const *statefile){
+    FILE * const fp = fopen(statefile,"r");
+    if(fp != NULL){
+      char line[PATH_MAX];
+      while(fgets(line,sizeof(line),fp) != NULL){
+	double f;
+	int a,b,c,d,e;
+	char str[PATH_MAX];
+	if(sscanf(line,"Frequency %lf",&Startup_freq) > 0){
+	} else if(sscanf(line,"Mode %s",str) > 0){	  
+	  int i;
+	  for(i=0;i<Nmodes;i++){
+	    if(strncasecmp(Modes[i].name,str,strlen(Modes[i].name)) == 0){
+	      set_mode(demod,Modes[i].mode);
+	      break;
+	    }
+	  }
+	} else if(sscanf(line,"Dial offset %lf",&demod->dial_offset) > 0){
+	} else if(sscanf(line,"Calibrate %lf",&f) > 0){
+	  set_cal(demod,f*1e-6);
+	} else if(sscanf(line,"Filter low %f",&demod->low) > 0){
+	} else if(sscanf(line,"Filter high %f",&demod->high) > 0){
+	} else if(sscanf(line,"Kaiser Beta %f",&Kaiser_beta) > 0){
+	} else if(sscanf(line,"Blocksize %d",&demod->L) > 0){
+	} else if(sscanf(line,"Impulse len %d",&demod->M) > 0){
+	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
+	} else if(sscanf(line,"Source %d.%d.%d.%d:%d",&a,&b,&c,&d,&e) > 0){
+	  a &= 0xff; b &= 0xff; c &= 0xff; d &= 0xff;
+	  IQ_mcast_address_text = malloc(25); // Longer than any possible IPv4 address?
+	  snprintf(IQ_mcast_address_text,25,"%d.%d.%d.%d",a,b,c,d);
+	  Mcast_dest_port = e;
+	}
+      }
+      fclose(fp);
+    }
+    return 0;
 }
