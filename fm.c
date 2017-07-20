@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.26 2017/07/18 00:43:25 karn Exp karn $
+// $Id: fm.c,v 1.27 2017/07/19 09:44:36 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -110,12 +110,9 @@ void *demod_fm(void *arg){
     demod->snr = avg*avg/(2*fm_variance) - 1;
     if(demod->snr > 2){
       float avg = 0;
-#if 0
-      extern float Misc;
-      float const ampl = Misc * demod->amplitude;
-#else
-      float const ampl = 0.55 * demod->amplitude; // Empirical constant, 0.5 to 0.6 seems to sound good
-#endif
+      // 0.55 is empirical constant, 0.5 to 0.6 seems to sound good
+      // Square amplitudes are compared to avoid sqrt inside loop
+      float const ampl = (0.55 * demod->amplitude)*(0.55 * demod->amplitude);
       assert(filter->olen == afilter->ilen);
       // Actual FM demodulation, with optional impulse noise blanking
       float pdev_pos = 0;
@@ -123,7 +120,7 @@ void *demod_fm(void *arg){
       int n;      
       for(n=0; n<filter->olen; n++){
 	complex float samp = filter->output.c[n];
-	if(cabsf(samp) > ampl){
+	if(cnrmf(samp) > ampl){
 	  lastaudio = afilter->input.r[n] = carg(samp * state);
 	  state = conjf(samp);
 	  // Keep track of peak deviation
