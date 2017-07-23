@@ -1,5 +1,5 @@
-// $Id: modes.c,v 1.7 2017/06/24 23:51:29 karn Exp karn $
-#include "command.h"
+// $Id: modes.c,v 1.8 2017/07/02 04:29:55 karn Exp karn $
+#include "radio.h"
 
 struct modetab Modes[] = {
   {AM,  "AM",     0,    1000,   -5000, 5000, }, // Envelope detected AM

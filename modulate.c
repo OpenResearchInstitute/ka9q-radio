@@ -8,7 +8,7 @@
 #include <string.h>
 #include "filter.h"
 #include "dsp.h"
-#include "command.h"
+#include "radio.h"
 
 #define BLOCKSIZE 4096
 

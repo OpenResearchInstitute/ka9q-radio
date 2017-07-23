@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.8 2017/06/24 23:52:10 karn Exp karn $
+// $Id: control.c,v 1.9 2017/07/02 04:29:45 karn Exp karn $
 // Send remote commands
 #define _GNU_SOURCE 1 // Get NAN macro
 #include <stdio.h>
@@ -18,7 +18,7 @@
 #include <linux/input.h>
 #endif
 
-#include "command.h"
+#include "radio.h"
 #include "dsp.h"
 
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"

@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.15 2017/06/21 21:55:26 karn Exp karn $
+// $Id: funcube.c,v 1.16 2017/07/02 04:29:52 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -21,7 +21,7 @@
 
 #include "fcd.h"
 #include "sdr.h"
-#include "command.h"
+#include "radio.h"
 #include "dsp.h"
 #include "rtp.h"
 
@@ -50,7 +50,7 @@ struct sdrstate {
 
 struct sdrstate FCD;
 pthread_t FCD_control_thread;
-const int ADC_samprate = 192000;
+int ADC_samprate = 192000;
 int Verbose;
 int No_hold_open; // if set, close control between commands
 int Dongle;       // Which of several funcube dongles to use

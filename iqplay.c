@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.5 2017/07/09 03:27:37 karn Exp karn $
+// $Id: iqplay.c,v 1.7 2017/07/16 16:08:16 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -20,11 +20,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#include "command.h"
+#include "radio.h"
 #include "rtp.h"
 #include "dsp.h"
 
-const int ADC_samprate = 192000;
+int ADC_samprate = 192000;
 int Verbose;
 int Rtp_sock; // Socket handle for sending real time stream
 

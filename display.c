@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.49 2017/07/19 00:05:01 karn Exp karn $
+// $Id: display.c,v 1.50 2017/07/19 09:45:37 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -397,9 +397,8 @@ void *display(void *arg){
 	Input_fd = i;
 	if(j != -1)
 	  close(j);
-	if(IQ_mcast_address_text != NULL)
-	  free(IQ_mcast_address_text);
-	IQ_mcast_address_text = strdup(str);
+	strncpy(IQ_mcast_address_text,str,sizeof(IQ_mcast_address_text));
+	Input_fd = setup_input(IQ_mcast_address_text);
       }
       break;
     case 'l': // Toggle RF tuning lock; affects how adjustments to LO and IF behave

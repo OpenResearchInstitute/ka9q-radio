@@ -1,4 +1,4 @@
-// $Id$
+// $Id: iqrecord.c,v 1.1 2017/06/17 07:22:23 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -22,7 +22,7 @@
 #include <sys/types.h>
 #include <attr/xattr.h>
 
-#include "command.h"
+#include "radio.h"
 #include "rtp.h"
 
 #define NSESSIONS 20
