@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.42 2017/07/19 00:05:42 karn Exp karn $
+// $Id: radio.c,v 1.43 2017/07/19 09:44:36 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -15,7 +15,6 @@
 #include <netinet/in.h>
 
 
-#include "command.h"
 #include "audio.h"
 #include "radio.h"
 #include "filter.h"
@@ -383,8 +382,7 @@ int loadstate(struct demod *demod,char const *statefile){
 	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
 	} else if(sscanf(line,"Source %d.%d.%d.%d:%d",&a,&b,&c,&d,&e) > 0){
 	  a &= 0xff; b &= 0xff; c &= 0xff; d &= 0xff;
-	  IQ_mcast_address_text = malloc(25); // Longer than any possible IPv4 address?
-	  snprintf(IQ_mcast_address_text,25,"%d.%d.%d.%d",a,b,c,d);
+	  snprintf(IQ_mcast_address_text,sizeof(IQ_mcast_address_text),"%d.%d.%d.%d",a,b,c,d);
 	  Mcast_dest_port = e;
 	}
       }
