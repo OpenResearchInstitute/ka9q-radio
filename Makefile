@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.41 2017/07/19 10:07:36 karn Exp karn $
+# $Id: Makefile,v 1.42 2017/07/23 23:32:03 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -56,13 +56,13 @@ dsb.o: dsb.c dsp.h filter.h radio.h audio.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c dsp.h filter.h
 fm.o: fm.c dsp.h filter.h radio.h audio.h
-funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h dsp.h rtp.h
+funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h dsp.h rtp.h radio.h
 modulate.o: modulate.c dsp.h filter.h
 gr.o: gr.c sdr.h
 hid-libusb.o: hid-libusb.c hidapi.h
 iq.o: iq.c dsp.h filter.h radio.h audio.h
-iqplay.o: iqplay.c rtp.h dsp.h
-iqrecord.o: iqrecord.c rtp.h
+iqplay.o: iqplay.c rtp.h dsp.h radio.h
+iqrecord.o: iqrecord.c rtp.h radio.h
 main.o: main.c radio.h filter.h dsp.h audio.h rtp.h
 misc.o: misc.c
 modes.o: modes.c 
