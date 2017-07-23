@@ -1,12 +1,65 @@
-// $Id: radio.h,v 1.28 2017/07/08 20:30:18 karn Exp karn $
+// $Id: radio.h,v 1.29 2017/07/19 00:05:19 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
+#include <stdint.h>
+#include <pthread.h>
+#include <unistd.h>
 #include <complex.h>
 #undef I
-#include "command.h"
 
-extern int ADC_samprate;
+
+
+enum cmd {
+  SENDSTAT=1,
+  SETSTATE,
+};
+
+enum mode {
+  AM = 0,
+  CAM,     // coherent AM
+  IQ,
+  ISB,
+  USB,
+  CWU,
+  LSB,
+  CWL,
+  NFM,
+  FM,
+  DSB,
+  WFM,
+};
+
+struct command {
+  enum cmd cmd;
+  enum mode mode;
+  double first_LO;
+  double second_LO;
+  double second_LO_rate;
+  double calibrate;
+};
+struct modetab {
+  enum mode mode;
+  char name[10];
+  float dial;       // Display frequency offset (mainly for CW/RTTY)
+  float tunestep;   // Default tuning step
+  float low;        // Lower edge of IF passband
+  float high;       // Upper edge of IF passband
+  float gain;       // Gain of filter
+};
+// Sent in each RTP packet right after header
+// NB! because we just copy this into the network stream, it's important that the compiler
+// not add any extra padding. To avoid this, the size must be a multiple of 8, the size of the double
+struct status {
+  double frequency;
+  uint32_t samprate;
+  uint8_t lna_gain;
+  uint8_t mixer_gain;
+  uint8_t if_gain;
+  uint8_t unused; // pad to 16 bytes
+};
+
+
 
 
 // Demodulator state block
@@ -68,27 +121,36 @@ extern struct demod Demod;
 extern int Demod_sock;
 extern int Tunestep;
 extern double Startup_freq;
-
+extern int ADC_samprate;
+extern struct modetab Modes[];
+extern const int Nmodes;
+extern int Rtpsock;
+extern struct sockaddr_in Input_source_address;
+extern socklen_t Rtpaddrlen;
+extern char IQ_mcast_address_text[25];
+extern int Mcast_dest_port;
+extern int Input_fd;
 extern const float Headroom; // Audio headroom ratio
 
-const int LO2_in_range(const struct demod *demod,const double f,int avoid_alias);
-const double get_freq(const struct demod *);
-double set_freq(struct demod *,const double,const int);
-double set_first_LO(struct demod *demod,const double first_LO,const int);
-const double get_first_LO(const struct demod *demod);
-double set_second_LO(struct demod *demod,const double second_LO);
-const double get_second_LO(const struct demod *demod,const int);
-double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int);
-const double get_exact_samprate(const struct demod *);
-const int get_filter(const struct demod *demod,float *low,float *high);
-int set_filter(struct demod *demod,const float low,const float high);
+int setup_input(char const *);
+const int LO2_in_range(const struct demod *,double f,int);
+const double get_freq(struct demod const *);
+double set_freq(struct demod *,double,int);
+double set_first_LO(struct demod *,double,int);
+const double get_first_LO(struct demod const *);
+double set_second_LO(struct demod *,double);
+const double get_second_LO(struct demod const *,int);
+double set_second_LO_rate(struct demod *,double,int);
+const double get_exact_samprate(struct demod const *);
+const int get_filter(struct demod const *,float *,float *);
+int set_filter(struct demod *,float,float);
 
-int set_mode(struct demod *demod,const enum mode mode);
-int set_cal(struct demod *,const double);
-const double get_cal(const struct demod *);
-int spindown(struct demod *demod,complex float *data,const int len);
-void closedown(const int a);
-void proc_samples(struct demod *,const int16_t *,const int);
+int set_mode(struct demod *,enum mode);
+int set_cal(struct demod *,double);
+const double get_cal(struct demod const *);
+int spindown(struct demod *,complex float *,int);
+void closedown(int a);
+void proc_samples(struct demod *,int16_t const *,int);
 
 // Save and load (most) receiver state
 int savestate(struct demod *,char const *);
