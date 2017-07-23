@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.46 2017/07/19 00:06:37 karn Exp karn $
+// $Id: main.c,v 1.47 2017/07/19 10:06:39 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -25,7 +25,6 @@
 #include "filter.h"
 #include "dsp.h"
 #include "audio.h"
-#include "command.h"
 #include "rtp.h"
 
 #define MAXPKT 1500
@@ -39,29 +38,24 @@ pthread_t Display_thread;
 int Nthreads = 1;
 int ADC_samprate = 192000;
 int DAC_samprate = 48000;
-
 int Quiet;
 int Verbose;
 int Ctl_port = 4159;
-
-struct sockaddr_in Ctl_address;
-struct sockaddr_in Input_source_address;
-
-char *IQ_mcast_address_text;
-int Mcast_dest_port;
-char *BB_mcast_address_text;
-struct sockaddr_in BB_mcast_sockaddr;
-int Send_OPUS; // send OPUS audio if 1, PCM if 0
-
-int Input_fd;
-int Ctl_fd;
-int Demod_sock;
-
+char IQ_mcast_address_text[25] = "239.1.2.1"; // Long enough for IPv4, but what about IPv6?
+int Mcast_dest_port = 5004;
+char BB_mcast_address_text[25] = "239.2.1.1"; 
 // We have to hold the requested startup frequency until we know the IP address
 // of the SDR front end to send it to
 double Startup_freq = 0;
 
-int setup_input(char *addr){
+struct sockaddr_in Ctl_address;
+struct sockaddr_in Input_source_address;
+struct sockaddr_in BB_mcast_sockaddr;
+int Input_fd;
+int Ctl_fd;
+int Demod_sock;
+
+int setup_input(char const *addr){
   int fd = -1;
   struct sockaddr_in sock;
 
@@ -142,11 +136,7 @@ int main(int argc,char *argv[]){
   set_second_LO(demod,-ADC_samprate/4);
   set_mode(demod,FM);
 
-  IQ_mcast_address_text = strdup("239.1.2.1");
-  BB_mcast_address_text = strdup("239.2.1.1");
   OPUS_bitrate = 32000;
-  Mcast_dest_port = 5004;     // recommended default RTP port
-  Send_OPUS = 0;
   OPUS_blocktime = 20;
 
   // Load state file, if it exists
@@ -175,9 +165,7 @@ int main(int argc,char *argv[]){
       set_second_LO(demod,-strtod(optarg,NULL));
       break;
     case 'I':
-      if(IQ_mcast_address_text)
-	free(IQ_mcast_address_text);
-      IQ_mcast_address_text = strdup(optarg);
+      strncpy(IQ_mcast_address_text,optarg,sizeof(IQ_mcast_address_text));
       break;
     case 'k':
       Kaiser_beta = strtod(optarg,NULL);
@@ -210,9 +198,7 @@ int main(int argc,char *argv[]){
       OPUS_bitrate = strtol(optarg,NULL,0);
       break;
     case 'R':
-      if(BB_mcast_address_text)
-	free(BB_mcast_address_text);
-      BB_mcast_address_text = strdup(optarg);
+      strncpy(BB_mcast_address_text,optarg,sizeof(BB_mcast_address_text));
       break;
     case 't':
       Nthreads = strtol(optarg,NULL,0);
@@ -232,13 +218,6 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-  if(IQ_mcast_address_text == NULL){
-    fprintf(stderr,"Specify -I iq_mcast_address_text_address\n");
-    exit(1);
-  }
-  if(OPUS_bitrate == 0)
-    Send_OPUS = 0; // Force PCM
-
   setlocale(LC_ALL,locale);
   if(Verbose){
     fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
@@ -275,7 +254,7 @@ int main(int argc,char *argv[]){
   Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
 
   // I've given up on IPv6 multicast for now. Too many bugs in too many places
-  if(BB_mcast_address_text != NULL && strlen(BB_mcast_address_text) > 0){
+  if(strlen(BB_mcast_address_text) > 0){
     BB_mcast_sockaddr.sin_family = AF_INET;
     BB_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
     inet_pton(AF_INET,BB_mcast_address_text,&BB_mcast_sockaddr.sin_addr);
