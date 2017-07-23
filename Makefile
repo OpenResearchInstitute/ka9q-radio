@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.40 2017/07/19 09:46:53 karn Exp karn $
+# $Id: Makefile,v 1.41 2017/07/19 10:07:36 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -35,6 +35,9 @@ radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.
 monitor: monitor.o
 	$(CC) -g -o $@ $^ -lasound  -lpthread -lopus -lm
 
+osx_monitor: osx_monitor.o
+	$(CC) -g -o $@ $^ -lopus -lm
+
 iqrecord: iqrecord.o
 	$(CC) -g -o $@ $^ -lpthread -lm
 
@@ -42,29 +45,29 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
-am.o: am.c dsp.h filter.h radio.h audio.h command.h
+am.o: am.c dsp.h filter.h radio.h audio.h
 audio.o: audio.c dsp.h audio.h rtp.h
 bandplan.o: bandplan.c bandplan.h
-cam.o: cam.c dsp.h filter.h radio.h audio.h command.h
-control.o: control.c command.h dsp.h
+cam.o: cam.c dsp.h filter.h radio.h audio.h
+control.o: control.c dsp.h
 demod.o: demod.c radio.h
-display.o: display.c radio.h command.h audio.h dsp.h filter.h bandplan.h
-dsb.o: dsb.c dsp.h filter.h radio.h audio.h command.h
+display.o: display.c radio.h audio.h dsp.h filter.h bandplan.h
+dsb.o: dsb.c dsp.h filter.h radio.h audio.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c dsp.h filter.h
-fm.o: fm.c dsp.h filter.h radio.h audio.h command.h
-funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h command.h dsp.h rtp.h
-modulate.o: modulate.c dsp.h filter.h command.h
+fm.o: fm.c dsp.h filter.h radio.h audio.h
+funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h dsp.h rtp.h
+modulate.o: modulate.c dsp.h filter.h
 gr.o: gr.c sdr.h
 hid-libusb.o: hid-libusb.c hidapi.h
-iq.o: iq.c dsp.h filter.h radio.h audio.h command.h
-iqplay.o: iqplay.c command.h rtp.h dsp.h
-iqrecord.o: iqrecord.c command.h rtp.h
-main.o: main.c radio.h filter.h dsp.h audio.h command.h rtp.h
+iq.o: iq.c dsp.h filter.h radio.h audio.h
+iqplay.o: iqplay.c rtp.h dsp.h
+iqrecord.o: iqrecord.c rtp.h
+main.o: main.c radio.h filter.h dsp.h audio.h rtp.h
 misc.o: misc.c
-modes.o: modes.c command.h
+modes.o: modes.c 
 monitor.o: monitor.c rtp.h dsp.h
-radio.o: radio.c command.h radio.h filter.h dsp.h audio.h
-ssb.o: ssb.c dsp.h filter.h radio.h audio.h command.h
+radio.o: radio.c radio.h filter.h dsp.h audio.h
+ssb.o: ssb.c dsp.h filter.h radio.h audio.h
 wwvsim.o: wwvsim.c
 
