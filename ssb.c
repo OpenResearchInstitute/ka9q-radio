@@ -13,8 +13,8 @@
 #include "radio.h"
 #include "audio.h"
 
-static const float hangtime = 1.1;    // Hang for 1.1 seconds after new peak
-static const float recovery_rate = 10; // Recover gain at this many db/sec after hang finishes
+static const float Hangtime = 1.1;    // Hang for 1.1 seconds after new peak
+static const float Recovery_rate = 10; // Recover gain at this many db/sec after hang finishes
 
 
 void *demod_ssb(void *arg){
@@ -24,8 +24,8 @@ void *demod_ssb(void *arg){
   demod->foffset = NAN; // not used
   demod->pdeviation = NAN;
   demod->gain = dB2voltage(70.); // 70 dB starting point, will adjust with ssb_agc
-  int const hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
-  float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate));
+  int const hangmax = Hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
+  float const agcratio = dB2voltage(Recovery_rate * ((float)demod->L/demod->samprate));
   int hangcount = hangmax;
 
   // Set up pre-demodulation filter
@@ -33,20 +33,22 @@ void *demod_ssb(void *arg){
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
+#if 0
   // Experimental notch filter
   struct notchfilter *nf = notch_create(48000./demod->samprate,0.001);
-
+#endif
 
   while(!demod->terminate){
     fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
 
+#if 0
     // experimental notch
     {
       int i;
       for(i=0;i<filter->ilen;i++)
 	filter->input.c[i] = notch(nf,filter->input.c[i]);
     }
-
+#endif
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
     // Automatic gain control
