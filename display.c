@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.50 2017/07/19 09:45:37 karn Exp karn $
+// $Id: display.c,v 1.51 2017/07/23 23:31:36 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -45,8 +45,10 @@ int Tunestep;
 #define MAXCOLS 256
 void popup(const char *filename){
 
+  char fname[PATH_MAX];
+  snprintf(fname,sizeof(fname),"%s/%s",Libdir,filename);
   FILE *fp;
-  if((fp = fopen(filename,"r")) == NULL)
+  if((fp = fopen(fname,"r")) == NULL)
     return;
   // Determine size of box
   int rows=0, cols=0;
