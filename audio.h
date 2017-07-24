@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.14 2017/06/21 09:08:40 karn Exp karn $
+// $Id: audio.h,v 1.15 2017/07/23 23:31:46 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -7,10 +7,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-void *audio_thread(void *);
 pthread_t Audio_thread;
-int send_mono_audio(float *,int);
-int send_stereo_audio(complex float *,int);
+int send_mono_audio(float const *,int);
+int send_stereo_audio(complex float const *,int);
 int setup_audio(void);
 
 extern char BB_mcast_address_text[];

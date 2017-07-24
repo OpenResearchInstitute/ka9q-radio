@@ -18,4 +18,4 @@ struct bandplan {
   double power;
 };
 
-const struct bandplan *lookup_frequency(const double);
+struct bandplan *lookup_frequency(double);
