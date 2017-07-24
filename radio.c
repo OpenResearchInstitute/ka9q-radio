@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.43 2017/07/19 09:44:36 karn Exp karn $
+// $Id: radio.c,v 1.44 2017/07/23 23:30:05 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -22,7 +22,7 @@
 
 
 extern int Ctl_fd;
-struct demod Demod;
+
 
 //const float Headroom = .316227766; // sqrt(0.10) = -10 dB
 const float Headroom = 0.1778; // -15 dB
@@ -200,27 +200,27 @@ int set_mode(struct demod *demod,const enum mode mode){
 
   switch(mode){
   case DSB:
-    pthread_create(&demod->demod_thread,NULL,demod_dsb,&Demod);
+    pthread_create(&demod->demod_thread,NULL,demod_dsb,demod);
     break;
   case NFM:
   case FM:
-    pthread_create(&demod->demod_thread,NULL,demod_fm,&Demod);
+    pthread_create(&demod->demod_thread,NULL,demod_fm,demod);
     break;
   case USB:
   case LSB:
   case CWU:
   case CWL:
-    pthread_create(&demod->demod_thread,NULL,demod_ssb,&Demod);
+    pthread_create(&demod->demod_thread,NULL,demod_ssb,demod);
     break;
   case CAM:
-    pthread_create(&demod->demod_thread,NULL,demod_cam,&Demod);
+    pthread_create(&demod->demod_thread,NULL,demod_cam,demod);
     break;
   case AM:
-    pthread_create(&demod->demod_thread,NULL,demod_am,&Demod);
+    pthread_create(&demod->demod_thread,NULL,demod_am,demod);
     break;
   case IQ:
   case ISB:
-    pthread_create(&demod->demod_thread,NULL,demod_iq,&Demod);
+    pthread_create(&demod->demod_thread,NULL,demod_iq,demod);
     break;
   case WFM:
     break;
@@ -329,64 +329,4 @@ int spindown(struct demod *demod,complex float *data,const int len){
     }
   }
   return 0;
-}
-// Save receiver state in file
-int savestate(struct demod *demod,char const * statefile){
-    // Dump receiver state to file
-    FILE * const fp = fopen(statefile,"w");
-    if(fp == NULL){
-      fprintf(stderr,"Can't write state file %s\n",statefile);
-    } else {
-      fprintf(fp,"#KA9Q DSP Receiver State dump\n");
-      fprintf(fp,"Source %s:%d\n",IQ_mcast_address_text,Mcast_dest_port);
-      fprintf(fp,"Frequency %.3f Hz\n",get_freq(demod));
-      fprintf(fp,"Mode %s\n",Modes[demod->mode].name);
-      fprintf(fp,"Dial offset %.3f Hz\n",demod->dial_offset);
-      fprintf(fp,"Calibrate %.3f ppm\n",get_cal(demod)*1e6);
-      fprintf(fp,"Filter low %.3f Hz\n",demod->low);
-      fprintf(fp,"Filter high %.3f Hz\n",demod->high);
-      fprintf(fp,"Kaiser Beta %.3f\n",Kaiser_beta);
-      fprintf(fp,"Blocksize %d\n",demod->L);
-      fprintf(fp,"Impulse len %d\n",demod->M);
-      fprintf(fp,"Tunestep %d\n",Tunestep);
-      fclose(fp);
-    }
-    return 0;
-}
-// Load receiver state from file
-int loadstate(struct demod *demod,char const *statefile){
-    FILE * const fp = fopen(statefile,"r");
-    if(fp != NULL){
-      char line[PATH_MAX];
-      while(fgets(line,sizeof(line),fp) != NULL){
-	double f;
-	int a,b,c,d,e;
-	char str[PATH_MAX];
-	if(sscanf(line,"Frequency %lf",&Startup_freq) > 0){
-	} else if(sscanf(line,"Mode %s",str) > 0){	  
-	  int i;
-	  for(i=0;i<Nmodes;i++){
-	    if(strncasecmp(Modes[i].name,str,strlen(Modes[i].name)) == 0){
-	      set_mode(demod,Modes[i].mode);
-	      break;
-	    }
-	  }
-	} else if(sscanf(line,"Dial offset %lf",&demod->dial_offset) > 0){
-	} else if(sscanf(line,"Calibrate %lf",&f) > 0){
-	  set_cal(demod,f*1e-6);
-	} else if(sscanf(line,"Filter low %f",&demod->low) > 0){
-	} else if(sscanf(line,"Filter high %f",&demod->high) > 0){
-	} else if(sscanf(line,"Kaiser Beta %f",&Kaiser_beta) > 0){
-	} else if(sscanf(line,"Blocksize %d",&demod->L) > 0){
-	} else if(sscanf(line,"Impulse len %d",&demod->M) > 0){
-	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
-	} else if(sscanf(line,"Source %d.%d.%d.%d:%d",&a,&b,&c,&d,&e) > 0){
-	  a &= 0xff; b &= 0xff; c &= 0xff; d &= 0xff;
-	  snprintf(IQ_mcast_address_text,sizeof(IQ_mcast_address_text),"%d.%d.%d.%d",a,b,c,d);
-	  Mcast_dest_port = e;
-	}
-      }
-      fclose(fp);
-    }
-    return 0;
 }
