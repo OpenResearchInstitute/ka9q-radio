@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.47 2017/07/19 10:06:39 karn Exp karn $
+// $Id: main.c,v 1.48 2017/07/23 23:31:12 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -29,17 +30,30 @@
 
 #define MAXPKT 1500
 
-void closedown(int a);
-
+void closedown(int);
 void *input_loop(struct demod *);
-int process_command(struct demod *,char *cmdbuf,int len);
-pthread_t Display_thread;
+int process_command(struct demod *,char const *,int);
 
+pthread_t Display_thread;
+struct demod Demod;
+struct sockaddr_in Ctl_address;
+struct sockaddr_in Input_source_address;
+struct sockaddr_in BB_mcast_sockaddr;
+int Input_fd = -1;
+int Ctl_fd = -1;
+int Demod_sock = -1;
+// Multicast receive statistics
+int Skips;
+int Delayed;
+
+
+// Parameters with default values
+char Libdir[] = "/usr/local/share/ka9q-radio";
 int Nthreads = 1;
 int ADC_samprate = 192000;
 int DAC_samprate = 48000;
-int Quiet;
-int Verbose;
+int Quiet = 0;
+int Verbose = 0;
 int Ctl_port = 4159;
 char IQ_mcast_address_text[25] = "239.1.2.1"; // Long enough for IPv4, but what about IPv6?
 int Mcast_dest_port = 5004;
@@ -48,18 +62,12 @@ char BB_mcast_address_text[25] = "239.2.1.1";
 // of the SDR front end to send it to
 double Startup_freq = 0;
 
-struct sockaddr_in Ctl_address;
-struct sockaddr_in Input_source_address;
-struct sockaddr_in BB_mcast_sockaddr;
-int Input_fd;
-int Ctl_fd;
-int Demod_sock;
 
+// Set up input socket for multicast data stream from front end
 int setup_input(char const *addr){
   int fd = -1;
   struct sockaddr_in sock;
 
-  // Set up input socket for multicast data stream from front end
   if(inet_pton(AF_INET,addr,&sock.sin_addr) != 1)
     return -1;
 
@@ -88,35 +96,37 @@ int setup_input(char const *addr){
   if(setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
     perror("ipv4 multicast join");
   
-#else // Linux, etc
+#else // Linux, etc, for both IPv4/IPv6
   struct group_req group_req;
   group_req.gr_interface = 0;
   sock.sin_family.sin_family = AF_INET;
   memcpy(&group_req.gr_group,&sock,sizeof(sock));
   if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-    perror("ipv4 multicast join");
+    perror("ip multicast join");
   
 #endif
   return fd;
 }
 
-int Skips;
-int Delayed;
 
 int main(int argc,char *argv[]){
   int c,N;
   struct demod * const demod = &Demod;
 
-  char *locale = getenv("LANG");
+  // The display thread assumes en_US.UTF-8, or anything with a grouping character
+  // Otherwise the cursor movements will be wrong
+  char const *locale = getenv("LANG");
+  if(locale == NULL || strlen(locale) == 0)
+    locale = "en_US.UTF-8";
   setlocale(LC_ALL,locale);
 
-  // Defaults
+  // Set defaults
   // The FFT length will be L + M - 1 because of window overlapping
   demod->L = 4096;      // Number of samples in buffer
   demod->M = 4096+1;    // Length of filter impulse response
   demod->samprate = ADC_samprate;
-  demod->min_IF = -80000; // Hardwired for Funcube
-  demod->max_IF = +80000;
+  demod->min_IF = -(ADC_samprate/2 - 16000); // Hardwired for Funcube
+  demod->max_IF = +(ADC_samprate/2 - 16000); // Hardwired for Funcube
   demod->decimate = ADC_samprate / DAC_samprate;
   // Verify decimation ratio
   if((ADC_samprate % DAC_samprate) != 0)
@@ -136,9 +146,6 @@ int main(int argc,char *argv[]){
   set_second_LO(demod,-ADC_samprate/4);
   set_mode(demod,FM);
 
-  OPUS_bitrate = 32000;
-  OPUS_blocktime = 20;
-
   // Load state file, if it exists
   // This overwrites hardwired defaults, but can be overridden with command line args
   {
@@ -147,7 +154,7 @@ int main(int argc,char *argv[]){
     loadstate(demod,statefile);
   }
 
-  Quiet = 0;
+  // Read command line args. These supersede state file parameters, which in turn supersede program defaults
   while((c = getopt(argc,argv,"B:c:f:i:I:k:l:L:m:M:p:R:qr:t:v")) != EOF){
     int i;
 
@@ -172,6 +179,7 @@ int main(int argc,char *argv[]){
       break;
     case 'l':
       locale = optarg;
+      setlocale(LC_ALL,locale);
       break;
     case 'L':
       demod->L = strtol(optarg,NULL,0);
@@ -186,7 +194,6 @@ int main(int argc,char *argv[]){
       break;
     case 'M':
       demod->M = strtol(optarg,NULL,0);
-      break;
       break;
     case 'p':
       Ctl_port = strtol(optarg,NULL,0);
@@ -218,7 +225,7 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-  setlocale(LC_ALL,locale);
+
   if(Verbose){
     fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
     fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
@@ -232,8 +239,6 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples (%'.1f ms @ %'u S/s) bin size %'.1f Hz\n",
 	    Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
   }
-
-
 
   Input_fd = setup_input(IQ_mcast_address_text);
 
@@ -414,7 +419,7 @@ void *input_loop(struct demod *demod){
     }
   }
 }
-int process_command(struct demod *demod,char *cmdbuf,int len){
+int process_command(struct demod *demod,char const *cmdbuf,int len){
   struct command command;
 
   if(len >= sizeof(command)){
@@ -449,3 +454,63 @@ int process_command(struct demod *demod,char *cmdbuf,int len){
   return 0;
 }
  
+// Save receiver state in file
+int savestate(struct demod *demod,char const *statefile){
+    // Dump receiver state to file
+    FILE * const fp = fopen(statefile,"w");
+    if(fp == NULL){
+      fprintf(stderr,"Can't write state file %s\n",statefile);
+    } else {
+      fprintf(fp,"#KA9Q DSP Receiver State dump\n");
+      fprintf(fp,"Source %s:%d\n",IQ_mcast_address_text,Mcast_dest_port);
+      fprintf(fp,"Frequency %.3f Hz\n",get_freq(demod));
+      fprintf(fp,"Mode %s\n",Modes[demod->mode].name);
+      fprintf(fp,"Dial offset %.3f Hz\n",demod->dial_offset);
+      fprintf(fp,"Calibrate %.3f ppm\n",get_cal(demod)*1e6);
+      fprintf(fp,"Filter low %.3f Hz\n",demod->low);
+      fprintf(fp,"Filter high %.3f Hz\n",demod->high);
+      fprintf(fp,"Kaiser Beta %.3f\n",Kaiser_beta);
+      fprintf(fp,"Blocksize %d\n",demod->L);
+      fprintf(fp,"Impulse len %d\n",demod->M);
+      fprintf(fp,"Tunestep %d\n",Tunestep);
+      fclose(fp);
+    }
+    return 0;
+}
+// Load receiver state from file
+int loadstate(struct demod *demod,char const *statefile){
+    FILE * const fp = fopen(statefile,"r");
+    if(fp != NULL){
+      char line[PATH_MAX];
+      while(fgets(line,sizeof(line),fp) != NULL){
+	double f;
+	int a,b,c,d,e;
+	char str[PATH_MAX];
+	if(sscanf(line,"Frequency %lf",&Startup_freq) > 0){
+	} else if(sscanf(line,"Mode %s",str) > 0){	  
+	  int i;
+	  for(i=0;i<Nmodes;i++){
+	    if(strncasecmp(Modes[i].name,str,strlen(Modes[i].name)) == 0){
+	      set_mode(demod,Modes[i].mode);
+	      break;
+	    }
+	  }
+	} else if(sscanf(line,"Dial offset %lf",&demod->dial_offset) > 0){
+	} else if(sscanf(line,"Calibrate %lf",&f) > 0){
+	  set_cal(demod,f*1e-6);
+	} else if(sscanf(line,"Filter low %f",&demod->low) > 0){
+	} else if(sscanf(line,"Filter high %f",&demod->high) > 0){
+	} else if(sscanf(line,"Kaiser Beta %f",&Kaiser_beta) > 0){
+	} else if(sscanf(line,"Blocksize %d",&demod->L) > 0){
+	} else if(sscanf(line,"Impulse len %d",&demod->M) > 0){
+	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
+	} else if(sscanf(line,"Source %d.%d.%d.%d:%d",&a,&b,&c,&d,&e) > 0){
+	  a &= 0xff; b &= 0xff; c &= 0xff; d &= 0xff;
+	  snprintf(IQ_mcast_address_text,sizeof(IQ_mcast_address_text),"%d.%d.%d.%d",a,b,c,d);
+	  Mcast_dest_port = e;
+	}
+      }
+      fclose(fp);
+    }
+    return 0;
+}
