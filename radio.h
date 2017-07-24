@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.29 2017/07/19 00:05:19 karn Exp karn $
+// $Id: radio.h,v 1.30 2017/07/23 23:29:52 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -8,13 +8,16 @@
 #include <complex.h>
 #undef I
 
+#include <sys/types.h>
+#include <sys/socket.h>
 
 
+// Receiver control input packet
 enum cmd {
   SENDSTAT=1,
   SETSTATE,
 };
-
+// Receiver modes
 enum mode {
   AM = 0,
   CAM,     // coherent AM
@@ -38,6 +41,7 @@ struct command {
   double second_LO_rate;
   double calibrate;
 };
+
 struct modetab {
   enum mode mode;
   char name[10];
@@ -47,6 +51,7 @@ struct modetab {
   float high;       // Upper edge of IF passband
   float gain;       // Gain of filter
 };
+
 // Sent in each RTP packet right after header
 // NB! because we just copy this into the network stream, it's important that the compiler
 // not add any extra padding. To avoid this, the size must be a multiple of 8, the size of the double
@@ -58,9 +63,6 @@ struct status {
   uint8_t if_gain;
   uint8_t unused; // pad to 16 bytes
 };
-
-
-
 
 // Demodulator state block
 struct demod {
@@ -117,16 +119,13 @@ struct demod {
   float cphase;     // Carrier phase (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
 };
-extern struct demod Demod;
+extern char Libdir[];
 extern int Demod_sock;
 extern int Tunestep;
-extern double Startup_freq;
 extern int ADC_samprate;
 extern struct modetab Modes[];
 extern const int Nmodes;
-extern int Rtpsock;
 extern struct sockaddr_in Input_source_address;
-extern socklen_t Rtpaddrlen;
 extern char IQ_mcast_address_text[25];
 extern int Mcast_dest_port;
 extern int Input_fd;
@@ -141,15 +140,11 @@ const double get_first_LO(struct demod const *);
 double set_second_LO(struct demod *,double);
 const double get_second_LO(struct demod const *,int);
 double set_second_LO_rate(struct demod *,double,int);
-const double get_exact_samprate(struct demod const *);
-const int get_filter(struct demod const *,float *,float *);
 int set_filter(struct demod *,float,float);
-
 int set_mode(struct demod *,enum mode);
 int set_cal(struct demod *,double);
 const double get_cal(struct demod const *);
 int spindown(struct demod *,complex float *,int);
-void closedown(int a);
 void proc_samples(struct demod *,int16_t const *,int);
 
 // Save and load (most) receiver state
@@ -157,10 +152,9 @@ int savestate(struct demod *,char const *);
 int loadstate(struct demod *,char const *);
 
 // Thread entry points
-void *fcd_command(void *);
 void *display(void *);
 
-
+// Demodulator thread entry points
 void *demod_fm(void *);
 void *demod_ssb(void *);
 void *demod_iq(void *);

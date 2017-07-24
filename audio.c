@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.27 2017/07/08 20:34:48 karn Exp karn $
+// $Id: audio.c,v 1.28 2017/07/19 09:45:25 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -26,12 +26,23 @@
 #include "audio.h"
 
 int Mcast_fd;
-
+int OPUS_stereo_read_fd;
+int OPUS_stereo_write_fd;
+int PCM_mono_read_fd;
+int PCM_mono_write_fd;
+int PCM_stereo_read_fd;
+int PCM_stereo_write_fd;
+float OPUS_blocktime = 20;
+int OPUS_bitrate = 32000;
 struct sockaddr_in BB_mcast_sockaddr;
+pthread_t OPUS_stereo_thread;
+pthread_t PCM_stereo_thread;
+pthread_t PCM_mono_thread;
+
 #define PCM_BUFSIZE 512        // 16-bit word count; must fit in Ethernet MTU
 
 
-short scaleclip(float x){
+short const scaleclip(float x){
   if(x >= 1.0)
     return SHRT_MAX;
   else if(x <= -1.0)
@@ -39,36 +50,27 @@ short scaleclip(float x){
   return (short)(SHRT_MAX * x);
 }
   
-int OPUS_stereo_read_fd;
-int OPUS_stereo_write_fd;
-int PCM_mono_read_fd;
-int PCM_mono_write_fd;
-int PCM_stereo_read_fd;
-int PCM_stereo_write_fd;
-
-int send_stereo_audio(complex float *buffer,int size){
+int send_stereo_audio(complex float const *buffer,int size){
   if(OPUS_bitrate != 0)
-    write(OPUS_stereo_write_fd,buffer,size * sizeof(complex float));
+    write(OPUS_stereo_write_fd,buffer,size * sizeof(*buffer));
   else
-    write(PCM_stereo_write_fd,buffer,size * sizeof(complex float));    
+    write(PCM_stereo_write_fd,buffer,size * sizeof(*buffer));    
   return 0;
 }
-int send_mono_audio(float *buffer,int size){
+
+int send_mono_audio(float const *buffer,int size){
   if(OPUS_bitrate != 0){
     complex float obuf[size];
     int i;
     for(i=0;i<size;i++)
       obuf[i] = CMPLXF(buffer[i],buffer[i]);
 
-    write(OPUS_stereo_write_fd,obuf,size * sizeof(complex float));
+    write(OPUS_stereo_write_fd,obuf,sizeof(obuf));
   } else
-    write(PCM_mono_write_fd,buffer,size * sizeof(float));    
+    write(PCM_mono_write_fd,buffer,size * sizeof(*buffer));    
   return 0;
 }
 
-
-float OPUS_blocktime;
-int OPUS_bitrate;
 
 void *stereo_opus_audio(void *arg){
   uint32_t timestamp = 0;
@@ -98,7 +100,7 @@ void *stereo_opus_audio(void *arg){
   }
 
   int error;
-  struct OpusEncoder *Opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
+  struct OpusEncoder * const Opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
   if(Opus == NULL){
     fprintf(stderr,"opus_encoder_create failed, error %d\n",error);
     free(opusbuf);
@@ -122,7 +124,7 @@ void *stereo_opus_audio(void *arg){
   struct msghdr message;
   message.msg_name = &BB_mcast_sockaddr;
   // OSX is very finicky about the size of the sockaddr structure; Linux is not
-  message.msg_namelen = sizeof(struct sockaddr_in);
+  message.msg_namelen = sizeof(BB_mcast_sockaddr);
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 2;
   message.msg_control = NULL;
@@ -130,13 +132,12 @@ void *stereo_opus_audio(void *arg){
   message.msg_flags = 0;
 
   while(1){
-    if(fillbuf(OPUS_stereo_read_fd,opusbuf,sizeof(complex float) * opus_blocksize) < 0){
+    if(fillbuf(OPUS_stereo_read_fd,opusbuf,sizeof(*opusbuf) * opus_blocksize) < 0){
       perror("stereo_opus_audio: pipe read error");
       break;
     }
-    
     // Encoder accepts stereo, which we represent as complex, but it wants an array of floats
-    int dlen = opus_encode_float(Opus,(float *)opusbuf,opus_blocksize,data,sizeof(data));
+    int const dlen = opus_encode_float(Opus,(float *)opusbuf,opus_blocksize,data,sizeof(data));
     if(dlen < 0){
       fprintf(stderr,"opus encode error %d\n",dlen);
       continue;
@@ -156,12 +157,12 @@ void *stereo_opus_audio(void *arg){
   return NULL;
 }
 void *stereo_pcm_audio(void *arg){
+  pthread_setname("stereo-pcm");
   uint32_t timestamp = 0;
   uint16_t seq = 0;
   time_t tt = time(NULL);
   uint32_t const ssrc = tt & 0xffffffff;
 
-  pthread_setname("stereo-pcm");
   struct rtp_header rtp;
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
   rtp.ssrc = htonl(ssrc);
@@ -178,7 +179,7 @@ void *stereo_pcm_audio(void *arg){
   struct msghdr message;      
   message.msg_name = &BB_mcast_sockaddr;
   // OSX is very finicky about the size of the sockaddr structure; Linux is not
-  message.msg_namelen = sizeof(struct sockaddr_in);
+  message.msg_namelen = sizeof(BB_mcast_sockaddr);
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 2;
   message.msg_control = NULL;
@@ -207,12 +208,12 @@ void *stereo_pcm_audio(void *arg){
 }
 
 void *mono_pcm_audio(void *arg){
+  pthread_setname("mono-pcm");
   uint32_t timestamp = 0;
   uint16_t seq = 0;
   time_t tt = time(NULL);
   uint32_t const ssrc = tt & 0xffffffff;
 
-  pthread_setname("mono-pcm");
   struct rtp_header rtp;
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
   rtp.ssrc = htonl(ssrc);
@@ -229,7 +230,7 @@ void *mono_pcm_audio(void *arg){
   struct msghdr message;      
   message.msg_name = &BB_mcast_sockaddr;
   // OSX is very finicky about the size of the sockaddr structure; Linux is not
-  message.msg_namelen = sizeof(struct sockaddr_in);
+  message.msg_namelen = sizeof(BB_mcast_sockaddr);
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 2;
   message.msg_control = NULL;
@@ -255,10 +256,6 @@ void *mono_pcm_audio(void *arg){
   }
   return NULL;
 }
-
-pthread_t OPUS_stereo_thread;
-pthread_t PCM_stereo_thread;
-pthread_t PCM_mono_thread;
 
 // Set up pipes to encoding/sending tasks and start them up
 int setup_audio(){
