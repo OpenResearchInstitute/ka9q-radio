@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.30 2017/07/23 23:29:52 karn Exp karn $
+// $Id: radio.h,v 1.31 2017/07/24 02:25:18 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -80,7 +80,7 @@ struct demod {
   float DC_i,DC_q;   // Average DC offsets
   float power_i,power_q; // Average channel powers
   float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
-  float dotprod;     // smoothed dot product of I,Q for quadrature, ideally zero
+  float sinphi;      // smoothed estimate of I/Q phase error
 
   // Demod thread data
   int input;  // Input pipe fd
