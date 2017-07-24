@@ -310,8 +310,7 @@ void *display(void *arg){
     wprintw(sdr,"I offset %10.6f\n",demod->DC_i);
     wprintw(sdr,"Q offset %10.6f\n",demod->DC_q);
     wprintw(sdr,"I/Q imbal%10.3f dB\n",power2dB(demod->power_i/demod->power_q));
-    double sinphi = demod->dotprod / (demod->power_i + demod->power_q);
-    wprintw(sdr,"I/Q phi  %10.5f rad\n",sinphi);
+    wprintw(sdr,"I/Q phi  %10.5f rad\n",demod->sinphi);
     wprintw(sdr,"LNA      %10u\n",demod->lna_gain);
     wprintw(sdr,"Mix gain %10u\n",demod->mixer_gain);
     wprintw(sdr,"IF gain  %10u dB\n",demod->if_gain);
@@ -391,16 +390,21 @@ void *display(void *arg){
       popup("help.txt");
       break;
     case 'I':
-      { // This seems to need work
+      {
 	char str[160];
 	getentry("IQ input IP dest address: ",str,sizeof(str));
-	int const i = setup_input(str);
-	int const j = Input_fd;
-	Input_fd = i;
-	if(j != -1)
-	  close(j);
-	strncpy(IQ_mcast_address_text,str,sizeof(IQ_mcast_address_text));
-	Input_fd = setup_input(IQ_mcast_address_text);
+	if(strlen(str) > 0){
+	  int const i = setup_input(str);
+	  int const j = Input_fd;
+	  if(i != -1){
+	    Input_fd = i;
+	    if(j != -1)
+	      close(j);
+	    strncpy(IQ_mcast_address_text,str,sizeof(IQ_mcast_address_text));
+	    // Reset error counts
+	    Skips = Delayed = 0;
+	  }
+	}
       }
       break;
     case 'l': // Toggle RF tuning lock; affects how adjustments to LO and IF behave
