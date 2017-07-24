@@ -1,14 +1,17 @@
-# $Id: Makefile,v 1.42 2017/07/23 23:32:03 karn Exp karn $
+# $Id: Makefile,v 1.43 2017/07/23 23:43:53 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
 CFLAGS=$(COPTS) $(INCLUDES)
+BINDIR=/usr/local/bin
+LIBDIR=/usr/local/share/ka9q-radio
 
 all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay modulate wwvsim wwv.txt wwvh.txt
 
 
 install: all
-	install --target-directory=$(HOME)/bin/ radio control funcube monitor iqrecord iqplay modulate wwvsim
+	install -D --target-directory=$(BINDIR) radio control funcube monitor iqrecord iqplay modulate wwvsim
+	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt wwv.txt wwvh.txt
 
 clean:
 	rm -f *.o radio control funcube monitor iqrecord iqplay modulate wwvsim bandplan.txt help.txt wwv.txt wwvh.txt libfcd.a
