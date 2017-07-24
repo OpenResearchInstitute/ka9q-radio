@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.48 2017/07/23 23:31:12 karn Exp karn $
+// $Id: main.c,v 1.49 2017/07/24 02:23:52 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -363,13 +363,26 @@ void *input_loop(struct demod *demod){
   int eseq = -1;
 
   while(1){
+
     fd_set mask;
     FD_ZERO(&mask);
     FD_SET(Ctl_fd,&mask);
     FD_SET(Input_fd,&mask);
-    
-    select(max(Ctl_fd,Input_fd)+1,&mask,NULL,NULL,NULL);
 
+    fd_set errmask;
+    FD_ZERO(&errmask);
+    FD_SET(Ctl_fd,&errmask);
+    FD_SET(Input_fd,&errmask);
+    
+    // The timeout and/or errmask recovers us if Input_fd changes, e.g., from the interactive 'I' command in display.c
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100000;
+    select(max(Ctl_fd,Input_fd)+1,&mask,NULL,&errmask,&timeout);
+    if(FD_ISSET(Input_fd,&errmask) || FD_ISSET(Ctl_fd,&errmask)){
+      usleep(1000); // just in case we tightly loop
+      continue;
+    }
     if(FD_ISSET(Ctl_fd,&mask)){
       // Got a command
       socklen_t addrlen;
@@ -394,6 +407,7 @@ void *input_loop(struct demod *demod){
 	continue; // Too small, ignore
       
       if(Startup_freq != 0){
+	// We now know where to send the tuning command for the startup frequency
 	set_freq(demod,Startup_freq,1);
 	Startup_freq = 0;
       }
@@ -402,10 +416,12 @@ void *input_loop(struct demod *demod){
       rtp.ssrc = ntohl(rtp.ssrc);
       rtp.seq = ntohs(rtp.seq);
       rtp.timestamp = ntohl(rtp.timestamp);
-      if(eseq != -1 && (int16_t)(eseq - rtp.seq) < 0){
-	Skips++;
-      } else if(eseq != -1 && (int16_t)(eseq - rtp.seq) > 0){
-	Delayed++;
+      if(eseq != -1){
+	if((int16_t)(eseq - rtp.seq) < 0){
+	  Skips++;
+	} else if((int16_t)(eseq - rtp.seq) > 0){
+	  Delayed++;
+	}
       }
       eseq = rtp.seq + 1;
       
