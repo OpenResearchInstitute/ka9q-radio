@@ -3,15 +3,17 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <limits.h>
 
+#include "radio.h"
 #include "bandplan.h"
 
-
+char Bandplan_file[] = "bandplan.txt";
 struct bandplan Bandplans[100];
 int Nbandplans;
 
 
-static int compar(const void *a,const void *b){
+static int compar(void const *a,void const *b){
   const double f = *(double *)a;
   const struct bandplan *bp = b;
 
@@ -26,7 +28,7 @@ static int compar(const void *a,const void *b){
 int Bandplan_init;
 extern int init_bandplan(int class);
 
-const struct bandplan *lookup_frequency(const double f){
+struct bandplan *lookup_frequency(double f){
   double key;
 
   key = round(f) / 1.0e6;
@@ -40,26 +42,30 @@ const struct bandplan *lookup_frequency(const double f){
 
 
 int init_bandplan(int class){
-  char line[160];
-  char classes[160];
-  char modes[160];
-  char name[160];
-  double power;
-  double lower,upper;
+  char fname[PATH_MAX];
+
+  snprintf(fname,sizeof(fname),"%s/%s",Libdir,Bandplan_file);
+
   FILE *bandplan;
-
-  int i=0,r;
-
-  if((bandplan = fopen("bandplan.txt","r")) == NULL)
+  if((bandplan = fopen(fname,"r")) == NULL)
     return -1;
 
+  char line[160];
   memset(line,0,sizeof(line));
+  int i=0;
   while(fgets(line,sizeof(line),bandplan) != NULL){
+
     if(line[0] == ';' || line[0] == '#')
       continue;
+    int r;
     for(r=0;r<strlen(line);r++)
       line[r] = tolower(line[r]);
 
+    char classes[160];
+    char modes[160];
+    char name[160];
+    double power;
+    double lower,upper;
     r = sscanf(line,"%lf %lf %s %s %s %lf",&lower,&upper,classes,modes,name,&power);
 	   
     if(r < 5)
