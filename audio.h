@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.15 2017/07/23 23:31:46 karn Exp karn $
+// $Id: audio.h,v 1.16 2017/07/24 02:26:29 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -13,7 +13,6 @@ int send_stereo_audio(complex float const *,int);
 int setup_audio(void);
 
 extern char BB_mcast_address_text[];
-extern int Mcast_dest_port;
 extern int DAC_samprate;
 extern int OPUS_bitrate;
 extern float OPUS_blocktime;

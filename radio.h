@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.31 2017/07/24 02:25:18 karn Exp karn $
+// $Id: radio.h,v 1.32 2017/07/24 06:25:07 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -100,6 +100,9 @@ struct demod {
 
   int frequency_lock;
 
+  // Experimental notch filter
+  struct notchfilter *nf;
+
   // Pre-demod filter parameters
   struct filter *filter;
   int L;            // Signal samples in FFT buffer
@@ -126,12 +129,12 @@ extern int ADC_samprate;
 extern struct modetab Modes[];
 extern const int Nmodes;
 extern struct sockaddr_in Input_source_address;
-extern char IQ_mcast_address_text[25];
-extern int Mcast_dest_port;
+extern char IQ_mcast_address_text[256];
 extern int Input_fd;
 extern const float Headroom; // Audio headroom ratio
 
-int setup_input(char const *);
+int setup_input(char const *,char const *);
+int setup_output(char const *,char const *);
 const int LO2_in_range(const struct demod *,double f,int);
 const double get_freq(struct demod const *);
 double set_freq(struct demod *,double,int);

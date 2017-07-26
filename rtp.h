@@ -10,6 +10,6 @@ struct rtp_header {
 };
 #define RTP_VERS 2
 
-extern int Mcast_dest_port;
+
 
 #endif
