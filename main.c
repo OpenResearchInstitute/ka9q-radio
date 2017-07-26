@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.49 2017/07/24 02:23:52 karn Exp karn $
+// $Id: main.c,v 1.50 2017/07/24 06:24:30 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -16,17 +16,15 @@
 #include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <sys/select.h>
+
 
 #include "radio.h"
 #include "filter.h"
 #include "dsp.h"
 #include "audio.h"
 #include "rtp.h"
+#include "multicast.h"
 
 #define MAXPKT 1500
 
@@ -55,74 +53,29 @@ int DAC_samprate = 48000;
 int Quiet = 0;
 int Verbose = 0;
 int Ctl_port = 4159;
-char IQ_mcast_address_text[25] = "239.1.2.1"; // Long enough for IPv4, but what about IPv6?
-int Mcast_dest_port = 5004;
-char BB_mcast_address_text[25] = "239.2.1.1"; 
+char IQ_mcast_address_text[256] = "239.1.2.1"; // Long enough for IPv4, but what about IPv6?
+char Mcast_dest_port[25];
+char BB_mcast_address_text[256] = "239.2.1.1"; 
 // We have to hold the requested startup frequency until we know the IP address
 // of the SDR front end to send it to
 double Startup_freq = 0;
+enum mode Start_mode = FM;
 
-
-// Set up input socket for multicast data stream from front end
-int setup_input(char const *addr){
-  int fd = -1;
-  struct sockaddr_in sock;
-
-  if(inet_pton(AF_INET,addr,&sock.sin_addr) != 1)
-    return -1;
-
-  if((fd = socket(PF_INET,SOCK_DGRAM,0)) == -1){
-    perror("can't create IPv4 input socket");
-    return -1;
-  }
-
-  int reuse = 1;
-  if(setsockopt(fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
-    perror("ipv4 so_reuseport failed");
-  if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
-    perror("ipv4 so_reuseaddr failed");
-  
-  sock.sin_family = AF_INET;
-  sock.sin_port = htons(Mcast_dest_port);
-  if(bind(fd,(struct sockaddr *)&sock,sizeof(sock)) != 0){
-    perror("bind on IPv4 input socket");
-    return -1;
-  }
-  
-#if 1 // old version, seems required on Apple    
-  struct ip_mreq mreq;
-  mreq.imr_multiaddr = sock.sin_addr;
-  mreq.imr_interface.s_addr = INADDR_ANY;
-  if(setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
-    perror("ipv4 multicast join");
-  
-#else // Linux, etc, for both IPv4/IPv6
-  struct group_req group_req;
-  group_req.gr_interface = 0;
-  sock.sin_family.sin_family = AF_INET;
-  memcpy(&group_req.gr_group,&sock,sizeof(sock));
-  if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-    perror("ip multicast join");
-  
-#endif
-  return fd;
-}
 
 
 int main(int argc,char *argv[]){
-  int c,N;
   struct demod * const demod = &Demod;
 
-  // The display thread assumes en_US.UTF-8, or anything with a grouping character
+  // The display thread assumes en_US.UTF-8, or anything with a thousands grouping character
   // Otherwise the cursor movements will be wrong
   char const *locale = getenv("LANG");
   if(locale == NULL || strlen(locale) == 0)
     locale = "en_US.UTF-8";
   setlocale(LC_ALL,locale);
 
-  // Set defaults
-  // The FFT length will be L + M - 1 because of window overlapping
-  demod->L = 4096;      // Number of samples in buffer
+  // Set program defaults, can be overridden by state file or command line args
+  Start_mode = FM;
+  demod->L = 4096;      // Number of samples in buffer: FFT length = L + M - 1
   demod->M = 4096+1;    // Length of filter impulse response
   demod->samprate = ADC_samprate;
   demod->min_IF = -(ADC_samprate/2 - 16000); // Hardwired for Funcube
@@ -133,7 +86,7 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Warning: A/D rate %'u is not integer multiple of D/A rate %'u; decimation will probably fail\n",
 	    ADC_samprate,DAC_samprate);
   
-  N = demod->L + demod->M - 1;
+  const int N = demod->L + demod->M - 1;
   if((N % demod->decimate) != 0)
     fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,demod->decimate);
 
@@ -144,7 +97,6 @@ int main(int argc,char *argv[]){
   fftwf_import_system_wisdom();
 
   set_second_LO(demod,-ADC_samprate/4);
-  set_mode(demod,FM);
 
   // Load state file, if it exists
   // This overwrites hardwired defaults, but can be overridden with command line args
@@ -155,6 +107,7 @@ int main(int argc,char *argv[]){
   }
 
   // Read command line args. These supersede state file parameters, which in turn supersede program defaults
+  int c;
   while((c = getopt(argc,argv,"B:c:f:i:I:k:l:L:m:M:p:R:qr:t:v")) != EOF){
     int i;
 
@@ -187,7 +140,7 @@ int main(int argc,char *argv[]){
     case 'm':
       for(i = 0; i < Nmodes;i++){
 	if(strcasecmp(optarg,Modes[i].name) == 0){
-	  set_mode(demod,Modes[i].mode);
+	  Start_mode = Modes[i].mode;
 	  break;
 	}
       }
@@ -225,7 +178,6 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-
   if(Verbose){
     fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
     fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
@@ -240,10 +192,15 @@ int main(int argc,char *argv[]){
 	    Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
   }
 
-  Input_fd = setup_input(IQ_mcast_address_text);
+  Input_fd = setup_input(IQ_mcast_address_text,Mcast_dest_port);
+  if(Input_fd == -1){
+    fprintf(stderr,"Can't set up I/Q input\n");
+    exit(1);
+  }
 
   {
     // Set up control port
+    // This has been neglected for a while
     struct sockaddr_in sock;
     sock.sin_family = AF_INET;
     sock.sin_port = htons(Ctl_port);
@@ -256,45 +213,18 @@ int main(int argc,char *argv[]){
       perror("control bind failed");
   }
   // Set up audio output stream(s)
-  Mcast_fd = socket(AF_INET,SOCK_DGRAM,0);
-
-  // I've given up on IPv6 multicast for now. Too many bugs in too many places
-  if(strlen(BB_mcast_address_text) > 0){
-    BB_mcast_sockaddr.sin_family = AF_INET;
-    BB_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
-    inet_pton(AF_INET,BB_mcast_address_text,&BB_mcast_sockaddr.sin_addr);
-
-    // Strictly speaking, it is not necessary to join a multicast group to which we only send.
-    // But this creates a problem with brain-dead Netgear (and probably other) "smart" switches
-    // that do IGMP snooping. There's a setting to handle what happens with multicast groups
-    // to which no IGMP messages are seen. If set to discard them, IPv6 multicast breaks
-    // because there's no IPv6 multicast querier. But set to pass them, then IPv4 multicasts
-    // that aren't subscribed to by anybody are flooded everywhere! We avoid that by subscribing
-    // to our own multicasts.
-#if __APPLE__ // Newer, protocol-independent MCAST_JOIN_GROUP doesn't seem to work on OSX
-    struct ip_mreq mreq;
-    mreq.imr_multiaddr = BB_mcast_sockaddr.sin_addr;
-    mreq.imr_interface.s_addr = INADDR_ANY;
-    if(setsockopt(Mcast_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
-      perror("ipv4 multicast join");
-
-#else // Linux, etc
-    struct group_req group_req;
-    group_req.gr_interface = 0;
-    BB_mcast_sockaddr.sin_family = AF_INET;
-    memcpy(&group_req.gr_group,&BB_mcast_sockaddr,sizeof(struct sockaddr_in));
-    if(setsockopt(Mcast_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-      perror("ipv4 multicast join");
-#endif
+  Mcast_fd = setup_output(BB_mcast_address_text,Mcast_dest_port);
+  if(Mcast_fd == -1){
+    fprintf(stderr,"Can't set up multicast audio output\n");
+    exit(1);
   }
-  // Apparently works for both IPv4 and IPv6
-  int ttl = 2;
-  if(setsockopt(Mcast_fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
-    perror("setsockopt multicast ttl failed");
 
   // Pipes for front end -> demod
   int sv[2];
-  pipe(sv);
+  if(pipe(sv) == -1){
+    perror("pipe");
+    exit(1);
+  }
   Demod_sock = sv[1]; // write end
   demod->input = sv[0]; // read end
 #ifdef F_SETPIPE_SZ // Linux only
@@ -320,6 +250,8 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
 
+  assert(demod->input > 0);
+  set_mode(demod,Start_mode);
 
   input_loop(demod); // Doesn't return
 
@@ -363,6 +295,8 @@ void *input_loop(struct demod *demod){
   int eseq = -1;
 
   while(1){
+
+    assert(demod->input > 0);
 
     fd_set mask;
     FD_ZERO(&mask);
@@ -478,7 +412,7 @@ int savestate(struct demod *demod,char const *statefile){
       fprintf(stderr,"Can't write state file %s\n",statefile);
     } else {
       fprintf(fp,"#KA9Q DSP Receiver State dump\n");
-      fprintf(fp,"Source %s:%d\n",IQ_mcast_address_text,Mcast_dest_port);
+      fprintf(fp,"Source %s %s\n",IQ_mcast_address_text,Mcast_dest_port);
       fprintf(fp,"Frequency %.3f Hz\n",get_freq(demod));
       fprintf(fp,"Mode %s\n",Modes[demod->mode].name);
       fprintf(fp,"Dial offset %.3f Hz\n",demod->dial_offset);
@@ -499,15 +433,14 @@ int loadstate(struct demod *demod,char const *statefile){
     if(fp != NULL){
       char line[PATH_MAX];
       while(fgets(line,sizeof(line),fp) != NULL){
+	chomp(line);
 	double f;
-	int a,b,c,d,e;
-	char str[PATH_MAX];
 	if(sscanf(line,"Frequency %lf",&Startup_freq) > 0){
-	} else if(sscanf(line,"Mode %s",str) > 0){	  
+	} else if(strncmp(line,"Mode ",5) == 0){
 	  int i;
 	  for(i=0;i<Nmodes;i++){
-	    if(strncasecmp(Modes[i].name,str,strlen(Modes[i].name)) == 0){
-	      set_mode(demod,Modes[i].mode);
+	    if(strncasecmp(Modes[i].name,&line[5],strlen(Modes[i].name)) == 0){
+	      Start_mode = Modes[i].mode;
 	      break;
 	    }
 	  }
@@ -520,10 +453,8 @@ int loadstate(struct demod *demod,char const *statefile){
 	} else if(sscanf(line,"Blocksize %d",&demod->L) > 0){
 	} else if(sscanf(line,"Impulse len %d",&demod->M) > 0){
 	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
-	} else if(sscanf(line,"Source %d.%d.%d.%d:%d",&a,&b,&c,&d,&e) > 0){
-	  a &= 0xff; b &= 0xff; c &= 0xff; d &= 0xff;
-	  snprintf(IQ_mcast_address_text,sizeof(IQ_mcast_address_text),"%d.%d.%d.%d",a,b,c,d);
-	  Mcast_dest_port = e;
+	} else if(sscanf(line,"Source %256s %25s",IQ_mcast_address_text,Mcast_dest_port) > 0){
+	  // Sizes defined elsewhere!
 	}
       }
       fclose(fp);
