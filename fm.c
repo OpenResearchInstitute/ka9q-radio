@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.27 2017/07/19 09:44:36 karn Exp karn $
+// $Id: fm.c,v 1.28 2017/07/20 06:17:44 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -170,8 +170,14 @@ void *demod_fm(void *arg){
 	  peakbin = n;
 	}
       }
-      if(peakbin >= 0)
-	demod->plfreq = (float)peakbin * PL_samprate / pl_fft_size;
+      if(peakbin > 0){
+	// Standard PL tones range from 67.0 to 254.1 Hz; ignore out of range results
+	// as they can be falsed by voice in the absence of a tone
+	// This needs to be enhanced as we still get random results on no tone
+	float f = (float)peakbin * PL_samprate / pl_fft_size;
+	if(f > 67 && f < 255)
+	  demod->plfreq = f;
+      }
     }
   }
   fftwf_destroy_plan(pl_plan);
