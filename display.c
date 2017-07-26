@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.51 2017/07/23 23:31:36 karn Exp karn $
+// $Id: display.c,v 1.53 2017/07/24 06:24:02 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -21,15 +21,19 @@
 #include <arpa/inet.h>
 #include <ncurses.h>
 #include <ctype.h>
+#include <sys/socket.h>
+#include <netdb.h>
 // We need some of these definitions for the Griffin dial, but some conflict
 // with definitions in ncurses.h !!arrrrggggh!!
 // So we'll declare ourselves the small parts we need later
 //#include <linux/input.h>
 
+#include "rtp.h"
 #include "radio.h"
 #include "audio.h"
 #include "dsp.h"
 #include "filter.h"
+#include "multicast.h"
 #include "bandplan.h"
 
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
@@ -174,8 +178,16 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     }
     break;
   case 8: // Spare for experimentation
-    Spare += tunestep;
-    break;
+    if(Spare + tunestep > -demod->samprate/2 && Spare + tunestep < demod->samprate/2){
+      Spare += tunestep;
+      // Experimental notch filter
+      struct notchfilter *nf = notch_create(Spare/demod->samprate,.001);
+      struct notchfilter *old_nf = demod->nf;
+      demod->nf = nf;
+      if(old_nf)
+	notch_delete(old_nf);
+      break;
+    }
   }
 }
 
@@ -206,6 +218,12 @@ void *display(void *arg){
   WINDOW * const net = newwin(6,70,21,0);
   
   int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
+
+  struct sockaddr old_input_source_address;
+  char source[INET6_ADDRSTRLEN];
+  char sport[256];
+  source[0] = 0;
+  sport[0] = 0;
 
   for(;;){
     struct bandplan const *bp;
@@ -318,22 +336,23 @@ void *display(void *arg){
     
     extern int Delayed,Skips;
 
-    char source[INET6_ADDRSTRLEN];
-    int sport=-1;
-
-    inet_ntop(AF_INET,&Input_source_address.sin_addr,source,sizeof(source));
-    sport = ntohs(Input_source_address.sin_port);
+    if(memcmp(&old_input_source_address,&Input_source_address,sizeof(old_input_source_address)) != 0){
+      // First time, or source has changed
+      memcpy(&old_input_source_address,&Input_source_address,sizeof(old_input_source_address));
+      getnameinfo((struct sockaddr *)&Input_source_address,sizeof(Input_source_address),source,sizeof(source),
+		  sport,sizeof(sport),NI_NOFQDN|NI_DGRAM);
+    }
 
     // Multicast packet I/O information
     wmove(net,0,0);
+    wprintw(net,"IQ in %s:%s -> %s:%s\n",source,sport,IQ_mcast_address_text,Mcast_dest_port);
+    wprintw(net,"Delayed %d Skips %d\n",Delayed,Skips);
     if(OPUS_bitrate > 0){
-      wprintw(net,"OPUS audio -> %s:%d; %'d bps %.1f ms blocks\n",BB_mcast_address_text,Mcast_dest_port,
+      wprintw(net,"OPUS audio -> %s:%s; %'d bps %.0f ms blocks\n",BB_mcast_address_text,Mcast_dest_port,
 	      OPUS_bitrate,OPUS_blocktime);
     } else {
-      wprintw(net,"PCM audio -> %s:%d\n",BB_mcast_address_text,Mcast_dest_port);
+      wprintw(net,"PCM audio -> %s:%s\n",BB_mcast_address_text,Mcast_dest_port);
     }
-    wprintw(net,"IQ in %s:%d -> %s:%d\n",source,sport,IQ_mcast_address_text,Mcast_dest_port);
-    wprintw(net,"Delayed %d Skips %d\n",Delayed,Skips);
 
     wnoutrefresh(net);
     doupdate();
@@ -394,7 +413,7 @@ void *display(void *arg){
 	char str[160];
 	getentry("IQ input IP dest address: ",str,sizeof(str));
 	if(strlen(str) > 0){
-	  int const i = setup_input(str);
+	  int const i = setup_input(str,Mcast_dest_port);
 	  int const j = Input_fd;
 	  if(i != -1){
 	    Input_fd = i;
