@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.28 2017/07/19 09:45:25 karn Exp karn $
+// $Id: audio.c,v 1.29 2017/07/24 02:26:47 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -34,6 +34,7 @@ int PCM_stereo_read_fd;
 int PCM_stereo_write_fd;
 float OPUS_blocktime = 20;
 int OPUS_bitrate = 32000;
+struct OpusEncoder *Opus;
 struct sockaddr_in BB_mcast_sockaddr;
 pthread_t OPUS_stereo_thread;
 pthread_t PCM_stereo_thread;
@@ -73,12 +74,11 @@ int send_mono_audio(float const *buffer,int size){
 
 
 void *stereo_opus_audio(void *arg){
+  pthread_setname("opus");
   uint32_t timestamp = 0;
   uint16_t seq = 0;
   time_t tt = time(NULL);
   uint32_t const ssrc = tt & 0xffffffff;
-
-  pthread_setname("opus");
 
   // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
   // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
@@ -93,17 +93,10 @@ void *stereo_opus_audio(void *arg){
     return NULL;
   }
   int const opus_blocksize = round(OPUS_blocktime * DAC_samprate / 1000.);
-  complex float * const opusbuf = malloc(sizeof(complex float) * opus_blocksize);
-  if(opusbuf == NULL){
-    fprintf(stderr,"opus buffer malloc failed\n");
-    return NULL;
-  }
-
   int error;
-  struct OpusEncoder * const Opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
+  Opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
   if(Opus == NULL){
     fprintf(stderr,"opus_encoder_create failed, error %d\n",error);
-    free(opusbuf);
     return NULL;
   }
   opus_encoder_ctl(Opus,OPUS_SET_BITRATE(OPUS_bitrate));
@@ -122,9 +115,8 @@ void *stereo_opus_audio(void *arg){
   iovec[1].iov_base = data;
   
   struct msghdr message;
-  message.msg_name = &BB_mcast_sockaddr;
-  // OSX is very finicky about the size of the sockaddr structure; Linux is not
-  message.msg_namelen = sizeof(BB_mcast_sockaddr);
+  message.msg_name = NULL; // Set by connect() call in setup_output()
+  message.msg_namelen = 0;
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 2;
   message.msg_control = NULL;
@@ -132,8 +124,9 @@ void *stereo_opus_audio(void *arg){
   message.msg_flags = 0;
 
   while(1){
+    complex float opusbuf[sizeof(complex float) * opus_blocksize];
     if(fillbuf(OPUS_stereo_read_fd,opusbuf,sizeof(*opusbuf) * opus_blocksize) < 0){
-      perror("stereo_opus_audio: pipe read error");
+      perror("opus: pipe read error");
       break;
     }
     // Encoder accepts stereo, which we represent as complex, but it wants an array of floats
@@ -148,12 +141,15 @@ void *stereo_opus_audio(void *arg){
       rtp.seq = htons(seq++);
       rtp.timestamp = htonl(timestamp);
       iovec[1].iov_len = dlen; // Length varies
-      sendmsg(Mcast_fd,&message,0);
+      int r = sendmsg(Mcast_fd,&message,0);
+      if(r < 0){
+	perror("opus: sendmsg");
+	break;
+      }
     }
     timestamp += opus_blocksize;
   }
   opus_encoder_destroy(Opus);
-  free(opusbuf);
   return NULL;
 }
 void *stereo_pcm_audio(void *arg){
@@ -177,9 +173,8 @@ void *stereo_pcm_audio(void *arg){
   iovec[1].iov_len = sizeof(PCM_buf); // byte count - fixed
   
   struct msghdr message;      
-  message.msg_name = &BB_mcast_sockaddr;
-  // OSX is very finicky about the size of the sockaddr structure; Linux is not
-  message.msg_namelen = sizeof(BB_mcast_sockaddr);
+  message.msg_name = NULL; // Set by connect() call in setup_output()
+  message.msg_namelen = 0;
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 2;
   message.msg_control = NULL;
@@ -190,7 +185,7 @@ void *stereo_pcm_audio(void *arg){
     complex float buffer[PCM_BUFSIZE/2];
 
     if(fillbuf(PCM_stereo_read_fd,buffer,sizeof(buffer)) < 0){
-      perror("stereo_pcm_audio: pipe read error");
+      perror("stereo_pcm: pipe read error");
       break;
     }
 
@@ -202,7 +197,11 @@ void *stereo_pcm_audio(void *arg){
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
     timestamp += PCM_BUFSIZE/2; // Increase by stereo sample count
-    sendmsg(Mcast_fd,&message,0);
+    int r = sendmsg(Mcast_fd,&message,0);
+    if(r < 0){
+      perror("stereo_pcm: sendmsg");
+      break;
+    }
   }
   return NULL;
 }
@@ -228,9 +227,8 @@ void *mono_pcm_audio(void *arg){
   iovec[1].iov_len = sizeof(PCM_buf); // byte count - fixed
   
   struct msghdr message;      
-  message.msg_name = &BB_mcast_sockaddr;
-  // OSX is very finicky about the size of the sockaddr structure; Linux is not
-  message.msg_namelen = sizeof(BB_mcast_sockaddr);
+  message.msg_name = NULL; // Set by connect() call in setup_output()
+  message.msg_namelen = 0;
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 2;
   message.msg_control = NULL;
@@ -241,7 +239,7 @@ void *mono_pcm_audio(void *arg){
     float buffer[PCM_BUFSIZE];
 
     if(fillbuf(PCM_mono_read_fd,buffer,sizeof(buffer)) < 0){
-      perror("mono_pcm_audio: pipe read error");
+      perror("mono_pcm: pipe read error");
       break;
     }
 
@@ -252,7 +250,12 @@ void *mono_pcm_audio(void *arg){
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
     timestamp += PCM_BUFSIZE; // Increase by stereo sample count
-    sendmsg(Mcast_fd,&message,0);
+    int r = sendmsg(Mcast_fd,&message,0);
+    if(r < 0){
+      perror("stereo_pcm: sendmsg");
+      break;
+    }
+
   }
   return NULL;
 }
