@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.7 2017/07/16 16:08:16 karn Exp karn $
+// $Id: iqplay.c,v 1.8 2017/07/23 23:30:21 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -23,6 +23,8 @@
 #include "radio.h"
 #include "rtp.h"
 #include "dsp.h"
+#include "multicast.h"
+
 
 int ADC_samprate = 192000;
 int Verbose;
@@ -47,8 +49,7 @@ int main(int argc,char *argv[]){
   memset(&status,0,sizeof(status));
   int blocksize = 256;
   char *dest = "239.1.2.10"; // Default for testing
-  int dest_port = 5004;     // Default for testing; recommended default RTP port
-  int dest_is_ipv6 = -1;
+  char *dest_port = "5004";     // Default for testing; recommended default RTP port
   locale = getenv("LANG");
 
   while((c = getopt(argc,argv,"vl:b:R:P:f:")) != EOF){
@@ -57,7 +58,7 @@ int main(int argc,char *argv[]){
       dest = optarg;
       break;
     case 'P':
-      dest_port = strtol(optarg,NULL,0);
+      dest_port = optarg;
       break;
     case 'v':
       Verbose++;
@@ -79,64 +80,8 @@ int main(int argc,char *argv[]){
   }
 
   setlocale(LC_ALL,locale);
-  signal(SIGPIPE,SIG_IGN);
-  signal(SIGINT,closedown);
-  signal(SIGKILL,closedown);
-  signal(SIGQUIT,closedown);
-  signal(SIGTERM,closedown);        
-  
   // Set up RTP output socket
-  struct sockaddr_in address4;  
-  struct sockaddr_in6 address6;
-  if(inet_pton(AF_INET,dest,&address4.sin_addr) == 1){
-    // Destination is IPv4
-    dest_is_ipv6 = 0;
-    if((Rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
-      perror("can't create IPv4 output socket");
-      exit(1);
-    }
-    address4.sin_family = AF_INET;
-    address4.sin_port = htons(dest_port);
-
-    if(IN_MULTICAST(ntohl(address4.sin_addr.s_addr))){
-      // Destination is multicast; join it
-      struct group_req group_req;
-      group_req.gr_interface = 0;
-      memcpy(&group_req.gr_group,&address4,sizeof(address4));
-      if(setsockopt(Rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-	perror("setsockopt ipv4 multicast join group failed");
-    } // IN_MULTICAST
-  } else if(inet_pton(AF_INET6,dest,&address6.sin6_addr) == 1){
-    // Destination is IPv6
-    dest_is_ipv6 = 1;
-    address6.sin6_family = AF_INET6;
-    address6.sin6_flowinfo = 0;  
-    address6.sin6_port = htons(dest_port);
-    address6.sin6_scope_id = 0;
-    if((Rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
-      perror("funcube: can't create IPv6 output socket");
-      exit(1);
-    }
-    if(IN6_IS_ADDR_MULTICAST(&address6)){
-      // Destination is multicast; join it
-      struct group_req group_req;
-      group_req.gr_interface = 0;
-      memcpy(&group_req.gr_group,&address6,sizeof(address6));
-      if(setsockopt(Rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-	perror("setsockopt ipv6 multicast join group failed");
-    } // IN6_IS_ADDR_MULTICAST
-  } else {
-    fprintf(stderr,"Can't parse destination %s\n",dest);
-    exit(1);
-  }
-  // Apparently works for both IPv4 and IPv6
-  u_char loop = 1;
-  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
-    perror("setsockopt multicast loop failed");
-
-  u_char ttl = 1;
-  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
-    perror("setsockopt multicast ttl failed");
+  Rtp_sock = setup_output(dest,dest_port);
       
   long ssrc = 0; // fill this in later
 
@@ -154,21 +99,20 @@ int main(int argc,char *argv[]){
   iovec[2].iov_len = sizeof(sampbuf);
 
   struct msghdr message;
-  if(dest_is_ipv6){
-    message.msg_name = &address6;
-    message.msg_namelen = sizeof(address6);
-  } else if(!dest_is_ipv6){
-    message.msg_name = &address4;
-    message.msg_namelen = sizeof(address4);
-  } else {
-    fprintf(stderr,"No valid dest address\n");
-    exit(1);
-  }
+  message.msg_name = NULL;
+  message.msg_namelen = 0;
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 3;
   message.msg_control = NULL;
   message.msg_controllen = 0;
   message.msg_flags = 0;
+
+  signal(SIGPIPE,SIG_IGN);
+  signal(SIGINT,closedown);
+  signal(SIGKILL,closedown);
+  signal(SIGQUIT,closedown);
+  signal(SIGTERM,closedown);        
+  
 
   int timestamp = 0;
   int seq = 0;
@@ -204,7 +148,7 @@ int main(int argc,char *argv[]){
       status.frequency = strtod(temp,NULL);
     }
     if(Verbose)
-      fprintf(stderr,"Transmitting %s at %'d samp/s upconverted %'.1lf Hz to %s:%d\n",
+      fprintf(stderr,"Transmitting %s at %'d samp/s upconverted %'.1lf Hz to %s:%s\n",
 	      filename,status.samprate,status.frequency,dest,dest_port);
 
     while(fillbuf(fd,sampbuf,sizeof(sampbuf)) > 0){
