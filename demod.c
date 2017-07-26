@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.23 2017/07/24 02:25:38 karn Exp karn $
+// $Id: demod.c,v 1.24 2017/07/24 06:22:52 karn Exp karn $
 // Common I/Q processing for all modes
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -9,6 +9,7 @@
 #undef I
 
 #include "radio.h"
+#include "filter.h"
 
 
 float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset estimates, per sample
@@ -53,8 +54,13 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
     // Correct phase
     samp_q = secphi * samp_q - tanphi * samp_i;
     assert(!isnan(samp_q) && !isnan(samp_i));
+    complex float samp = CMPLXF(samp_i,samp_q);
+    // Experimental notch filter
+    if(demod->nf)
+      samp = notch(demod->nf,samp);
+
     // Final corrected sample
-    buffer[i] = CMPLXF(samp_i,samp_q);
+    buffer[i] = samp;
   }
   // Update estimates of DC offset, signal powers and phase error
   demod->DC_i += DC_alpha * (samp_i_sum - cnt * demod->DC_i);
