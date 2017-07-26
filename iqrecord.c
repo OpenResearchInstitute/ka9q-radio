@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.1 2017/06/17 07:22:23 karn Exp karn $
+// $Id: iqrecord.c,v 1.2 2017/07/23 23:30:44 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -52,7 +52,7 @@ struct sockaddr_in sender;
 struct sockaddr_in Input_mcast_sockaddr;
 
 int Input_fd;
-int Mcast_dest_port = 5004;     // Default for testing; recommended default RTP port
+char Mcast_dest_port[] = "5004";     // Default for testing; recommended default RTP port
 
 int main(int argc,char *argv[]){
   int c;
@@ -105,45 +105,11 @@ int main(int argc,char *argv[]){
   signal(SIGPIPE,SIG_IGN);
 
   // Set up input socket for multicast data stream from front end
-  if(inet_pton(AF_INET,iq_mcast_address_text,&Input_mcast_sockaddr.sin_addr) == 1){
-    if((Input_fd = socket(PF_INET,SOCK_DGRAM,0)) == -1){
-      perror("can't create IPv4 input socket");
-      exit(1);
-    }
-
-    int reuse = 1;
-    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
-      perror("ipv4 so_reuseport failed");
-    if(setsockopt(Input_fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse)) != 0)
-      perror("ipv4 so_reuseaddr failed");
-
-    Input_mcast_sockaddr.sin_family = AF_INET;
-    Input_mcast_sockaddr.sin_port = htons(Mcast_dest_port);
-    if(bind(Input_fd,(struct sockaddr *)&Input_mcast_sockaddr,sizeof(struct sockaddr_in)) != 0){
-      perror("bind on IPv4 input socket");
-      exit(1);
-    }
-
-#if 1 // old version, seems required on Apple    
-    struct ip_mreq mreq;
-    mreq.imr_multiaddr = Input_mcast_sockaddr.sin_addr;
-    mreq.imr_interface.s_addr = INADDR_ANY;
-    if(setsockopt(Input_fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0){
-      perror("ipv4 multicast join");
-      exit(1);
-    }
-#else // Linux, etc
-    struct group_req group_req;
-    group_req.gr_interface = 0;
-    Input_mcast_sockaddr.ss_family = AF_INET;
-    memcpy(&group_req.gr_group,&Input_mcast_sockaddr,sizeof(Input_mcast_sockaddr));
-    if(setsockopt(Input_fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
-      perror("ipv4 multicast join");
-      exit(1);
-    }
-#endif
+  Input_fd = setup_input(iq_mcast_address_text,Mcast_dest_port);
+  if(Input_fd == -1){
+    fprintf(stderr,"Can't set up I/Q input\n");
+    exit(1);
   }
-
   input_loop(); // Doesn't return
 
   exit(0);
