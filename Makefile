@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.45 2017/07/26 11:28:34 karn Exp karn $
+# $Id: Makefile,v 1.46 2017/07/27 00:11:38 karn Exp karn $
 INCLUDES=-I /opt/local/include
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -35,13 +35,8 @@ control: control.o modes.o
 radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
-#monitor: monitor.o multicast.o
-#	$(CC) -g -o $@ $^ -lasound -lopus -lm
 monitor: monitor.o multicast.o
-	$(CC) -g -o $@ $^ -lopus -lm
-
-osx_monitor: osx_monitor.o
-	$(CC) -g -o $@ $^ -lopus -lm
+	$(CC) -g -o $@ $^ -lasound -lopus -lm
 
 iqrecord: iqrecord.o multicast.o
 	$(CC) -g -o $@ $^ -lpthread -lm
