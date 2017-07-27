@@ -44,7 +44,7 @@ int setup_input(char const *addr,char const *port){
   }
 
   
-#if 0 // old version, seems required on Apple    
+#if 1 // old version, seems required on Apple    
   struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
   struct ip_mreq mreq;
   mreq.imr_multiaddr.s_addr = sin->sin_addr.s_addr;
