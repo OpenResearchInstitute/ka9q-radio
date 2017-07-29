@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.2 2017/07/23 23:30:44 karn Exp karn $
+// $Id: iqrecord.c,v 1.3 2017/07/26 11:20:45 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -10,49 +10,55 @@
 #include <complex.h>
 #undef I
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <netdb.h>
 #include <sys/select.h>
 #include <sys/types.h>
-#include <attr/xattr.h>
+#include <sys/time.h>
 
 #include "radio.h"
 #include "rtp.h"
+#include "attr.h"
 
-#define NSESSIONS 20
-
+// One for each session being recorded
 struct session {
-  FILE *fp;   // File being recorded
-  uint32_t ssrc;
-  uint32_t timestamp; // first timestamp
-  uint16_t seq; // first sequence number
-  time_t lastused;
-  double frequency;
-  struct sockaddr_in iq_sender;
-  unsigned int samprate;
-} Sessions[NSESSIONS];
+  struct session *next;
+  FILE *fp;                  // File being recorded
+  uint32_t ssrc;             // RTP stream source ID
+  uint32_t start_timestamp;  // first timestamp seen in stream
+  uint32_t timestamp;        // next expected timestamp
+  uint16_t seq;              // next expected sequence number
+  double frequency;          // Tuner LO frequency
+  struct sockaddr iq_sender; // Sender's IP address and source port
+  unsigned int samprate;     // Nominal sampling rate indicated in packet header
+};
 
+struct session *Sessions;
+
+// Largest Ethernet packet size
 #define MAXPKT 1500
 
 void closedown(int a);
 
-void *input_loop(void);
+void input_loop(void);
 
-int ADC_samprate = 192000;
 
 int Quiet;
 
-struct sockaddr_in sender;
-struct sockaddr_in Input_mcast_sockaddr;
+struct sockaddr Sender;
+struct sockaddr Input_mcast_sockaddr;
 
 int Input_fd;
+char IQ_mcast_address_text[256] = "239.1.2.3"; // Default for testing
 char Mcast_dest_port[] = "5004";     // Default for testing; recommended default RTP port
+
+
 
 int main(int argc,char *argv[]){
   int c;
@@ -61,18 +67,13 @@ int main(int argc,char *argv[]){
   locale = getenv("LANG");
   setlocale(LC_ALL,locale);
 
-  fprintf(stderr,"I/Q raw signal recorder for the Funcube Pro and Pro+\n");
-  fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
-  fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
-
   // Defaults
-  Quiet = 0;
-  char *iq_mcast_address_text = "239.1.2.3"; // Default for testing
 
+  Quiet = 0;
   while((c = getopt(argc,argv,"I:l:q")) != EOF){
     switch(c){
     case 'I':
-      iq_mcast_address_text = optarg;
+      strncpy(IQ_mcast_address_text,optarg,sizeof(IQ_mcast_address_text));
       break;
     case 'l':
       locale = optarg;
@@ -83,18 +84,34 @@ int main(int argc,char *argv[]){
     default:
       fprintf(stderr,"Usage: %s [-I iq multicast address] [-l locale] [-q]\n",argv[0]);
       fprintf(stderr,"Default: %s -I %s -l %s\n",
-	      argv[0],iq_mcast_address_text,locale);
+	      argv[0],IQ_mcast_address_text,locale);
       exit(1);
       break;
     }
   }
-  if(iq_mcast_address_text == NULL){
-    fprintf(stderr,"Specify -I iq_mcast_address_text_address\n");
+  if(!Quiet){
+    fprintf(stderr,"I/Q raw signal recorder for the Funcube Pro and Pro+\n");
+    fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
+    fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
+  }
+
+  if(strlen(IQ_mcast_address_text) == 0){
+    fprintf(stderr,"Specify -I IQ_mcast_address_text_address\n");
     exit(1);
   }
   setlocale(LC_ALL,locale);
 
-  fprintf(stderr,"A/D sample rate %'d\n",ADC_samprate);
+
+  // Set up input socket for multicast data stream from front end
+  Input_fd = setup_input(IQ_mcast_address_text,Mcast_dest_port);
+  if(Input_fd == -1){
+    fprintf(stderr,"Can't set up I/Q input\n");
+    exit(1);
+  }
+  int n;
+  n = 1 << 20; // 1 MB
+  if(setsockopt(Input_fd,SOL_SOCKET,SO_RCVBUF,&n,sizeof(n)) == -1)
+    perror("setsockopt");
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -104,12 +121,6 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
 
-  // Set up input socket for multicast data stream from front end
-  Input_fd = setup_input(iq_mcast_address_text,Mcast_dest_port);
-  if(Input_fd == -1){
-    fprintf(stderr,"Can't set up I/Q input\n");
-    exit(1);
-  }
   input_loop(); // Doesn't return
 
   exit(0);
@@ -117,16 +128,15 @@ int main(int argc,char *argv[]){
 
 void closedown(int a){
   if(!Quiet)
-    fprintf(stderr,"radio: caught signal %d: %s\n",a,strsignal(a));
+    fprintf(stderr,"iqrecord: caught signal %d: %s\n",a,strsignal(a));
 
   exit(1);
 }
 
-// Read from RTP network socket, assemble blocks of samples with corrections done
-
-void *input_loop(){
+// Read from RTP network socket, assemble blocks of samples
+void input_loop(){
   int cnt;
-  short samples[MAXPKT];
+  char samples[MAXPKT];
   struct rtp_header rtp;
   struct status status;
   struct iovec iovec[3];
@@ -139,16 +149,16 @@ void *input_loop(){
   iovec[2].iov_len = sizeof(samples);
   
   struct msghdr message;
-  message.msg_name = &sender;
-  message.msg_namelen = sizeof(sender);
+  message.msg_name = &Sender;
+  message.msg_namelen = sizeof(Sender);
   message.msg_iov = iovec;
   message.msg_iovlen = sizeof(iovec) / sizeof(struct iovec);
   message.msg_control = NULL;
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
+  char filename[PATH_MAX] = "";
   while(1){
-
     // Receive I/Q data from front end
     cnt = recvmsg(Input_fd,&message,0);
     if(cnt <= 0){    // ??
@@ -164,77 +174,79 @@ void *input_loop(){
     rtp.seq = ntohs(rtp.seq);
     rtp.timestamp = ntohl(rtp.timestamp);
     
-    struct session *sp = NULL;
-    int i;
-
-    for(i=0;i<NSESSIONS;i++){
-      if(Sessions[i].ssrc == rtp.ssrc
-	 && memcmp(&Sessions[i].iq_sender,&sender,sizeof(struct sockaddr_in)) == 0
-	 && Sessions[i].frequency == status.frequency){
-	sp = &Sessions[i];
+    struct session *sp;
+    for(sp = Sessions;sp != NULL;sp=sp->next){
+      if(sp->ssrc == rtp.ssrc
+	 && memcmp(&sp->iq_sender,&Sender,sizeof(sp->iq_sender)) == 0
+	 && sp->frequency == status.frequency){
 	break;
       }
     }
-    if(sp == NULL){ // Not found; look for empty slot
-      time_t tt = time(NULL);
-      for(i=0;i<NSESSIONS;i++){
-	if(Sessions[i].fp == NULL || Sessions[i].lastused + 30 < tt){
-	  sp = &Sessions[i];
-	  if(sp->fp != NULL){
-	    fprintf(stderr,"Closing old session %d\n",i);
-	    fclose(sp->fp);
-	    sp->fp = NULL;
-	  }
-	  // Initialize entry
-	  char filename[PATH_MAX];
-	  snprintf(filename,sizeof(filename),"iqrecord-%.1lfHz-%lx",status.frequency,(long unsigned)rtp.ssrc);
-	  fprintf(stderr,"create session %ld -> %s\n",(long)(sp - Sessions),filename);
-	  memcpy(&sp->iq_sender,&sender,sizeof(struct sockaddr_in));
-	  sp->frequency = status.frequency;
-	  sp->fp = fopen(filename,"w+");
-	  char temp[PATH_MAX];
-	  snprintf(temp,sizeof(temp),"%lu",(unsigned long)status.samprate);
-	  setxattr(filename,"user.samplerate",temp,strlen(temp),0);
-	  snprintf(temp,sizeof(temp),"%.1f",status.frequency);
-	  setxattr(filename,"user.frequency",temp,strlen(temp),0);
-	  snprintf(temp,sizeof(temp),"%lx",(long unsigned)rtp.ssrc);
-	  setxattr(filename,"user.ssrc",temp,strlen(temp),0);
+    if(sp == NULL){ // Not found; create new one
+      sp = calloc(1,sizeof(*sp));
 
-	  char temp2[PATH_MAX];
-	  inet_ntop(AF_INET,&sender.sin_addr,temp2,sizeof(temp2));
-	  int sport;
-	  sport = ntohs(sender.sin_port);
-	  snprintf(temp,sizeof(temp),"%s:%d",temp2,sport);
-	  setxattr(filename,"user.source",temp,strlen(temp),0);
+      // Initialize entry
+      sp->next = Sessions;
+      Sessions = sp;
 
-	  sp->ssrc = rtp.ssrc;
-	  sp->seq = rtp.seq;
-	  sp->timestamp = rtp.timestamp;
-	  break;
-	}
+      memcpy(&sp->iq_sender,&Sender,sizeof(sp->iq_sender));
+      sp->ssrc = rtp.ssrc;
+      sp->seq = rtp.seq;
+      sp->start_timestamp = rtp.timestamp;
+      sp->timestamp = sp->start_timestamp;
+      sp->frequency = status.frequency;
+
+      // Create file with name iqrecord-frequency-ssrc
+      snprintf(filename,sizeof(filename),"iqrecord-%.1lfHz-%lx",status.frequency,(long unsigned)rtp.ssrc);
+      sp->fp = fopen(filename,"w+");
+
+      if(sp->fp == NULL){
+	fprintf(stderr,"can't write file %s\n",filename);
+	perror("open");
+	continue;
       }
-    }
-    if(sp == NULL){
-      char src[INET6_ADDRSTRLEN];
-      int sport = -1;
-      if(sender.sin_family == AF_INET){
-	inet_ntop(AF_INET,&((struct sockaddr_in *)&sender)->sin_addr,src,sizeof(src));      
-	sport = ntohs(((struct sockaddr_in *)&sender)->sin_port);
-      } else if(sender.sin_family == AF_INET6){
-	inet_ntop(AF_INET6,&((struct sockaddr_in6 *)&sender)->sin6_addr,src,sizeof(src));
-	sport = ntohs(((struct sockaddr_in6 *)&sender)->sin6_port);
-      } else {
-	strcpy(src,"unknown");
-      }
-      fprintf(stderr,"No slots available for ssrc 0x%x from %s:%d\n",(unsigned int)rtp.ssrc,src,sport);
-      continue; // Drop packet
-    }
-    sp->lastused = time(NULL);
+      if(!Quiet)
+	fprintf(stderr,"creating file %s\n",filename);
 
-    fseek(sp->fp,2 * sizeof(int16_t) * (rtp.timestamp - sp->timestamp),SEEK_SET);
+      char *iobuffer = malloc(4096);   // One page
+      setbuffer(sp->fp,iobuffer,4096); // Should free(iobuffer) after the file is closed
+
+      int const fd = fileno(sp->fp);
+      fcntl(fd,F_SETFL,O_NONBLOCK); // Let's see if this keeps us from losing data
+      attrprintf(fd,"samplerate","%lu",(unsigned long)status.samprate);
+      attrprintf(fd,"frequency","%.1f",status.frequency);
+      attrprintf(fd,"ssrc","%lx",(long unsigned)rtp.ssrc);
+
+      char sender_text[256];
+      getnameinfo((struct sockaddr *)&Sender,sizeof(Sender),sender_text,sizeof(sender_text),NULL,0,NI_NOFQDN|NI_DGRAM);
+      attrprintf(fd,"source","%s",sender_text);
+      attrprintf(fd,"multicast","%s",IQ_mcast_address_text);
+      
+      struct timeval tv;
+      gettimeofday(&tv,NULL);
+      attrprintf(fd,"unixstarttime","%ld.%06ld",(long)tv.tv_sec,(long)tv.tv_usec);
+      
+      // 2 channels, I & Q
+      attrprintf(fd,"channels","2");
+
+      // Signed 16-bit integers, little-endian (Intel)
+      attrprintf(fd,"sampleformat","s16le");
+    }
+
+    if(rtp.seq != sp->seq || rtp.timestamp != sp->timestamp){
+      if(!Quiet)
+	fprintf(stderr,"iqrecord %s: Expected seq %d, got %d; expected timestamp %u, got %u\n",
+		filename,sp->seq,rtp.seq,sp->timestamp,rtp.timestamp);
+      sp->seq = rtp.seq;
+      sp->timestamp = rtp.timestamp;
+    }
+    // Should I limit the range on this?
+    fseek(sp->fp,2 * sizeof(int16_t) * (rtp.timestamp - sp->start_timestamp),SEEK_SET);
 
     cnt -= sizeof(rtp) + sizeof(status);
-    fwrite(samples,sizeof(samples[0]),cnt/2,sp->fp);
+    fwrite(samples,sizeof(*samples),cnt,sp->fp);
+    sp->seq++;
+    sp->timestamp += cnt/4; // Assumes 2 channels of s16
   }
 }
  
