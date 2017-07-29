@@ -42,23 +42,21 @@ int setup_input(char const *addr,char const *port){
     fprintf(stderr,"setup_input: Can't create input multicast socket from %s:%s\n",addr,port);
     return -1;
   }
-
   
-#if 1 // old version, seems required on Apple    
+#ifdef __linux__ // Linux, etc, for both IPv4/IPv6
+  struct group_req group_req;
+  group_req.gr_interface = 0;
+  memcpy(&group_req.gr_group,resp->ai_addr,resp->ai_addrlen);
+  if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+    perror("ip multicast join");
+
+#else // old version, seems required on Apple    
   struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
   struct ip_mreq mreq;
   mreq.imr_multiaddr.s_addr = sin->sin_addr.s_addr;
   mreq.imr_interface.s_addr = INADDR_ANY;
   if(setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
     perror("ipv4 multicast join");
-  
-#else // Linux, etc, for both IPv4/IPv6
-  struct group_req group_req;
-  group_req.gr_interface = 0;
-  memcpy(&group_req.gr_group,resp->ai_addr,resp->ai_addrlen);
-  if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-    perror("ip multicast join");
-  
 #endif
   return fd;
 }
@@ -106,21 +104,19 @@ int setup_output(char const *addr,char const *port){
   // that aren't subscribed to by anybody are flooded everywhere! We avoid that by subscribing
   // to our own multicasts.
   
-#if 0 // old version, seems required on Apple    
+#ifdef __linux__ // Linux, etc, for both IPv4/IPv6
+  struct group_req group_req;
+  group_req.gr_interface = 0;
+  memcpy(&group_req.gr_group,resp->ai_addr,resp->ai_addrlen);
+  if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
+    perror("ip multicast join");
+#else // old version, seems required on Apple    
   struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
   struct ip_mreq mreq;
   mreq.imr_multiaddr.s_addr = sin->sin_addr.s_addr;
   mreq.imr_interface.s_addr = INADDR_ANY;
   if(setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) != 0)
     perror("ipv4 multicast join");
-  
-#else // Linux, etc, for both IPv4/IPv6
-  struct group_req group_req;
-  group_req.gr_interface = 0;
-  memcpy(&group_req.gr_group,resp->ai_addr,resp->ai_addrlen);
-  if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-    perror("ip multicast join");
-  
 #endif
   return fd;
 }
