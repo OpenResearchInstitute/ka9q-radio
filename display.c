@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.53 2017/07/24 06:24:02 karn Exp karn $
+// $Id: display.c,v 1.54 2017/07/26 11:22:02 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -413,7 +413,7 @@ void *display(void *arg){
 	char str[160];
 	getentry("IQ input IP dest address: ",str,sizeof(str));
 	if(strlen(str) > 0){
-	  int const i = setup_input(str,Mcast_dest_port);
+	  int const i = setup_mcast_input(str,Mcast_dest_port);
 	  int const j = Input_fd;
 	  if(i != -1){
 	    Input_fd = i;

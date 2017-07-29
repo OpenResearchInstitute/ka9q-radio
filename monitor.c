@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.12 2017/07/27 00:08:31 karn Exp karn $
+// $Id: monitor.c,v 1.13 2017/07/29 10:18:06 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -280,7 +280,7 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   // Set up multicast input
-  Input_fd = setup_input(Mcast_address_text,Mcast_dport);
+  Input_fd = setup_mcast_input(Mcast_address_text,Mcast_dport);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up input\n");
     exit(1);

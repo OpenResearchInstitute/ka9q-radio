@@ -7,7 +7,7 @@
 #include "multicast.h"
 
 // Set up input socket for multicast data stream from front end
-int setup_input(char const *addr,char const *port){
+int setup_mcast_input(char const *addr,char const *port){
   int fd = -1;
   struct addrinfo hints,*results,*resp;
 
@@ -60,8 +60,8 @@ int setup_input(char const *addr,char const *port){
 #endif
   return fd;
 }
-// Set up audio output multicast
-int setup_output(char const *addr,char const *port){
+// Set up multicast output
+int setup_mcast_output(char const *addr,char const *port){
   int fd = -1;
   struct addrinfo hints,*results,*resp;
 

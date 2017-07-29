@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.50 2017/07/24 06:24:30 karn Exp karn $
+// $Id: main.c,v 1.51 2017/07/26 11:27:09 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -54,7 +54,7 @@ int Quiet = 0;
 int Verbose = 0;
 int Ctl_port = 4159;
 char IQ_mcast_address_text[256] = "239.1.2.1"; // Long enough for IPv4, but what about IPv6?
-char Mcast_dest_port[25];
+char Mcast_dest_port[25] = "5004";
 char BB_mcast_address_text[256] = "239.2.1.1"; 
 // We have to hold the requested startup frequency until we know the IP address
 // of the SDR front end to send it to
@@ -192,7 +192,7 @@ int main(int argc,char *argv[]){
 	    Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
   }
 
-  Input_fd = setup_input(IQ_mcast_address_text,Mcast_dest_port);
+  Input_fd = setup_mcast_input(IQ_mcast_address_text,Mcast_dest_port);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
@@ -213,7 +213,7 @@ int main(int argc,char *argv[]){
       perror("control bind failed");
   }
   // Set up audio output stream(s)
-  Mcast_fd = setup_output(BB_mcast_address_text,Mcast_dest_port);
+  Mcast_fd = setup_mcast_output(BB_mcast_address_text,Mcast_dest_port);
   if(Mcast_fd == -1){
     fprintf(stderr,"Can't set up multicast audio output\n");
     exit(1);
