@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.46 2017/07/27 00:11:38 karn Exp karn $
+# $Id: Makefile,v 1.47 2017/07/27 01:33:25 karn Exp karn $
 INCLUDES=-I /opt/local/include
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -6,19 +6,16 @@ CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 
-all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay modulate wwvsim wwv.txt wwvh.txt
+all: bandplan.txt help.txt radio control funcube monitor iqrecord iqplay modulate
 
 
 install: all
-	install -D --target-directory=$(BINDIR) radio control funcube monitor iqrecord iqplay modulate wwvsim
-	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt wwv.txt wwvh.txt
+	install -D --target-directory=$(BINDIR) radio control funcube monitor iqrecord iqplay modulate
+	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt
 
 clean:
-	rm -f *.o radio control funcube monitor iqrecord iqplay modulate wwvsim bandplan.txt help.txt wwv.txt wwvh.txt libfcd.a
+	rm -f *.o radio control funcube monitor iqrecord iqplay modulate bandplan.txt help.txt libfcd.a
 	rcsclean
-
-wwvsim: wwvsim.o
-	$(CC) -g -o $@ $^ -lm
 
 modulate: modulate.o misc.o filter.o modes.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lm
@@ -70,5 +67,4 @@ monitor.o: monitor.c rtp.h dsp.h multicast.h
 multicast.o: multicast.c multicast.h
 radio.o: radio.c radio.h filter.h dsp.h audio.h
 ssb.o: ssb.c dsp.h filter.h radio.h audio.h
-wwvsim.o: wwvsim.c
 
