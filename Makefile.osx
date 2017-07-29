@@ -9,8 +9,10 @@ all: bandplan.txt help.txt radio control monitor iqrecord iqplay modulate
 
 
 install: all
-	install -d radio control monitor iqrecord iqplay modulate $(BINDIR)
-	install -d bandplan.txt help.txt $(LIBDIR)
+	 install -d $(LIBDIR)
+ 	 install -d ($BINDIR)
+	 install radio control monitor iqrecord iqplay modulate $(BINDIR)
+	 install bandplan.txt help.txt $(LIBDIR)
 
 clean:
 	rm -f *.o radio control monitor iqrecord iqplay modulate bandplan.txt help.txt libfcd.a
