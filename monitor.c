@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.11 2017/07/19 00:05:57 karn Exp karn $
+// $Id: monitor.c,v 1.12 2017/07/27 00:08:31 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -32,16 +32,24 @@ struct audio {
   OpusDecoder *opus;
 };
 
+// Global variables with defaults
+char *Mcast_address_text = "239.2.1.1";
+char *Mcast_dport = "5004";
+
 // Maximum samples/words per packet
 // Bigger than Ethernet MTU because of network device fragmentation/reassembly
 const int Bufsize = 8192;
-int Input_fd = -1;
 const int L=512;
 const int Samprate = 48000;
-char *Audioname = "default";
 int Verbose;
+#ifdef __linux__
+char *Audioname = "default";
+#else
+char *Audioname = NULL; // No ALSA on OSX!
+#endif
 
 struct audio *Audio[256]; // Hash chains
+int Input_fd = -1;
 
 void close_audio(struct audio *ap){
   if(ap == NULL)
@@ -60,7 +68,7 @@ void close_audio(struct audio *ap){
 
 int Underrun;
 int Overrun;
-snd_pcm_t *Handle;
+snd_pcm_t *Handle = NULL;
 
 // Set up or change ALSA for demodulated sound output
 snd_pcm_t *audio_init(const char *name,unsigned samprate,int channels,int L){
@@ -218,6 +226,7 @@ struct audio *make_session(const uint32_t ssrc){
 }
 
 void closedown(){
+  // These aren't really necessary, since the system will clean up anyway
 #if __linux__
   if(Handle){
     snd_pcm_drop(Handle);
@@ -235,50 +244,52 @@ void closedown(){
 
 
 int main(int argc,char *argv[]){
-  char *mcast_address_string = "239.2.1.1";
-  char *dport = "5004";
 
   int c;
+  // Note: Audioname defaults to "default" on Linux, "stdout" on OSX (which doesn't have ALSA)
   while((c = getopt(argc,argv,"S:I:P:v")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
       break;
+#ifdef __linux__
     case 'S':
       Audioname = optarg;
       break;
+#endif
     case 'I':
-      mcast_address_string = optarg;
+      Mcast_address_text = optarg;
       break;
     case 'P':
-      dport = optarg;
+      Mcast_dport = optarg;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-v] [-S audioname] [-I mcast_address] [-P dport]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -S %s -I %s -P %s\n",argv[0],Audioname,mcast_address_string,dport);
+      fprintf(stderr,"Usage: %s [-v] [-S audioname] [-I mcast_address] [-P Mcast_dport]\n",argv[0]);
+      fprintf(stderr,"Defaults: %s -S %s -I %s -P %s\n",argv[0],Audioname,Mcast_address_text,Mcast_dport);
+      fprintf(stderr,"-S supported only on Linux\n");
       exit(1);
     }
   }
   if(Verbose)
     fprintf(stderr,"%s: %s\n",argv[0],opus_get_version_string());
 
-  if(strcmp(Audioname,"stdout") == 0){
+  if(strcmp(Audioname,"stdout") == 0)
     Audioname = NULL; // Special case for standard output
-    if(isatty(1)){
-      fprintf(stderr,"Audio on standard output selected, and it's a terminal\n");
-      exit(1);
-    }
+  if(Audioname == NULL && isatty(1)){
+    fprintf(stderr,"Audio on standard output selected, and it's a terminal\n");
+    exit(1);
   }
   // Set up multicast input
-  Input_fd = setup_input(mcast_address_string,dport);
+  Input_fd = setup_input(Mcast_address_text,Mcast_dport);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up input\n");
     exit(1);
   }
-  fprintf(stderr,"Listening on %s:%s\n",mcast_address_string,dport);
+  fprintf(stderr,"Listening on %s:%s\n",Mcast_address_text,Mcast_dport);
 
 #ifdef __linux__
-  Handle = audio_init(Audioname,Samprate,2,L); // sets up audio device, opus encoder
+  if(Handle != NULL)
+    Handle = audio_init(Audioname,Samprate,2,L); // sets up audio device, opus encoder
 #endif
 
   struct iovec iovec[2];
@@ -404,7 +415,7 @@ int main(int argc,char *argv[]){
 	samples = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
 	if(samples > 0){
 #if __linux__
-	  if(Audioname)
+	  if(Handle != NULL)
 	    play_stereo_pcm(Handle,outsamps,samples);
 	  else
 #endif
@@ -431,7 +442,7 @@ int main(int argc,char *argv[]){
     }
     if(samples > 0){
 #if __linux__
-      if(Audioname)
+      if(Handle != NULL)
 	play_stereo_pcm(Handle,outsamps,samples);
       else
 #endif

@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.47 2017/07/27 01:33:25 karn Exp karn $
+# $Id: Makefile,v 1.48 2017/07/29 08:24:18 karn Exp karn $
 INCLUDES=-I /opt/local/include
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g    -std=gnu11 -pthread -Wall -funsafe-math-optimizations 
@@ -23,7 +23,7 @@ modulate: modulate.o misc.o filter.o modes.o
 funcube: funcube.o gr.o libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lm
 
-iqplay: iqplay.o multicast.o misc.o
+iqplay: iqplay.o multicast.o attr.o misc.o
 	$(CC) -g -o $@ $^ -lpthread -lm
 
 control: control.o modes.o
@@ -35,7 +35,7 @@ radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.
 monitor: monitor.o multicast.o
 	$(CC) -g -o $@ $^ -lasound -lopus -lm
 
-iqrecord: iqrecord.o multicast.o
+iqrecord: iqrecord.o multicast.o attr.o
 	$(CC) -g -o $@ $^ -lpthread -lm
 
 libfcd.a: fcd.o hid-libusb.o
@@ -58,8 +58,8 @@ modulate.o: modulate.c dsp.h filter.h
 gr.o: gr.c sdr.h
 hid-libusb.o: hid-libusb.c hidapi.h
 iq.o: iq.c dsp.h filter.h radio.h audio.h
-iqplay.o: iqplay.c rtp.h dsp.h radio.h multicast.h
-iqrecord.o: iqrecord.c rtp.h radio.h multicast.h
+iqplay.o: iqplay.c rtp.h dsp.h radio.h multicast.h attr.h
+iqrecord.o: iqrecord.c rtp.h radio.h multicast.h attr.h
 main.o: main.c radio.h filter.h dsp.h audio.h rtp.h multicast.h
 misc.o: misc.c
 modes.o: modes.c 
