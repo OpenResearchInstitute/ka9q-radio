@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.13 2017/07/29 10:18:06 karn Exp karn $
+// $Id: monitor.c,v 1.14 2017/07/29 21:42:57 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -27,20 +27,19 @@ struct audio {
   uint32_t ssrc;
   int eseq; // Next expected sequence number
   int etime; // Next expected timestamp
-  time_t lastused;
-  struct sockaddr_in sender;
+  struct sockaddr sender;
   OpusDecoder *opus;
 };
 
-// Global variables with defaults
-char *Mcast_address_text = "239.2.1.1";
-char *Mcast_dport = "5004";
+// Global variables
+char *Mcast_address_text;
+char *Mcast_dport;
 
 // Maximum samples/words per packet
 // Bigger than Ethernet MTU because of network device fragmentation/reassembly
 const int Bufsize = 8192;
 const int L=512;
-const int Samprate = 48000;
+const int Samprate = 48000; // Too hard to handle other sample rates right now
 int Verbose;
 #ifdef __linux__
 char *Audioname = "default";
@@ -184,10 +183,10 @@ int play_stereo_pcm(snd_pcm_t *handle,const int16_t *outsamps,const int size){
 }
 #endif
 
-struct audio *lookup_session(const uint32_t ssrc,const struct sockaddr_in *sender){
-  struct audio *sp;
+struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
 
   // Walk hash chain
+  struct audio *sp;
   for(sp = Audio[ssrc & 0xff]; sp != NULL; sp = sp->next){
     if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
       // Found it
@@ -201,23 +200,25 @@ struct audio *lookup_session(const uint32_t ssrc,const struct sockaddr_in *sende
 	sp->next = Audio[ssrc & 0xff];
 	Audio[ssrc & 0xff] = sp;
       }
-      sp->lastused = time(NULL); // Update last used time
       return sp;
     }
   }
   return NULL;
 }
 // Create a new session, partly initialize; ssrc is used as hash key
-struct audio *make_session(const uint32_t ssrc){
+struct audio *make_session(struct sockaddr *sender,uint32_t ssrc,uint16_t seq,uint32_t timestamp){
   struct audio *sp;
 
-  if((sp = calloc(1,sizeof(struct audio))) == NULL)
+  if((sp = calloc(1,sizeof(*sp))) == NULL)
     return NULL; // Shouldn't happen on modern machines!
   
-  sp->lastused = time(NULL);
-  // Partly initialize entry; caller has to do other fields
-  // Put at head of bucket chain
+  // Initialize entry
+  memcpy(&sp->sender,sender,sizeof(struct sockaddr));
   sp->ssrc = ssrc;
+  sp->eseq = seq;
+  sp->etime = timestamp;
+
+  // Put at head of bucket chain
   sp->next = Audio[ssrc & 0xff];
   if(sp->next != NULL)
     sp->next->prev = sp;
@@ -226,27 +227,15 @@ struct audio *make_session(const uint32_t ssrc){
 }
 
 void closedown(){
-  // These aren't really necessary, since the system will clean up anyway
-#if __linux__
-  if(Handle){
-    snd_pcm_drop(Handle);
-    snd_pcm_close(Handle);
-    Handle = NULL;
-  }
-#endif
-
-  if(Input_fd != -1){
-    close(Input_fd);
-    Input_fd = -1;
-  }
   exit(0);
 }
 
 
-int main(int argc,char *argv[]){
-
-  int c;
+int main(int argc,char * const argv[]){
   // Note: Audioname defaults to "default" on Linux, "stdout" on OSX (which doesn't have ALSA)
+  Mcast_address_text = "239.2.1.1";
+  Mcast_dport = "5004";
+  int c;
   while((c = getopt(argc,argv,"S:I:P:v")) != EOF){
     switch(c){
     case 'v':
@@ -255,6 +244,8 @@ int main(int argc,char *argv[]){
 #ifdef __linux__
     case 'S':
       Audioname = optarg;
+      if(strcmp(Audioname,"stdout") == 0)
+	Audioname = NULL;  // Special case for standard output
       break;
 #endif
     case 'I':
@@ -264,23 +255,25 @@ int main(int argc,char *argv[]){
       Mcast_dport = optarg;
       break;
     default:
+#ifdef __linux__
       fprintf(stderr,"Usage: %s [-v] [-S audioname] [-I mcast_address] [-P Mcast_dport]\n",argv[0]);
       fprintf(stderr,"Defaults: %s -S %s -I %s -P %s\n",argv[0],Audioname,Mcast_address_text,Mcast_dport);
-      fprintf(stderr,"-S supported only on Linux\n");
+#else
+      fprintf(stderr,"Usage: %s [-v] [-I mcast_address] [-P Mcast_dport]\n",argv[0]);
+      fprintf(stderr,"Defaults: %s -I %s -P %s\n",argv[0],Mcast_address_text,Mcast_dport);
+#endif      
       exit(1);
     }
   }
   if(Verbose)
     fprintf(stderr,"%s: %s\n",argv[0],opus_get_version_string());
 
-  if(strcmp(Audioname,"stdout") == 0)
-    Audioname = NULL; // Special case for standard output
   if(Audioname == NULL && isatty(1)){
-    fprintf(stderr,"Audio on standard output selected, and it's a terminal\n");
+    fprintf(stderr,"Won't write raw PCM audio to a terminal. Redirect stdout.\n");
     exit(1);
   }
   // Set up multicast input
-  Input_fd = setup_mcast_input(Mcast_address_text,Mcast_dport);
+  Input_fd = setup_mcast(Mcast_address_text,Mcast_dport,0);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up input\n");
     exit(1);
@@ -302,7 +295,7 @@ int main(int argc,char *argv[]){
   iovec[1].iov_len = sizeof(data);
 
   struct msghdr message;
-  struct sockaddr_in sender;
+  struct sockaddr sender;
   message.msg_name = &sender;
   message.msg_namelen = sizeof(sender);
   message.msg_iov = &iovec[0];
@@ -335,10 +328,9 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);
   signal(SIGPIPE,SIG_IGN);
 
-  struct timeval last_receive_time;
   struct timeval receive_time;
   gettimeofday(&receive_time,NULL);
-  last_receive_time = receive_time;
+  struct timeval last_receive_time = receive_time;
   int recentbytes = 0;
   float bitrate = 0;
 
@@ -356,7 +348,7 @@ int main(int argc,char *argv[]){
     rtp.timestamp = ntohl(rtp.timestamp);
 
     // Look up session
-    struct audio *sp = lookup_session(rtp.ssrc,&sender);
+    struct audio *sp = lookup_session(&sender,rtp.ssrc);
 
     if(sp == NULL){
       // Not found; create new entry
@@ -368,14 +360,10 @@ int main(int argc,char *argv[]){
 
       fprintf(stderr,"New stream from %s:%s ssrc %x type %d\n",addr,port,rtp.ssrc,rtp.mpt);
 
-      if((sp = make_session(rtp.ssrc)) == NULL){
+      if((sp = make_session(&sender,rtp.ssrc,rtp.seq,rtp.timestamp)) == NULL){
 	fprintf(stderr,"No room!!\n");
 	continue;
       }
-      // Initialize entry
-      memcpy(&sp->sender,&sender,sizeof(struct sockaddr_in));
-      sp->eseq = rtp.seq;
-      sp->etime = rtp.timestamp;
     }
     int drop = 0;
     if(rtp.seq != sp->eseq){
@@ -414,13 +402,12 @@ int main(int argc,char *argv[]){
 	// packet dropped; conceal
 	samples = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
 	if(samples > 0){
-#if __linux__
+#ifdef __linux__
 	  if(Handle != NULL)
 	    play_stereo_pcm(Handle,outsamps,samples);
 	  else
 #endif
 	    write(1,outsamps,samples*2*sizeof(*outsamps));
-
 	}
       }
       samples = opus_decode(sp->opus,(unsigned char *)data,size,(opus_int16 *)outsamps,sizeof(outsamps),0);
@@ -441,7 +428,7 @@ int main(int argc,char *argv[]){
 	      interval,(unsigned long)sp->ssrc,(int)size,bitrate,(int)samples);
     }
     if(samples > 0){
-#if __linux__
+#ifdef __linux__
       if(Handle != NULL)
 	play_stereo_pcm(Handle,outsamps,samples);
       else

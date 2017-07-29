@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.4 2017/07/29 10:18:42 karn Exp karn $
+// $Id: iqrecord.c,v 1.5 2017/07/29 21:42:42 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -104,7 +104,7 @@ int main(int argc,char *argv[]){
 
 
   // Set up input socket for multicast data stream from front end
-  Input_fd = setup_mcast_input(IQ_mcast_address_text,Mcast_dest_port);
+  Input_fd = setup_mcast(IQ_mcast_address_text,Mcast_dest_port,0);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);

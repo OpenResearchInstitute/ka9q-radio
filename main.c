@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.51 2017/07/26 11:27:09 karn Exp karn $
+// $Id: main.c,v 1.52 2017/07/29 21:42:49 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -192,7 +192,7 @@ int main(int argc,char *argv[]){
 	    Kaiser_beta,demod->M,1000.*demod->M/ADC_samprate,ADC_samprate,(float)ADC_samprate/N);
   }
 
-  Input_fd = setup_mcast_input(IQ_mcast_address_text,Mcast_dest_port);
+  Input_fd = setup_mcast(IQ_mcast_address_text,Mcast_dest_port,0);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
@@ -213,7 +213,7 @@ int main(int argc,char *argv[]){
       perror("control bind failed");
   }
   // Set up audio output stream(s)
-  Mcast_fd = setup_mcast_output(BB_mcast_address_text,Mcast_dest_port);
+  Mcast_fd = setup_mcast(BB_mcast_address_text,Mcast_dest_port,1);
   if(Mcast_fd == -1){
     fprintf(stderr,"Can't set up multicast audio output\n");
     exit(1);
