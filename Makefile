@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.49 2017/07/29 10:17:57 karn Exp karn $
+# $Id: Makefile,v 1.50 2017/07/30 00:16:16 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -45,7 +45,7 @@ attr.o: attr.c attr.h
 audio.o: audio.c dsp.h audio.h rtp.h
 bandplan.o: bandplan.c bandplan.h
 cam.o: cam.c dsp.h filter.h radio.h audio.h
-control.o: control.c dsp.h
+control.o: control.c dsp.h radio.h
 demod.o: demod.c radio.h
 display.o: display.c radio.h audio.h dsp.h filter.h bandplan.h multicast.h
 dsb.o: dsb.c dsp.h filter.h radio.h audio.h
