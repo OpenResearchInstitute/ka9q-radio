@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.14 2017/07/29 21:42:57 karn Exp karn $
+// $Id: monitor.c,v 1.15 2017/07/29 23:56:12 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -281,7 +281,7 @@ int main(int argc,char * const argv[]){
   fprintf(stderr,"Listening on %s:%s\n",Mcast_address_text,Mcast_dport);
 
 #ifdef __linux__
-  if(Handle != NULL)
+  if(Audioname != NULL)
     Handle = audio_init(Audioname,Samprate,2,L); // sets up audio device, opus encoder
 #endif
 
