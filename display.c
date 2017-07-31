@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.55 2017/07/29 21:42:26 karn Exp karn $
+// $Id: display.c,v 1.56 2017/07/29 23:55:41 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -514,8 +514,19 @@ void *display(void *arg){
 	char str[160];
 	getentry("Enter frequency: ",str,sizeof(str));
 	double const f = parse_frequency(str);
-	if(f > 0)
-	  set_freq(demod,f,0);
+	if(f > 0){
+	  // If frequency would be out of range, guess kHz or MHz
+	  if(f >= 0.1 && f < 100)
+	    set_freq(demod,f*1e6); // 0.1 - 99.999 Only MHz can be valid
+	  else if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
+	    set_freq(demod,f*1e6);
+	  else if(f < 2000)        // Could be kHz or MHz, arbitarily assume kHz
+	    set_freq(demod,f*1e3);
+	  else if(f < 100000)      // Can only be kHz
+	    set_freq(demod,f*1e3);
+	  else                     // ignore 
+	    ; 
+	}
       }
       break;
     case 'i':    // Recenter IF
