@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.52 2017/07/29 21:42:49 karn Exp karn $
+// $Id: main.c,v 1.53 2017/07/29 23:55:54 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -54,24 +54,27 @@ int Quiet = 0;
 int Verbose = 0;
 int Ctl_port = 4159;
 char IQ_mcast_address_text[256] = "239.1.2.1"; // Long enough for IPv4, but what about IPv6?
-char Mcast_dest_port[25] = "5004";
+char Mcast_dest_port[256] = "5004";
 char BB_mcast_address_text[256] = "239.2.1.1"; 
 // We have to hold the requested startup frequency until we know the IP address
 // of the SDR front end to send it to
 double Startup_freq = 0;
 enum mode Start_mode = FM;
-
+char Locale[256] = "en_US.UTF-8";
 
 
 int main(int argc,char *argv[]){
   struct demod * const demod = &Demod;
 
-  // The display thread assumes en_US.UTF-8, or anything with a thousands grouping character
-  // Otherwise the cursor movements will be wrong
-  char const *locale = getenv("LANG");
-  if(locale == NULL || strlen(locale) == 0)
-    locale = "en_US.UTF-8";
-  setlocale(LC_ALL,locale);
+  {
+    // The display thread assumes en_US.UTF-8, or anything with a thousands grouping character
+    // Otherwise the cursor movements will be wrong
+    char const * const cp = getenv("LANG");
+    if(cp != NULL){
+      strncpy(Locale,cp,sizeof(Locale));
+      setlocale(LC_ALL,Locale);
+    }
+  }
 
   // Set program defaults, can be overridden by state file or command line args
   Start_mode = FM;
@@ -131,8 +134,8 @@ int main(int argc,char *argv[]){
       Kaiser_beta = strtod(optarg,NULL);
       break;
     case 'l':
-      locale = optarg;
-      setlocale(LC_ALL,locale);
+      strncpy(Locale,optarg,sizeof(Locale));
+      setlocale(LC_ALL,Locale);
       break;
     case 'L':
       demod->L = strtol(optarg,NULL,0);
@@ -170,9 +173,9 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-O Opus multicast address] [-P PCM multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
-      fprintf(stderr,"Default: %s -B %.1f -c %.2lf -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d\n",
-	      argv[0],OPUS_blocktime,demod->calibrate*1e6,IQ_mcast_address_text,locale,demod->L,"FM",demod->M,
+      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-r opus_bitrate] [-t threads]\n",argv[0]);
+      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d\n",
+	      argv[0],OPUS_blocktime,demod->calibrate*1e6,Startup_freq,IQ_mcast_address_text,Locale,demod->L,Modes[Start_mode].name,demod->M,
 	      BB_mcast_address_text,OPUS_bitrate,Nthreads);
       exit(1);
       break;
@@ -412,6 +415,7 @@ int savestate(struct demod *demod,char const *statefile){
       fprintf(stderr,"Can't write state file %s\n",statefile);
     } else {
       fprintf(fp,"#KA9Q DSP Receiver State dump\n");
+      fprintf(fp,"Locale %s\n",Locale);
       fprintf(fp,"Source %s %s\n",IQ_mcast_address_text,Mcast_dest_port);
       fprintf(fp,"Frequency %.3f Hz\n",get_freq(demod));
       fprintf(fp,"Mode %s\n",Modes[demod->mode].name);
@@ -423,6 +427,10 @@ int savestate(struct demod *demod,char const *statefile){
       fprintf(fp,"Blocksize %d\n",demod->L);
       fprintf(fp,"Impulse len %d\n",demod->M);
       fprintf(fp,"Tunestep %d\n",Tunestep);
+      fprintf(fp,"Audio multicast address %s\n",BB_mcast_address_text);
+      fprintf(fp,"Opus blocktime %.0f\n",OPUS_blocktime);
+      fprintf(fp,"OPUS bitrate %d\n",OPUS_bitrate);
+      fprintf(fp,"Control port %d\n",Ctl_port);
       fclose(fp);
     }
     return 0;
@@ -453,8 +461,14 @@ int loadstate(struct demod *demod,char const *statefile){
 	} else if(sscanf(line,"Blocksize %d",&demod->L) > 0){
 	} else if(sscanf(line,"Impulse len %d",&demod->M) > 0){
 	} else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
-	} else if(sscanf(line,"Source %256s %25s",IQ_mcast_address_text,Mcast_dest_port) > 0){
+	} else if(sscanf(line,"Source %256s %256s",IQ_mcast_address_text,Mcast_dest_port) > 0){
 	  // Sizes defined elsewhere!
+	} else if(sscanf(line,"Audio multicast address %256s",BB_mcast_address_text) > 0){
+	} else if(sscanf(line,"Opus blocktime %f",&OPUS_blocktime) > 0){
+	} else if(sscanf(line,"OPUS bitrate %d",&OPUS_bitrate) > 0){
+	} else if(sscanf(line,"Control port %d",&Ctl_port) > 0){
+	} else if(sscanf(line,"Locale %256s",Locale)){
+	  setlocale(LC_ALL,Locale);
 	}
       }
       fclose(fp);
