@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.56 2017/08/02 06:21:57 karn Exp karn $
+// $Id: main.c,v 1.57 2017/08/02 07:45:03 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -192,21 +192,19 @@ int main(int argc,char *argv[]){
     exit(1);
   }
 
-  if(demod->ctl_port != -1){
-    // Set up control port
-    // This has been neglected for a while
-    struct sockaddr_in sock;
-    sock.sin_family = AF_INET;
-    sock.sin_port = htons(demod->ctl_port);
-    sock.sin_addr.s_addr = INADDR_ANY;
+  // Set up control port
+  // This has been neglected for a while
+  struct sockaddr_in sock;
+  sock.sin_family = AF_INET;
+  sock.sin_port = htons(demod->ctl_port);
+  sock.sin_addr.s_addr = INADDR_ANY;
+  
+  if((demod->ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
+    perror("can't open control socket");
+  
+  if(demod->ctl_port && bind(demod->ctl_fd,(struct sockaddr *)&sock,sizeof(struct sockaddr_in)) != 0)
+    perror("control bind failed");
 
-    if((demod->ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
-      perror("can't open control socket");
-
-    if(bind(demod->ctl_fd,(struct sockaddr *)&sock,sizeof(struct sockaddr_in)) != 0)
-      perror("control bind failed");
-  } else
-    demod->ctl_fd = -1;
 
   if(setup_audio(&Audio) != 0){
     fprintf(stderr,"Audio setup failed\n");
