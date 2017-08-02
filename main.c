@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.55 2017/08/02 02:31:55 karn Exp karn $
+// $Id: main.c,v 1.56 2017/08/02 06:21:57 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -67,8 +67,15 @@ int main(int argc,char *argv[]){
  
   // Don't let set_mode() write an eof to stdin, which it would do with the default value (0) of corr_iq_write_fd
   demod->corr_iq_write_fd = demod->corr_iq_read_fd = -1;
+  // Set program defaults, can be overridden by state file or command line args
+  demod->ctl_port = -1; // Disable for now
   demod->L = 4096;      // Number of samples in buffer: FFT length = L + M - 1
   demod->M = 4096+1;    // Length of filter impulse response
+  demod->kaiser_beta = 3.0; 
+  strncpy(demod->iq_mcast_address_text,"239.1.2.1",sizeof(demod->iq_mcast_address_text));
+  Audio.opus_bitrate = 32000;
+  Audio.opus_blocktime = 20;
+  strncpy(Audio.audio_mcast_address_text,"239.2.1.1",sizeof(Audio.audio_mcast_address_text));
   // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
   fftwf_import_system_wisdom();
 
@@ -90,7 +97,7 @@ int main(int argc,char *argv[]){
   // Read command line args. Ordering is important; everything overrides the default state file,
   // but parameters given before an explicit state file will be overriden by the state file
   int c;
-  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:R:qr:t:v")) != EOF){
+  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:R:qo:t:v")) != EOF){
     int i;
 
     switch(c){
@@ -143,7 +150,7 @@ int main(int argc,char *argv[]){
     case 'q':
       Quiet++; // Suppress display
       break;
-    case 'r':
+    case 'o':
       Audio.opus_bitrate = strtol(optarg,NULL,0);
       break;
     case 'R':
@@ -159,7 +166,7 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-d statefile] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-r opus_bitrate] [-t threads] [-v]\n",argv[0]);
+      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-d statefile] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-t threads] [-v]\n",argv[0]);
       fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d\n",
 	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,Statepath,demod->startup_freq,demod->iq_mcast_address_text,Locale,demod->L,Modes[demod->start_mode].name,demod->M,
 	      Audio.audio_mcast_address_text,Audio.opus_bitrate,Nthreads);
@@ -185,7 +192,7 @@ int main(int argc,char *argv[]){
     exit(1);
   }
 
-  {
+  if(demod->ctl_port != -1){
     // Set up control port
     // This has been neglected for a while
     struct sockaddr_in sock;
@@ -198,7 +205,9 @@ int main(int argc,char *argv[]){
 
     if(bind(demod->ctl_fd,(struct sockaddr *)&sock,sizeof(struct sockaddr_in)) != 0)
       perror("control bind failed");
-  }
+  } else
+    demod->ctl_fd = -1;
+
   if(setup_audio(&Audio) != 0){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
@@ -262,23 +271,16 @@ void *input_loop(struct demod *demod){
 
     fd_set mask;
     FD_ZERO(&mask);
-    FD_SET(demod->ctl_fd,&mask);
+    if(demod->ctl_fd != -1)
+      FD_SET(demod->ctl_fd,&mask);
     FD_SET(demod->input_fd,&mask);
 
-    fd_set errmask;
-    FD_ZERO(&errmask);
-    FD_SET(demod->ctl_fd,&errmask);
-    FD_SET(demod->input_fd,&errmask);
-    
-    // The timeout and/or errmask recovers us if demod->input_fd changes, e.g., from the interactive 'I' command in display.c
+    // The timeout recovers us if demod->input_fd changes, e.g., from the interactive 'I' command in display.c
     struct timeval timeout;
     timeout.tv_sec = 0;
     timeout.tv_usec = 100000;
-    select(FD_SETSIZE,&mask,NULL,&errmask,&timeout);
-    if(FD_ISSET(demod->input_fd,&errmask) || FD_ISSET(demod->ctl_fd,&errmask)){
-      usleep(1000); // just in case we tightly loop
-      continue;
-    }
+    select(FD_SETSIZE,&mask,NULL,NULL,&timeout);
+
     if(FD_ISSET(demod->ctl_fd,&mask)){
       // Got a command
       socklen_t addrlen;
