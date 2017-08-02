@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.58 2017/07/31 03:16:11 karn Exp karn $
+// $Id: display.c,v 1.59 2017/08/02 02:31:48 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -411,7 +411,7 @@ void *display(void *arg){
     case '?':
       popup("help.txt");
       break;
-    case 's':
+    case 'r':
       {
 	char str[160];
 	char tmp[256];
@@ -422,6 +422,18 @@ void *display(void *arg){
 	    break;
 	  snprintf(tmp,sizeof(tmp),"%s/.radiostate/%s",getenv("HOME"),str);
 	  loadstate(demod,tmp);
+	}
+      }
+      break;
+    case 'w':
+      {
+	char str[160];
+	char tmp[256];
+
+	getentry("Save state file: ",str,sizeof(str));
+	if(strlen(str) > 0){
+	  snprintf(tmp,sizeof(tmp),"%s/.radiostate/%s",getenv("HOME"),str);
+	  savestate(demod,tmp);
 	}
       }
       break;
