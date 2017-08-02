@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.24 2017/07/24 06:22:52 karn Exp karn $
+// $Id: demod.c,v 1.25 2017/07/26 11:23:57 karn Exp karn $
 // Common I/Q processing for all modes
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -72,5 +72,5 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
   demod->sinphi += Power_alpha * cnt * (dpn - demod->sinphi);
 
   // Pass to demodulator thread (ssb/fm/iq etc)
-  write(Demod_sock,buffer,sizeof(buffer));
+  write(demod->corr_iq_write_fd,buffer,sizeof(buffer));
 }

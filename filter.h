@@ -5,8 +5,6 @@
 #include <fftw3.h>
 #undef I
 
-extern float Kaiser_beta;
-
 enum filtertype {
   NONE,
   COMPLEX,

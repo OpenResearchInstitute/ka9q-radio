@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.6 2017/07/08 20:29:47 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.7 2017/07/19 09:44:36 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -43,15 +43,17 @@ void *demod_dsb(void *arg){
   complex float * const fftbuf = fftwf_alloc_complex(filter->olen);
   fftwf_plan fft_plan = fftwf_plan_dft_1d(filter->olen,fftbuf,fftbuf,FFTW_FORWARD,FFTW_ESTIMATE);
   float kaiser_window[filter->olen];
-  make_kaiser(kaiser_window,filter->olen,Kaiser_beta);
+  make_kaiser(kaiser_window,filter->olen,demod->kaiser_beta);
 
   // This filter is unconventional because we iterate on the second LO, which means we
   // have to recompute the *entire* filter input buffer every time
   complex float if_samples[N];
-  fillbuf(demod->input,if_samples+filter->ilen,mm1 * sizeof(*if_samples)); // Prime the pump
-  while(!demod->terminate){
+  fillbuf(demod->corr_iq_read_fd,if_samples+filter->ilen,mm1 * sizeof(*if_samples)); // Prime the pump
+  while(1){
     memmove(if_samples,if_samples+filter->ilen,mm1*sizeof(*if_samples)); // Re-copy the overlap so we can downconvert it again
-    fillbuf(demod->input,if_samples+mm1,filter->ilen*sizeof(*if_samples)); // New samples
+    // New samples
+    if(fillbuf(demod->corr_iq_read_fd,if_samples+mm1,filter->ilen*sizeof(*if_samples)) < 0)
+      break;
 
     complex double LO_phase_step = demod->second_LO_phase_step;
     int tries;
@@ -151,7 +153,7 @@ void *demod_dsb(void *arg){
     complex float audio[filter->olen];
     for(n=0;n<filter->olen;n++)
       audio[n] = filter->output.c[n] * demod->gain;
-    send_stereo_audio(audio,n);
+    send_stereo_audio(demod->audio,audio,n);
   }
   fftwf_free(fftbuf);
   fftwf_destroy_plan(fft_plan);

@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.16 2017/07/24 02:26:29 karn Exp karn $
+// $Id: audio.h,v 1.17 2017/07/26 11:22:37 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -7,17 +7,33 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-pthread_t Audio_thread;
-int send_mono_audio(float const *,int);
-int send_stereo_audio(complex float const *,int);
-int setup_audio(void);
+struct audio {
+  // Audio parameters
+  float opus_blocktime;
+  int opus_bitrate;
+  char audio_mcast_address_text[256];
+  struct sockaddr audio_mcast_sockaddr;
+  int opus_stereo_write_fd;
+  int opus_stereo_read_fd;
+  int pcm_mono_read_fd;
+  int pcm_mono_write_fd;
+  int pcm_stereo_read_fd;
+  int pcm_stereo_write_fd;
+  struct OpusEncoder *opus;
+  pthread_t opus_stereo_thread;
+  pthread_t pcm_stereo_thread;
+  pthread_t pcm_mono_thread;
+  int audio_mcast_fd;
+};
 
-extern char BB_mcast_address_text[];
+struct audio Audio;
+
+
+int send_mono_audio(struct audio *,float const *,int);
+int send_stereo_audio(struct audio *,complex float const *,int);
+int setup_audio(struct audio *);
+
 extern int DAC_samprate;
-extern int OPUS_bitrate;
-extern float OPUS_blocktime;
-extern struct sockaddr_in BB_mcast_sockaddr;
-extern int Mcast_fd;
 extern int Verbose;
 
 

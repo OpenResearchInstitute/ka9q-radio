@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.11 2017/07/10 22:10:27 karn Exp karn $
+// $Id: misc.c,v 1.12 2017/07/18 00:41:18 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -74,6 +74,8 @@ const float camplitude(const complex float *data, const int len){
   return sqrtf(amplitude/len);
 }
 
+// Completely fill buffer
+// Needed because reads from a pipe can be partial
 int fillbuf(const int fd,void *buffer,const int cnt){
   int i;
   unsigned char *bp = buffer;
@@ -91,12 +93,12 @@ int fillbuf(const int fd,void *buffer,const int cnt){
 
 }
 
-// Remove return or newline from end of string
+// Remove return or newline, if any, from end of string
 void chomp(char *s){
-  char *cp;
 
   if(s == NULL)
     return;
+  char *cp;
   if((cp = strchr(s,'\r')) != NULL)
     *cp = '\0';
   if((cp = strchr(s,'\n')) != NULL)
@@ -109,8 +111,8 @@ void chomp(char *s){
 // 12k345 (12.345 kHz)
 // 12m345 (12.345 MHz)
 // 12g345 (12.345 GHz)
-
-
+// If no g/m/k and number is too small, make a heuristic guess
+// NB! This assumes radio covers 100 kHz - 2 GHz; should make more general
 const double parse_frequency(const char *s){
   char *ss = alloca(strlen(s));
 
@@ -120,8 +122,9 @@ const double parse_frequency(const char *s){
 
   ss[i] = '\0';
   
+  // k, m or g in place of decimal point indicates scaling by 1k, 1M or 1G
   char *sp;
-  double mult = 1.0;
+  double mult;
   if((sp = strchr(ss,'g')) != NULL){
     mult = 1e9;
     *sp = '.';
@@ -136,8 +139,23 @@ const double parse_frequency(const char *s){
 
   char *endptr;
   double f = strtod(ss,&endptr);
-  if(endptr != ss)
-    return mult * f;
-  else
-    return 0;
+  if(endptr == ss || f == 0)
+    return 0; // Empty entry, or nothing decipherable
+  
+  if(mult != 1 || f >= 1e5) // If multiplier given, or frequency >= 100 kHz (lower limit), return as-is
+    return f;
+    
+  f *= mult; // Apply scaling, if any
+
+  // If frequency would be out of range, guess kHz or MHz
+  if(f < 100)
+    f *= 1e6;              // 0.1 - 99.999 Only MHz can be valid
+  else if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
+    f *= 1e6;
+  else if(f < 2000)        // Could be kHz or MHz, arbitarily assume kHz
+    f *= 1e3;
+  else if(f < 100000)      // Can only be kHz
+    f *= 1e3;
+
+  return f;
 }

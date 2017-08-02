@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.32 2017/07/24 06:25:07 karn Exp karn $
+// $Id: radio.h,v 1.33 2017/07/26 11:19:54 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -19,7 +19,8 @@ enum cmd {
 };
 // Receiver modes
 enum mode {
-  AM = 0,
+  NO_MODE = 0,
+  AM,
   CAM,     // coherent AM
   IQ,
   ISB,
@@ -66,14 +67,19 @@ struct status {
 
 // Demodulator state block
 struct demod {
+  char iq_mcast_address_text[256];
+  struct sockaddr input_source_address;
+  struct sockaddr ctl_address;
+  
   // Front end state
+  double nominal_samprate; // Sample rate as given by front end
   double samprate;  // True A/D sample rate, assuming same TCXO as tuner
   float min_IF;     // Limits on usable IF due to aliasing, filtering, etc
   float max_IF;
   double first_LO;  // UNcorrected local copy of frequency sent to front end tuner
   double calibrate; // Tuner TCXO calibration; - -> frequency low, + -> frequency high
                     // True first LO freq =  (1 + calibrate) * demod.first_LO
-  uint8_t lna_gain;
+  uint8_t lna_gain; // tracked from A/D and displayed but not currently used
   uint8_t mixer_gain;
   uint8_t if_gain;
 
@@ -82,11 +88,16 @@ struct demod {
   float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
   float sinphi;      // smoothed estimate of I/Q phase error
 
-  // Demod thread data
-  int input;  // Input pipe fd
-  pthread_t demod_thread;
-  int terminate;
+  int input_fd;      // Raw incoming I/Q data from multicast socket
+  int ctl_port;      // Port number for incoming control packets
+  int ctl_fd;        // File descriptor for control input socket
 
+  // Per-thread data
+  int corr_iq_write_fd;    // Corrected I/Q data being written to demodulator thread
+  int corr_iq_read_fd;     // Corrected I/Q data being read by demodulator thread
+  pthread_t demod_thread;
+
+  double startup_freq;
   double dial_offset; // displayed dial frequency = carrier freq + dial_offset (useful for CW)
 
   // Second (software) local oscillator parameters
@@ -110,9 +121,12 @@ struct demod {
   int decimate;     // Input/output sample rate decimation ratio
   float low;        // Edges of filter band
   float high;
+  float kaiser_beta;
 
   // Demodulator parameters
+  enum mode start_mode;
   enum mode mode;   // USB/LSB/FM/etc
+
   float amplitude;  // Amplitude (not power) of signal after filter
   float noise;      // Minimum amplitude for SNR estimates (experimental)
   float snr;        // Estimated signal-to-noise ratio
@@ -121,16 +135,14 @@ struct demod {
   float pdeviation; // Peak frequency deviation (FM)
   float cphase;     // Carrier phase (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
+
+  struct audio *audio; // Link to audio output system
+
 };
 extern char Libdir[];
-extern int Demod_sock;
 extern int Tunestep;
-extern int ADC_samprate;
 extern struct modetab Modes[];
 extern const int Nmodes;
-extern struct sockaddr_in Input_source_address;
-extern char IQ_mcast_address_text[256];
-extern int Input_fd;
 extern const float Headroom; // Audio headroom ratio
 
 int setup_input(char const *,char const *);
@@ -146,7 +158,6 @@ double set_second_LO_rate(struct demod *,double,int);
 int set_filter(struct demod *,float,float);
 int set_mode(struct demod *,enum mode);
 int set_cal(struct demod *,double);
-const double get_cal(struct demod const *);
 int spindown(struct demod *,complex float *,int);
 void proc_samples(struct demod *,int16_t const *,int);
 

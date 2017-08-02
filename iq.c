@@ -33,8 +33,7 @@ void *demod_iq(void *arg){
   set_filter(demod,demod->low,demod->high);
   demod->gain = dB2voltage(70.); // Starting point
 
-  while(!demod->terminate){
-    fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
+  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
@@ -61,7 +60,7 @@ void *demod_iq(void *arg){
     for(n=0;n<filter->olen;n++)
       filter->output.c[n] *= demod->gain;
 
-    send_stereo_audio(filter->output.c,n);
+    send_stereo_audio(demod->audio,filter->output.c,n);
   }
   delete_filter(demod->filter);
   demod->filter = NULL;

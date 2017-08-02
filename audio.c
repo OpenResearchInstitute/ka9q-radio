@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.29 2017/07/24 02:26:47 karn Exp karn $
+// $Id: audio.c,v 1.30 2017/07/26 11:22:59 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -24,21 +24,7 @@
 #include "rtp.h"
 #include "dsp.h"
 #include "audio.h"
-
-int Mcast_fd;
-int OPUS_stereo_read_fd;
-int OPUS_stereo_write_fd;
-int PCM_mono_read_fd;
-int PCM_mono_write_fd;
-int PCM_stereo_read_fd;
-int PCM_stereo_write_fd;
-float OPUS_blocktime = 20;
-int OPUS_bitrate = 32000;
-struct OpusEncoder *Opus;
-struct sockaddr_in BB_mcast_sockaddr;
-pthread_t OPUS_stereo_thread;
-pthread_t PCM_stereo_thread;
-pthread_t PCM_mono_thread;
+#include "multicast.h"
 
 #define PCM_BUFSIZE 512        // 16-bit word count; must fit in Ethernet MTU
 
@@ -51,30 +37,32 @@ short const scaleclip(float x){
   return (short)(SHRT_MAX * x);
 }
   
-int send_stereo_audio(complex float const *buffer,int size){
-  if(OPUS_bitrate != 0)
-    write(OPUS_stereo_write_fd,buffer,size * sizeof(*buffer));
+int send_stereo_audio(struct audio *audio,complex float const *buffer,int size){
+  if(audio->opus_bitrate != 0)
+    write(audio->opus_stereo_write_fd,buffer,size * sizeof(*buffer));
   else
-    write(PCM_stereo_write_fd,buffer,size * sizeof(*buffer));    
+    write(audio->pcm_stereo_write_fd,buffer,size * sizeof(*buffer));    
   return 0;
 }
 
-int send_mono_audio(float const *buffer,int size){
-  if(OPUS_bitrate != 0){
+int send_mono_audio(struct audio *audio,float const *buffer,int size){
+  if(audio->opus_bitrate != 0){
     complex float obuf[size];
     int i;
     for(i=0;i<size;i++)
       obuf[i] = CMPLXF(buffer[i],buffer[i]);
 
-    write(OPUS_stereo_write_fd,obuf,sizeof(obuf));
+    write(audio->opus_stereo_write_fd,obuf,sizeof(obuf));
   } else
-    write(PCM_mono_write_fd,buffer,size * sizeof(*buffer));    
+    write(audio->pcm_mono_write_fd,buffer,size * sizeof(*buffer));    
   return 0;
 }
 
 
 void *stereo_opus_audio(void *arg){
   pthread_setname("opus");
+  assert(arg != NULL);
+  struct audio *audio = arg;
   uint32_t timestamp = 0;
   uint16_t seq = 0;
   time_t tt = time(NULL);
@@ -83,25 +71,25 @@ void *stereo_opus_audio(void *arg){
   // Must correspond to 2.5, 5, 10, 20, 40, 60 ms
   // i.e., 120, 240, 480, 960, 1920, 2880 samples @ 48 kHz
   // opus 1.2 also supports 80, 100 and 120 ms
-  if(OPUS_blocktime != 2.5 && OPUS_blocktime != 5
-     && OPUS_blocktime != 10 && OPUS_blocktime != 20
-     && OPUS_blocktime != 40 && OPUS_blocktime != 60
-     && OPUS_blocktime != 80 && OPUS_blocktime != 100
-     && OPUS_blocktime != 120){
+  if(audio->opus_blocktime != 2.5 && audio->opus_blocktime != 5
+     && audio->opus_blocktime != 10 && audio->opus_blocktime != 20
+     && audio->opus_blocktime != 40 && audio->opus_blocktime != 60
+     && audio->opus_blocktime != 80 && audio->opus_blocktime != 100
+     && audio->opus_blocktime != 120){
     fprintf(stderr,"opus block time must be 2.5/5/10/20/40/60/80/100/120 ms\n");
     fprintf(stderr,"80/100/120 supported only on opus 1.2 and later\n");
     return NULL;
   }
-  int const opus_blocksize = round(OPUS_blocktime * DAC_samprate / 1000.);
+  int const opus_blocksize = round(audio->opus_blocktime * DAC_samprate / 1000.);
   int error;
-  Opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
-  if(Opus == NULL){
+  audio->opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
+  if(audio->opus == NULL){
     fprintf(stderr,"opus_encoder_create failed, error %d\n",error);
     return NULL;
   }
-  opus_encoder_ctl(Opus,OPUS_SET_BITRATE(OPUS_bitrate));
-  opus_encoder_ctl(Opus,OPUS_SET_DTX(1));
-  opus_encoder_ctl(Opus,OPUS_SET_LSB_DEPTH(16));
+  opus_encoder_ctl(audio->opus,OPUS_SET_BITRATE(audio->opus_bitrate));
+  opus_encoder_ctl(audio->opus,OPUS_SET_DTX(1));
+  opus_encoder_ctl(audio->opus,OPUS_SET_LSB_DEPTH(16));
 
   struct rtp_header rtp;
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
@@ -125,12 +113,12 @@ void *stereo_opus_audio(void *arg){
 
   while(1){
     complex float opusbuf[sizeof(complex float) * opus_blocksize];
-    if(fillbuf(OPUS_stereo_read_fd,opusbuf,sizeof(*opusbuf) * opus_blocksize) < 0){
+    if(fillbuf(audio->opus_stereo_read_fd,opusbuf,sizeof(*opusbuf) * opus_blocksize) < 0){
       perror("opus: pipe read error");
       break;
     }
     // Encoder accepts stereo, which we represent as complex, but it wants an array of floats
-    int const dlen = opus_encode_float(Opus,(float *)opusbuf,opus_blocksize,data,sizeof(data));
+    int const dlen = opus_encode_float(audio->opus,(float *)opusbuf,opus_blocksize,data,sizeof(data));
     if(dlen < 0){
       fprintf(stderr,"opus encode error %d\n",dlen);
       continue;
@@ -141,7 +129,7 @@ void *stereo_opus_audio(void *arg){
       rtp.seq = htons(seq++);
       rtp.timestamp = htonl(timestamp);
       iovec[1].iov_len = dlen; // Length varies
-      int r = sendmsg(Mcast_fd,&message,0);
+      int r = sendmsg(audio->audio_mcast_fd,&message,0);
       if(r < 0){
 	perror("opus: sendmsg");
 	break;
@@ -149,11 +137,14 @@ void *stereo_opus_audio(void *arg){
     }
     timestamp += opus_blocksize;
   }
-  opus_encoder_destroy(Opus);
+  opus_encoder_destroy(audio->opus);
   return NULL;
 }
 void *stereo_pcm_audio(void *arg){
   pthread_setname("stereo-pcm");
+  assert(arg != NULL);
+  struct audio *audio = arg;
+
   uint32_t timestamp = 0;
   uint16_t seq = 0;
   time_t tt = time(NULL);
@@ -184,7 +175,7 @@ void *stereo_pcm_audio(void *arg){
   while(1){
     complex float buffer[PCM_BUFSIZE/2];
 
-    if(fillbuf(PCM_stereo_read_fd,buffer,sizeof(buffer)) < 0){
+    if(fillbuf(audio->pcm_stereo_read_fd,buffer,sizeof(buffer)) < 0){
       perror("stereo_pcm: pipe read error");
       break;
     }
@@ -197,7 +188,7 @@ void *stereo_pcm_audio(void *arg){
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
     timestamp += PCM_BUFSIZE/2; // Increase by stereo sample count
-    int r = sendmsg(Mcast_fd,&message,0);
+    int r = sendmsg(audio->audio_mcast_fd,&message,0);
     if(r < 0){
       perror("stereo_pcm: sendmsg");
       break;
@@ -208,6 +199,8 @@ void *stereo_pcm_audio(void *arg){
 
 void *mono_pcm_audio(void *arg){
   pthread_setname("mono-pcm");
+  assert(arg != NULL);
+  struct audio *audio = arg;
   uint32_t timestamp = 0;
   uint16_t seq = 0;
   time_t tt = time(NULL);
@@ -238,7 +231,7 @@ void *mono_pcm_audio(void *arg){
   while(1){
     float buffer[PCM_BUFSIZE];
 
-    if(fillbuf(PCM_mono_read_fd,buffer,sizeof(buffer)) < 0){
+    if(fillbuf(audio->pcm_mono_read_fd,buffer,sizeof(buffer)) < 0){
       perror("mono_pcm: pipe read error");
       break;
     }
@@ -250,38 +243,45 @@ void *mono_pcm_audio(void *arg){
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
     timestamp += PCM_BUFSIZE; // Increase by stereo sample count
-    int r = sendmsg(Mcast_fd,&message,0);
+    int r = sendmsg(audio->audio_mcast_fd,&message,0);
     if(r < 0){
       perror("stereo_pcm: sendmsg");
       break;
     }
-
   }
   return NULL;
 }
 
 // Set up pipes to encoding/sending tasks and start them up
-int setup_audio(){
+int setup_audio(struct audio *audio){
   
   if(Verbose)
     fprintf(stderr,"%s\n",opus_get_version_string());
+  // Set up audio output stream(s)
+  audio->audio_mcast_fd = setup_mcast(Audio.audio_mcast_address_text,Mcast_dest_port,1);
+  if(audio->audio_mcast_fd == -1){
+    fprintf(stderr,"Can't set up multicast audio output\n");
+    return -1;
+  }
+
+
   int pipefd[2];
 
   pipe(pipefd);
-  OPUS_stereo_read_fd = pipefd[0];
-  OPUS_stereo_write_fd = pipefd[1];
+  audio->opus_stereo_read_fd = pipefd[0];
+  audio->opus_stereo_write_fd = pipefd[1];
 
   pipe(pipefd);
-  PCM_stereo_read_fd = pipefd[0];
-  PCM_stereo_write_fd = pipefd[1];
+  audio->pcm_stereo_read_fd = pipefd[0];
+  audio->pcm_stereo_write_fd = pipefd[1];
 
   pipe(pipefd);
-  PCM_mono_read_fd = pipefd[0];
-  PCM_mono_write_fd = pipefd[1];
+  audio->pcm_mono_read_fd = pipefd[0];
+  audio->pcm_mono_write_fd = pipefd[1];
 
-  pthread_create(&OPUS_stereo_thread,NULL,stereo_opus_audio,NULL);
-  pthread_create(&PCM_stereo_thread,NULL,stereo_pcm_audio,NULL);
-  pthread_create(&PCM_mono_thread,NULL,mono_pcm_audio,NULL);  
+  pthread_create(&audio->opus_stereo_thread,NULL,stereo_opus_audio,audio);
+  pthread_create(&audio->pcm_stereo_thread,NULL,stereo_pcm_audio,audio);
+  pthread_create(&audio->pcm_mono_thread,NULL,mono_pcm_audio,audio);
 
   return 0;
 }

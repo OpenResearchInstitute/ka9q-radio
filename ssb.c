@@ -38,9 +38,7 @@ void *demod_ssb(void *arg){
   struct notchfilter *nf = notch_create(48000./demod->samprate,0.001);
 #endif
 
-  while(!demod->terminate){
-    fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
-
+  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
 #if 0
     // experimental notch
     {
@@ -72,7 +70,7 @@ void *demod_ssb(void *arg){
     for(n=0;n<filter->olen;n++)
       filter->output.r[n] *= demod->gain;
 
-    send_mono_audio(filter->output.r,n);
+    send_mono_audio(demod->audio,filter->output.r,n);
   }
   delete_filter(demod->filter);
   demod->filter = NULL;

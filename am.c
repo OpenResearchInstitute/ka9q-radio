@@ -26,8 +26,7 @@ void *demod_am(void *arg){
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
-  while(!demod->terminate){
-    fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
+  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
@@ -48,7 +47,7 @@ void *demod_am(void *arg){
     for(n=0; n<filter->olen; n++)
       audio[n] = (audio[n] - average) * demod->gain;
     
-    send_mono_audio(audio,n);
+    send_mono_audio(demod->audio,audio,n);
   }
   delete_filter(filter);
   demod->filter = NULL;

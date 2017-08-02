@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.28 2017/07/20 06:17:44 karn Exp karn $
+// $Id: fm.c,v 1.29 2017/07/26 11:21:24 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -53,7 +53,7 @@ void *demod_fm(void *arg){
       aresponse[j] = gain * 300./f; // -6 dB/octave de-emphasis to handle PM (indirect FM) transmission
   }
   // Window scaling for REAL input, REAL output
-  window_rfilter(AL,AM,aresponse,Kaiser_beta);
+  window_rfilter(AL,AM,aresponse,demod->kaiser_beta);
 
   struct filter * const afilter = create_filter(AL,AM,aresponse,1,REAL,REAL); // Real input, real output, same sample rate
 
@@ -83,15 +83,14 @@ void *demod_fm(void *arg){
 
   float lastaudio = 0; // state for impulse noise removal
 
-  while(!demod->terminate){
-    // Constant gain used by FM only; automatically adjusted by AGC in linear modes
-    // We do this in the loop because BW can change
-    demod->gain = (Headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
-
-    fillbuf(demod->input,filter->input.c,filter->ilen*sizeof(*filter->input.c));
+  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
+    // Constant gain used by FM only; automatically adjusted by AGC in linear modes
+    // We do this in the loop because BW can change
+
+    demod->gain = (Headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
     // Find average magnitude and magnitude^2
     // Approximate for SNR because magnitude has a chi-squared distribution with 2 degrees of freedom
     float avg_squares = 0;
@@ -159,7 +158,7 @@ void *demod_fm(void *arg){
 	break;
 
     if(n < afilter->olen){
-      send_mono_audio(afilter->output.r,afilter->olen);
+      send_mono_audio(demod->audio,afilter->output.r,afilter->olen);
       fftwf_execute(pl_plan);
       int peakbin = -1;
       float peakenergy = 0;

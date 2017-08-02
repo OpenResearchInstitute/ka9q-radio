@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.57 2017/07/31 03:10:51 karn Exp karn $
+// $Id: display.c,v 1.58 2017/07/31 03:16:11 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -42,6 +42,7 @@ float Spare; // General purpose knob for experiments
 
 int Update_interval = 100;
 int Tunestep;
+extern char Statepath[];
 
 
 // Pop up a temporary window with the contents of a file,
@@ -161,7 +162,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     demod->dial_offset += tunestep;
     break;
   case 4: // Calibrate offset
-    set_cal(demod,get_cal(demod) + tunestep * 1e-6); // ppm
+    set_cal(demod,demod->calibrate + tunestep * 1e-6); // ppm
     break;
   case 5: // Filter low edge
     demod->low += tunestep;
@@ -172,8 +173,8 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     set_filter(demod,demod->low,demod->high);
     break;
   case 7: // Kaiser window beta parameter for filter
-    if(Kaiser_beta + tunestep >= 0.0){
-      Kaiser_beta += tunestep;
+    if(demod->kaiser_beta + tunestep >= 0.0){
+      demod->kaiser_beta += tunestep;
       set_filter(demod,demod->low,demod->high); // Recreate filters
     }
     break;
@@ -214,7 +215,7 @@ void *display(void *arg){
 #endif
   WINDOW * const fw = newwin(9,70,0,0);
   WINDOW * const sig = newwin(10,25,10,0);
-  WINDOW * const sdr = newwin(7,30,10,25);
+  WINDOW * const sdr = newwin(10,30,10,25);
   WINDOW * const net = newwin(6,70,21,0);
   
   int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
@@ -263,10 +264,10 @@ void *display(void *arg){
     }
     wprintw(fw,"\n");
     wprintw(fw,"Dial offset %'17.3f Hz\n",demod->dial_offset);
-    wprintw(fw,"Calibrate   %'17.3f ppm\n",get_cal(demod)*1e6);
+    wprintw(fw,"Calibrate   %'17.3f ppm\n",demod->calibrate *1e6);
     wprintw(fw,"Filter low  %'17.3f Hz\n",demod->low);
     wprintw(fw,"Filter high %'17.3f Hz\n",demod->high);
-    wprintw(fw,"Kaiser Beta %'17.3f\n",Kaiser_beta);
+    wprintw(fw,"Kaiser Beta %'17.3f\n",demod->kaiser_beta);
     wprintw(fw,"Spare       %'17.3f\n",Spare);
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
@@ -325,6 +326,7 @@ void *display(void *arg){
     
     // SDR front end hardware status, I/Q offset and imbalance information
     wmove(sdr,0,0);
+    wprintw(sdr,"Samprate %'10.0f Hz\n",demod->nominal_samprate);
     wprintw(sdr,"I offset %10.6f\n",demod->DC_i);
     wprintw(sdr,"Q offset %10.6f\n",demod->DC_q);
     wprintw(sdr,"I/Q imbal%10.3f dB\n",power2dB(demod->power_i/demod->power_q));
@@ -336,22 +338,23 @@ void *display(void *arg){
     
     extern int Delayed,Skips;
 
-    if(memcmp(&old_input_source_address,&Input_source_address,sizeof(old_input_source_address)) != 0){
+    if(memcmp(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address)) != 0){
       // First time, or source has changed
-      memcpy(&old_input_source_address,&Input_source_address,sizeof(old_input_source_address));
-      getnameinfo((struct sockaddr *)&Input_source_address,sizeof(Input_source_address),source,sizeof(source),
+      memcpy(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address));
+      getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
+		  source,sizeof(source),
 		  sport,sizeof(sport),NI_NOFQDN|NI_DGRAM);
     }
 
     // Multicast packet I/O information
     wmove(net,0,0);
-    wprintw(net,"IQ in %s:%s -> %s:%s\n",source,sport,IQ_mcast_address_text,Mcast_dest_port);
+    wprintw(net,"IQ in %s:%s -> %s:%s\n",source,sport,demod->iq_mcast_address_text,Mcast_dest_port);
     wprintw(net,"Delayed %d Skips %d\n",Delayed,Skips);
-    if(OPUS_bitrate > 0){
-      wprintw(net,"OPUS audio -> %s:%s; %'d bps %.0f ms blocks\n",BB_mcast_address_text,Mcast_dest_port,
-	      OPUS_bitrate,OPUS_blocktime);
+    if(demod->audio->opus_bitrate > 0){
+      wprintw(net,"OPUS audio -> %s:%s; %'d bps %.0f ms blocks\n",demod->audio->audio_mcast_address_text,Mcast_dest_port,
+	      demod->audio->opus_bitrate,demod->audio->opus_blocktime);
     } else {
-      wprintw(net,"PCM audio -> %s:%s\n",BB_mcast_address_text,Mcast_dest_port);
+      wprintw(net,"PCM audio -> %s:%s\n",demod->audio->audio_mcast_address_text,Mcast_dest_port);
     }
 
     wnoutrefresh(net);
@@ -408,18 +411,32 @@ void *display(void *arg){
     case '?':
       popup("help.txt");
       break;
+    case 's':
+      {
+	char str[160];
+	char tmp[256];
+
+	getentry("Load state file: ",str,sizeof(str));
+	if(strlen(str) > 0){
+	  if(loadstate(demod,str) == 0)
+	    break;
+	  snprintf(tmp,sizeof(tmp),"%s/.radiostate/%s",getenv("HOME"),str);
+	  loadstate(demod,tmp);
+	}
+      }
+      break;
     case 'I':
       {
 	char str[160];
 	getentry("IQ input IP dest address: ",str,sizeof(str));
 	if(strlen(str) > 0){
 	  int const i = setup_mcast(str,Mcast_dest_port,0);
-	  int const j = Input_fd;
+	  int const j = demod->input_fd;
 	  if(i != -1){
-	    Input_fd = i;
+	    demod->input_fd = i;
 	    if(j != -1)
 	      close(j);
-	    strncpy(IQ_mcast_address_text,str,sizeof(IQ_mcast_address_text));
+	    strncpy(demod->iq_mcast_address_text,str,sizeof(demod->iq_mcast_address_text));
 	    // Reset error counts
 	    Skips = Delayed = 0;
 	  }
@@ -553,8 +570,8 @@ void *display(void *arg){
 	char str[160],*ptr;
 	getentry("Enter Kaiser window beta: ",str,sizeof(str));
 	double const b = strtod(str,&ptr);
-	if(ptr != str && b >= 0 && b < 100 && b != Kaiser_beta){
-	  Kaiser_beta = b;
+	if(ptr != str && b >= 0 && b < 100 && b != demod->kaiser_beta){
+	  demod->kaiser_beta = b;
 	  set_filter(demod,demod->low,demod->high);
 	}
       }
@@ -567,11 +584,7 @@ void *display(void *arg){
   }
  done:;
   pthread_cleanup_pop(1);
-  {
-    // Dump receiver state to file
-    char statefile[PATH_MAX];
-    snprintf(statefile,sizeof(statefile),"%s/.radiostate",getenv("HOME"));
-    savestate(demod,statefile);
-  }
+  // Dump receiver state to default
+  savestate(demod,Statepath);
   exit(0);
 }

@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.44 2017/07/23 23:30:05 karn Exp karn $
+// $Id: radio.c,v 1.45 2017/07/24 02:25:54 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -37,7 +37,7 @@ const double get_first_LO(const struct demod *demod){
 
 // Return current frequency of carrier frequency at current first IF
 // If sweeping, return second LO freq at "offset" samples ahead of current sample
-const double get_second_LO(const struct demod *demod,const int offset){
+const double get_second_LO(const struct demod *demod,int offset){
   assert(demod != NULL);
 
   if(cimag(demod->second_LO_phase_accel) != 0){
@@ -49,9 +49,11 @@ const double get_second_LO(const struct demod *demod,const int offset){
 }
 
 // Set frequency with optional front end tuning
-double set_freq(struct demod *demod,const double f,const int force){
+double set_freq(struct demod *demod,double f,int force){
   assert(demod != NULL);
 
+  if(demod->samprate == 0)
+    return 0; // Not yet set by the first incoming packet; ignore
   double change = f - get_freq(demod);
 
   // See if we can change only LO2
@@ -63,14 +65,14 @@ double set_freq(struct demod *demod,const double f,const int force){
     if(change < 0){
       // Assume the user will keep tuning down, so put the IF in the
       // high half (lo2 in the low half)
-      lo2 = -demod->samprate/4;
+      lo2 = -demod->nominal_samprate/4;
     } else if(change > 0){
       // Assume the user will keep tuning up
-      lo2 = demod->samprate/4;
+      lo2 = demod->nominal_samprate/4;
     } else {
       // If LO2 is not close to +/-samprate/4, move it there
-      if(fabs(fabs(lo2) - demod->samprate/4) > 1.0){
-	lo2 = copysign(demod->samprate/4,lo2);
+      if(fabs(fabs(lo2) - demod->nominal_samprate/4) > 1.0){
+	lo2 = copysign(demod->nominal_samprate/4,lo2);
       }
     }
     double lo1 = f + lo2 - demod->dial_offset;
@@ -96,7 +98,7 @@ const double get_freq(const struct demod *demod){
 // Note: single precision floating point is not accurate enough at VHF and above
 // demod->first_LO isn't updated here, but by the
 // incoming status frames so it don't change right away
-double set_first_LO(struct demod *demod,const double first_LO,const int force){
+double set_first_LO(struct demod *demod,double first_LO,int force){
   assert(demod != NULL);
 
   if(!force && first_LO == get_first_LO(demod))
@@ -111,8 +113,8 @@ double set_first_LO(struct demod *demod,const double first_LO,const int force){
   requested_status.if_gain = 0xff;
 
   // Send commands to source address of last RTP packet from front end
-  if(sendto(Ctl_fd,&requested_status,sizeof(requested_status),0,(struct sockaddr *)&Input_source_address,
-	    sizeof(Input_source_address)) == -1)
+  if(sendto(demod->ctl_fd,&requested_status,sizeof(requested_status),0,(struct sockaddr *)&demod->input_source_address,
+	    sizeof(demod->input_source_address)) == -1)
     perror("sendto control socket");
 
   // Return new true frequency
@@ -132,7 +134,7 @@ double set_first_LO(struct demod *demod,const double first_LO,const int force){
 // sampling rate, filter setting and alias region
 //
 // If avoid_alias is false, simply test that specified frequency is between +/- samplerate/2
-const int LO2_in_range(const struct demod *demod,const double f,int avoid_alias){
+const int LO2_in_range(const struct demod *demod,double f,int avoid_alias){
   assert(demod != NULL);
   if(avoid_alias)
     return f >= demod->min_IF + max(0,demod->high)
@@ -144,7 +146,7 @@ const int LO2_in_range(const struct demod *demod,const double f,int avoid_alias)
 
 // Set second local oscillator (the one in software)
 // Only limit range to +/- samprate/2; the caller must avoid the alias region, e.g., with LO2_in_range()
-double set_second_LO(struct demod *demod,const double second_LO){
+double set_second_LO(struct demod *demod,double second_LO){
   assert(demod != NULL);
 
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
@@ -158,7 +160,7 @@ double set_second_LO(struct demod *demod,const double second_LO){
 
   return second_LO;
 }
-double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const int force){
+double set_second_LO_rate(struct demod *demod,double second_LO_rate,int force){
   assert(demod != NULL);
 
   if(!force && second_LO_rate == demod->second_LO_rate)
@@ -175,13 +177,33 @@ double set_second_LO_rate(struct demod *demod,const double second_LO_rate,const 
   }
   return second_LO_rate;
 }
-int set_mode(struct demod *demod,const enum mode mode){
+int set_mode(struct demod *demod,enum mode mode){
   assert(demod != NULL);
 
-  demod->terminate = 1;
-  pthread_join(demod->demod_thread,NULL); // Wait for it to finish (if any)
-  
-  demod->terminate = 0;
+  // Send EOF to current demod thread, if any, to cause clean exit
+  if(demod->corr_iq_write_fd != -1){
+    close(demod->corr_iq_write_fd);
+    demod->corr_iq_write_fd = -1;
+    pthread_join(demod->demod_thread,NULL); // Wait for it to finish (if any)
+    demod->corr_iq_read_fd = -1;
+  }
+  // New pipe for front end -> demod thread
+  int sv[2];
+  if(pipe(sv) == -1){
+    perror("pipe");
+    exit(1);
+  }
+  demod->corr_iq_write_fd = sv[1]; // write end
+  demod->corr_iq_read_fd = sv[0]; // read end
+#ifdef F_SETPIPE_SZ // Linux only
+  int sz = fcntl(demod->corr_iq_write_fd,F_SETPIPE_SZ,demod->L * sizeof(complex float));
+#if 0
+  fprintf(stderr,"sock size %d\n",sz);
+#endif
+  if(sz == -1)
+    perror("F_SETPIPE_SZ");
+#endif // F_SETPIPE_SZ
+
   demod->mode = mode;
   demod->dial_offset = Modes[mode].dial;
   demod->low = Modes[mode].low;
@@ -223,12 +245,13 @@ int set_mode(struct demod *demod,const enum mode mode){
     pthread_create(&demod->demod_thread,NULL,demod_iq,demod);
     break;
   case WFM:
+  case NO_MODE:
     break;
   }
   return 0;
 }      
 
-int set_filter(struct demod *demod,const float low,const float high){
+int set_filter(struct demod *demod,float low,float high){
   assert(demod != NULL);
   assert(demod->filter != NULL);
   struct filter * const filter = demod->filter;
@@ -250,8 +273,8 @@ int set_filter(struct demod *demod,const float low,const float high){
 
   complex float * const response = fftwf_alloc_complex(N_dec);
   int n;
-  float f;
   for(n=0;n<N_dec;n++){
+    float f;
     if(n <= N_dec/2)
       f = (float)n * dsamprate / N_dec;
     else
@@ -261,7 +284,7 @@ int set_filter(struct demod *demod,const float low,const float high){
     else
       response[n] = 0;
   }
-  window_filter(L_dec,M_dec,response,Kaiser_beta);
+  window_filter(L_dec,M_dec,response,demod->kaiser_beta);
 
   // We hot swap with the response array already in the filter (if any) without mutual exclusion
   // so never let the response pointer in the filter be invalid
@@ -275,22 +298,18 @@ int set_filter(struct demod *demod,const float low,const float high){
 
 
 
-int set_cal(struct demod *demod,const double cal){
+// Set TXCO calibration for front end
+// + means clock is fast, - means clock is slow
+int set_cal(struct demod *demod,double cal){
   assert(demod != NULL);
 
   double f = get_freq(demod);
   demod->calibrate = cal;
-  demod->samprate = ADC_samprate * (1 + cal);
-  set_freq(demod,f,0);
+  demod->samprate = demod->nominal_samprate * (1 + cal);
+  if(f != 0)
+    set_freq(demod,f,0); // Don't tune if not yet running
   return 0;
 }
-const double get_cal(const struct demod *demod){
-  assert(demod != NULL);
-
-  return demod->calibrate;
-}
-
-
 int spindown(struct demod *demod,complex float *data,const int len){
   assert(demod != NULL);
   assert(data != NULL);
