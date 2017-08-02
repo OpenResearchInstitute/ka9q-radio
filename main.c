@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.54 2017/08/01 00:33:32 karn Exp karn $
+// $Id: main.c,v 1.55 2017/08/02 02:31:55 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -317,6 +317,7 @@ void *input_loop(struct demod *demod){
 
       if(status.samprate != demod->nominal_samprate){
 	// We now know the A/D sample rate, or it's changed
+	// These need to be set before the demod thread starts!
 	demod->nominal_samprate = status.samprate;
 	demod->samprate = demod->nominal_samprate * (1 + demod->calibrate * 1e-6);
 	demod->max_IF = demod->nominal_samprate/2 - 16000; // Hardwired for Funcube, make this more general somehow

@@ -180,11 +180,15 @@ double set_second_LO_rate(struct demod *demod,double second_LO_rate,int force){
 int set_mode(struct demod *demod,enum mode mode){
   assert(demod != NULL);
 
+  if(demod->samprate == 0){
+    demod->start_mode = mode;
+    return -1; // Don't know the sample rate yet. Save for first packet, which will call us again
+  }
   // Send EOF to current demod thread, if any, to cause clean exit
-  if(demod->corr_iq_write_fd != -1){
+  if(demod->corr_iq_write_fd > 0){ // 0 is stdin and "can't happen"
     close(demod->corr_iq_write_fd);
     demod->corr_iq_write_fd = -1;
-    pthread_join(demod->demod_thread,NULL); // Wait for it to finish (if any)
+    pthread_join(demod->demod_thread,NULL); // Wait for it to finish
     demod->corr_iq_read_fd = -1;
   }
   // New pipe for front end -> demod thread
