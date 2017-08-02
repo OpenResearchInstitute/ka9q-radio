@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.12 2017/07/18 00:41:18 karn Exp karn $
+// $Id: misc.c,v 1.13 2017/08/02 02:30:26 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -137,16 +137,14 @@ const double parse_frequency(const char *s){
   } else
     mult = 1;
 
-  char *endptr;
+  char *endptr = NULL;
   double f = strtod(ss,&endptr);
   if(endptr == ss || f == 0)
     return 0; // Empty entry, or nothing decipherable
   
   if(mult != 1 || f >= 1e5) // If multiplier given, or frequency >= 100 kHz (lower limit), return as-is
-    return f;
+    return f * mult;
     
-  f *= mult; // Apply scaling, if any
-
   // If frequency would be out of range, guess kHz or MHz
   if(f < 100)
     f *= 1e6;              // 0.1 - 99.999 Only MHz can be valid
