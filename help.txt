@@ -18,4 +18,6 @@ m            Set demod mode (cam/am/usb/lsb/cwu/cwl/iq/isb/fm)
 f            Set frequency (eg: 147m435, 10m0, 760k0, 14313000)
 u            Set display update rate, ms
 k            Set Kaiser window beta parameter
+r            Read statefile
+w            Write statefile
 
