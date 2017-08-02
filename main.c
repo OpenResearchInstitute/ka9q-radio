@@ -97,7 +97,7 @@ int main(int argc,char *argv[]){
   // Read command line args. Ordering is important; everything overrides the default state file,
   // but parameters given before an explicit state file will be overriden by the state file
   int c;
-  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:R:qo:t:v")) != EOF){
+  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:v")) != EOF){
     int i;
 
     switch(c){
@@ -107,7 +107,7 @@ int main(int argc,char *argv[]){
     case 'c':
       set_cal(demod,1e-6*strtod(optarg,NULL));
       break;
-    case 's':
+    case 'r':
       // Look in current directory first
       if(loadstate(demod,optarg) == 0)
 	break;
