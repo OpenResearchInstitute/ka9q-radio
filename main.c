@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.57 2017/08/02 07:45:03 karn Exp karn $
+// $Id: main.c,v 1.60 2017/08/04 03:36:22 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // downconvert, filter and demodulate
 // Take commands from UDP socket
@@ -53,6 +53,7 @@ int Verbose = 0;
 char Mcast_dest_port[256] = "5004";
 char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
+int Update_interval = 100;
 
 
 
@@ -78,6 +79,7 @@ int main(int argc,char *argv[]){
   // Set program defaults, can be overridden by state file and command line args, in that order
   memset(demod,0,sizeof(*demod));
   demod->audio = &Audio; // Link to audio output system
+  demod->audio->samprate = DAC_samprate; // currently 48 kHz, hard to change
   demod->start_mode = FM;
   demod->start_freq = 147.435e6;
   
@@ -96,17 +98,20 @@ int main(int argc,char *argv[]){
 
   // Find any file argument and load it
   int c;
-  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:v")) != EOF)
+  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:v")) != EOF)
     ;
   if(argc > optind)
     loadstate(demod,argv[optind]);
   
   // Go back and re-read args for real this time
   optind = 1;
-  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:v")) != EOF){
+  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:v")) != EOF){
     int i;
 
     switch(c){
+    case 'u':
+      Update_interval = strtol(optarg,NULL,0);
+      break;
     case 'B':
       Audio.opus_blocktime = strtod(optarg,NULL);
       break;
@@ -162,10 +167,9 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-r statefile] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-t threads] [-v]\n",argv[0]);
-      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d\n",
-	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,"default",demod->start_freq,demod->iq_mcast_address_text,Locale,demod->L,Modes[demod->start_mode].name,demod->M,
-	      Audio.audio_mcast_address_text,Audio.opus_bitrate,Nthreads);
+      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-t threads] [-u update_ms] [-v]\n",argv[0]);
+      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d -u %d\n",
+	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,"default",demod->start_freq,demod->iq_mcast_address_text,Locale,demod->L,Modes[demod->start_mode].name,demod->M,Audio.audio_mcast_address_text,Audio.opus_bitrate,Nthreads,Update_interval);
       exit(1);
       break;
     }
@@ -397,7 +401,7 @@ int process_command(struct demod *demod,char const *cmdbuf,int len){
 }
  
 // Save receiver state in file
-int savestate(struct demod *demod,char const *statefile){
+int savestate(struct demod *dp,char const *statefile){
   // Dump receiver state to file
   char pathname[PATH_MAX];
   snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,statefile);
@@ -408,23 +412,23 @@ int savestate(struct demod *demod,char const *statefile){
   }
   fprintf(fp,"#KA9Q DSP Receiver State dump\n");
   fprintf(fp,"Locale %s\n",Locale);
-  fprintf(fp,"Source %s %s\n",demod->iq_mcast_address_text,Mcast_dest_port);
-  if(demod->audio){
-    fprintf(fp,"Audio output %s\n",demod->audio->audio_mcast_address_text);
-    fprintf(fp,"Opus blocktime %.0f\n",demod->audio->opus_blocktime);
-    fprintf(fp,"OPUS bitrate %d\n",demod->audio->opus_bitrate);
+  fprintf(fp,"Source %s %s\n",dp->iq_mcast_address_text,Mcast_dest_port);
+  if(dp->audio){
+    fprintf(fp,"Audio output %s\n",dp->audio->audio_mcast_address_text);
+    fprintf(fp,"Opus blocktime %.0f\n",dp->audio->opus_blocktime);
+    fprintf(fp,"OPUS bitrate %d\n",dp->audio->opus_bitrate);
   }
-  fprintf(fp,"Control port %d\n",demod->ctl_port);
-  fprintf(fp,"Blocksize %d\n",demod->L);
-  fprintf(fp,"Impulse len %d\n",demod->M);
-  fprintf(fp,"Frequency %.3f Hz\n",get_freq(demod));
-  fprintf(fp,"Mode %s\n",Modes[demod->mode].name);
-  fprintf(fp,"Dial offset %.3f Hz\n",demod->dial_offset);
-  fprintf(fp,"Kaiser Beta %.3f\n",demod->kaiser_beta);
-  fprintf(fp,"Filter low %.3f Hz\n",demod->low);
-  fprintf(fp,"Filter high %.3f Hz\n",demod->high);
-  fprintf(fp,"Tunestep %d\n",Tunestep);
-  fprintf(fp,"Calibrate %.3f ppm\n",demod->calibrate*1e6); // do last?
+  fprintf(fp,"Control port %d\n",dp->ctl_port);
+  fprintf(fp,"Blocksize %d\n",dp->L);
+  fprintf(fp,"Impulse len %d\n",dp->M);
+  fprintf(fp,"Frequency %.3f Hz\n",get_freq(dp));
+  fprintf(fp,"Mode %s\n",Modes[dp->mode].name);
+  fprintf(fp,"Dial offset %.3f Hz\n",dp->dial_offset);
+  fprintf(fp,"Kaiser Beta %.3f\n",dp->kaiser_beta);
+  fprintf(fp,"Filter low %.3f Hz\n",dp->low);
+  fprintf(fp,"Filter high %.3f Hz\n",dp->high);
+  fprintf(fp,"Tunestep %d\n",dp->tunestep);
+  fprintf(fp,"Calibrate %.3f ppm\n",dp->calibrate*1e6); // do last?
   fclose(fp);
   return 0;
 }
@@ -461,7 +465,7 @@ int loadstate(struct demod *dp,char const *statefile){
     } else if(sscanf(line,"Kaiser Beta %f",&dp->kaiser_beta) > 0){
     } else if(sscanf(line,"Blocksize %d",&dp->L) > 0){
     } else if(sscanf(line,"Impulse len %d",&dp->M) > 0){
-    } else if(sscanf(line,"Tunestep %d",&Tunestep) > 0){
+    } else if(sscanf(line,"Tunestep %d",&dp->tunestep) > 0){
     } else if(sscanf(line,"Source %256s %256s",dp->iq_mcast_address_text,Mcast_dest_port) > 0){
       // Array sizes defined elsewhere!
     } else if(dp->audio && sscanf(line,"Audio output %256s",dp->audio->audio_mcast_address_text) > 0){
