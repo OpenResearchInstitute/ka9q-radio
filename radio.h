@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.34 2017/08/02 02:28:59 karn Exp karn $
+// $Id: radio.h,v 1.35 2017/08/04 03:35:55 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -149,6 +149,7 @@ struct demod {
 
   struct audio *audio; // Link to audio output system
 
+  int tunestep;     // User interface cursor location, log10()
 };
 extern char Libdir[];
 extern int Tunestep;
