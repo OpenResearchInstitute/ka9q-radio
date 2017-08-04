@@ -1,5 +1,6 @@
-# $Id: Makefile,v 1.54 2017/07/31 03:15:08 karn Exp karn $
+# $Id: Makefile,v 1.55 2017/08/04 03:36:37 karn Exp $
 INCLUDES=
+#COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
