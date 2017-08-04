@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.18 2017/07/19 10:07:23 karn Exp karn $
+// $Id: filter.c,v 1.19 2017/08/04 03:35:55 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -36,6 +36,7 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
     fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,decimate);
 
   struct filter * const f = calloc(1,sizeof(*f));
+  pthread_mutex_init(&f->mutex,NULL);
   f->slave = 0;
   f->in_type = in_type;
   f->out_type = out_type;
@@ -122,6 +123,7 @@ struct filter *create_filter_slave(struct filter * const master,complex float * 
     fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,decimate);
 
   struct filter * const f = calloc(1,sizeof(*f));
+  pthread_mutex_init(&f->mutex,NULL);
   f->slave = 1;
   // Share all but decimation ratio, response and output
   f->in_type = master->in_type;
@@ -190,7 +192,6 @@ int execute_filter_nocopy(struct filter * const f){
   assert(f != NULL);
   assert(f->out_type != NONE);
   assert(f->in_type != NONE);
-  assert(f->response != NULL);
   assert(f->fdomain != NULL);
   assert(f->f_fdomain != NULL);  
 
@@ -217,6 +218,8 @@ int execute_filter_nocopy(struct filter * const f){
   assert(malloc_usable_size(f->f_fdomain) >= (N_dec/2+1) * sizeof(*f->f_fdomain));
   assert(malloc_usable_size(f->response) >= (N_dec/2+1) * sizeof(*f->response));
   assert(malloc_usable_size(f->fdomain) >= (N_dec/2+1) * sizeof(*f->fdomain));
+  pthread_mutex_lock(&f->mutex);
+  assert(f->response != NULL);
   int p;
   for(p=0; p <= N_dec/2; p++){
     f->f_fdomain[p] = f->response[p] * f->fdomain[p];
@@ -255,6 +258,8 @@ int execute_filter_nocopy(struct filter * const f){
       }
     }
   }
+  pthread_mutex_unlock(&f->mutex);
+
   if(f->out_type == CROSS_CONJ){
     // hack for ISB; forces negative frequencies onto I, positive onto Q
     assert(malloc_usable_size(f->f_fdomain) >= N_dec * sizeof(*f->f_fdomain));
@@ -275,6 +280,7 @@ int delete_filter(struct filter * const f){
   if(f == NULL)
     return 0;
   
+  pthread_mutex_destroy(&f->mutex);
   fftwf_destroy_plan(f->rev_plan);  
   fftwf_free(f->output_buffer.c);
   fftwf_free(f->response);

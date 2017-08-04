@@ -34,6 +34,7 @@ struct filter {
   int decimate;
   int olen;
   int slave;                         // Filter is a slave to another
+  pthread_mutex_t mutex;             // Used to protect the response array during dynamic modification
 };
 int window_filter(const int L,const int M,complex float *response,const float beta);
 int window_rfilter(const int L,const int M,complex float *response,const float beta);
