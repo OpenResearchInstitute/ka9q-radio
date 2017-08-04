@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.47 2017/08/02 06:20:05 karn Exp karn $
+// $Id: radio.c,v 1.48 2017/08/04 03:35:55 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -20,6 +20,10 @@
 #include "radio.h"
 #include "filter.h"
 #include "dsp.h"
+
+
+// Preferred A/D sample rate; ignored by funcube but may be used by others someday
+const int ADC_samprate = 192000;
 
 
 // Completely fill buffer from corrected I/O input queue
@@ -122,6 +126,7 @@ double set_first_LO(struct demod *demod,double first_LO,int force){
     // Set tuner to integer nearest requested frequency after decalibration
     demod->requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
     // These need a way to set
+    demod->requested_status.samprate = ADC_samprate; // Preferred samprate; ignored by funcube
     demod->requested_status.lna_gain = 1;
     demod->requested_status.mixer_gain = 1;
     demod->requested_status.if_gain = 0;
@@ -290,10 +295,11 @@ int set_filter(struct demod *demod,float low,float high){
   }
   window_filter(L_dec,M_dec,response,demod->kaiser_beta);
 
-  // We hot swap with the response array already in the filter (if any) without mutual exclusion
-  // so never let the response pointer in the filter be invalid
+  // Hot swap with existing response, if any, using mutual exclusion
+  pthread_mutex_lock(&filter->mutex);
   complex float *tmp = filter->response;
   filter->response = response;
+  pthread_mutex_unlock(&filter->mutex);
   fftwf_free(tmp);
   demod->low = low;
   demod->high = high;
