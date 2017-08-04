@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.18 2017/08/02 02:29:17 karn Exp karn $
+// $Id: audio.h,v 1.19 2017/08/04 03:35:46 karn Exp karn $
 #ifndef _AUDIO_H
 #define _AUDIO_H 1
 
@@ -9,6 +9,7 @@
 
 struct audio {
   // Audio parameters
+  int samprate;
   float opus_blocktime;
   int opus_bitrate;
   char audio_mcast_address_text[256];

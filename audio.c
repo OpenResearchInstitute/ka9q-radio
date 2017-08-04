@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.31 2017/08/02 02:31:21 karn Exp karn $
+// $Id: audio.c,v 1.32 2017/08/04 03:35:55 karn Exp karn $
 // Multicast PCM audio
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -80,9 +80,9 @@ void *stereo_opus_audio(void *arg){
     fprintf(stderr,"80/100/120 supported only on opus 1.2 and later\n");
     return NULL;
   }
-  int const opus_blocksize = round(audio->opus_blocktime * DAC_samprate / 1000.);
+  int const opus_blocksize = round(audio->opus_blocktime * audio->samprate / 1000.);
   int error;
-  audio->opus = opus_encoder_create(DAC_samprate,2,OPUS_APPLICATION_AUDIO,&error);
+  audio->opus = opus_encoder_create(audio->samprate,2,OPUS_APPLICATION_AUDIO,&error);
   if(audio->opus == NULL){
     fprintf(stderr,"opus_encoder_create failed, error %d\n",error);
     return NULL;
