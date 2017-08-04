@@ -6,6 +6,8 @@
 #include <limits.h>
 #include <fftw3.h>
 #include <string.h>
+#include <pthread.h>
+
 #include "filter.h"
 #include "dsp.h"
 #include "radio.h"

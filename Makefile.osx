@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.8 2017/07/30 01:09:02 karn Exp karn $
+# $Id: Makefile.osx,v 1.9 2017/07/31 03:15:08 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -53,7 +53,7 @@ iqrecord.o: iqrecord.c rtp.h radio.h multicast.h attr.h
 main.o: main.c radio.h filter.h dsp.h audio.h rtp.h multicast.h
 misc.o: misc.c
 modes.o: modes.c 
-modulate.o: modulate.c dsp.h filter.h
+modulate.o: modulate.c dsp.h filter.h radio.h
 monitor.o: monitor.c rtp.h dsp.h multicast.h
 multicast.o: multicast.c multicast.h
 radio.o: radio.c radio.h filter.h dsp.h audio.h
