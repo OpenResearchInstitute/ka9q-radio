@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.17 2017/07/19 09:44:53 karn Exp karn $
+// $Id: filter.c,v 1.18 2017/07/19 10:07:23 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -197,24 +197,40 @@ int execute_filter_nocopy(struct filter * const f){
   int const N = f->ilen + f->impulse_length - 1; // points in input buffer
   int const N_dec = N / f->decimate;                     // points in (decimated) output buffer
 
-  if(!f->slave)
+  if(!f->slave){
+    if(f->in_type == COMPLEX){
+      int i;
+      for(i=0;i<N;i++){
+	assert(!isnan(cimagf(f->input_buffer.c[i])));
+	assert(!isnan(crealf(f->input_buffer.c[i])));
+      }
+    } else {
+      int i;
+      for(i=0;i<N;i++){
+	assert(!isnan(f->input_buffer.r[i]));
+      }
+    }
     fftwf_execute(f->fwd_plan);  // Forward transform only in master
+  }
 
   // DC and positive frequencies up to nyquist frequency are same for all types
   assert(malloc_usable_size(f->f_fdomain) >= (N_dec/2+1) * sizeof(*f->f_fdomain));
   assert(malloc_usable_size(f->response) >= (N_dec/2+1) * sizeof(*f->response));
   assert(malloc_usable_size(f->fdomain) >= (N_dec/2+1) * sizeof(*f->fdomain));
   int p;
-  for(p=0; p <= N_dec/2; p++)
+  for(p=0; p <= N_dec/2; p++){
     f->f_fdomain[p] = f->response[p] * f->fdomain[p];
-
+    assert(!isnan(crealf(f->f_fdomain[p])) && !isnan(crealf(f->response[p])) && !isnan(creal(f->fdomain[p])));
+  }
   if(f->in_type == REAL){
     if(f->out_type != REAL){
       // For a purely real input, F[-f] = conj(F[+f])
       assert(malloc_usable_size(f->f_fdomain) >= N_dec * sizeof(*f->f_fdomain));
       int p,dn;
-      for(p=1,dn=N_dec-1; dn > N_dec/2; p++,dn--)
+      for(p=1,dn=N_dec-1; dn > N_dec/2; p++,dn--){
 	f->f_fdomain[dn] = f->response[dn] * conjf(f->fdomain[p]);
+	assert(!isnan(crealf(f->f_fdomain[dn])) && !isnan(crealf(f->f_fdomain[dn])));
+      }
     } // out_type == REAL already handled
   } else { // in_type == COMPLEX
     if(f->out_type != REAL){
@@ -224,15 +240,19 @@ int execute_filter_nocopy(struct filter * const f){
       assert(malloc_usable_size(f->f_fdomain) >= N_dec * sizeof(*f->f_fdomain));
 
       int n,dn;
-      for(n=N-1,dn=N_dec-1; dn > N_dec/2;n--,dn--)
+      for(n=N-1,dn=N_dec-1; dn > N_dec/2;n--,dn--){
 	f->f_fdomain[dn] = f->response[dn] * f->fdomain[n];
+	assert(!isnan(crealf(f->f_fdomain[dn])) && !isnan(crealf(f->f_fdomain[dn])));
+      }
     } else {
       // Real output; fold conjugates of negative frequencies into positive to force pure real result
       assert(malloc_usable_size(f->fdomain) >= N * sizeof(*f->fdomain));
       assert(malloc_usable_size(f->response) >= N_dec * sizeof(*f->response));
       int n,p,dn;
-      for(n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--)
+      for(n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--){
 	f->f_fdomain[p] += conjf(f->response[dn] * f->fdomain[n]);
+	assert(!isnan(crealf(f->f_fdomain[p])) && !isnan(crealf(f->f_fdomain[p])));
+      }
     }
   }
   if(f->out_type == CROSS_CONJ){

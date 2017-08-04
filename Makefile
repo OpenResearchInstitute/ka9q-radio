@@ -1,6 +1,6 @@
-# $Id: Makefile,v 1.53 2017/07/30 01:17:00 karn Exp karn $
+# $Id: Makefile,v 1.54 2017/07/31 03:15:08 karn Exp karn $
 INCLUDES=
-COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio

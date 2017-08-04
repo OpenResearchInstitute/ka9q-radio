@@ -92,7 +92,7 @@ int main(int argc,char *argv[]){
   while(1){
     int i,j;
     int16_t samp[L/4];
-    if(fillbuf(0,samp,sizeof(samp)) <= 0)
+    if(pipefill(0,samp,sizeof(samp)) <= 0)
       break;
     // Filter will upsample by 4x
     for(j=i=0;i<L;){

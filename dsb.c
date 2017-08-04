@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.7 2017/07/19 09:44:36 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.8 2017/08/02 02:30:11 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -48,12 +48,11 @@ void *demod_dsb(void *arg){
   // This filter is unconventional because we iterate on the second LO, which means we
   // have to recompute the *entire* filter input buffer every time
   complex float if_samples[N];
-  fillbuf(demod->corr_iq_read_fd,if_samples+filter->ilen,mm1 * sizeof(*if_samples)); // Prime the pump
-  while(1){
+  fillbuf(demod,if_samples+filter->ilen,mm1); // Prime the pump
+  while(!demod->terminate){
     memmove(if_samples,if_samples+filter->ilen,mm1*sizeof(*if_samples)); // Re-copy the overlap so we can downconvert it again
     // New samples
-    if(fillbuf(demod->corr_iq_read_fd,if_samples+mm1,filter->ilen*sizeof(*if_samples)) < 0)
-      break;
+    fillbuf(demod,if_samples+mm1,filter->ilen);
 
     complex double LO_phase_step = demod->second_LO_phase_step;
     int tries;
@@ -136,10 +135,10 @@ void *demod_dsb(void *arg){
     demod->snr = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
 
     // Use both I and Q for gain setting so we don't blast our ears when the phase is wrong
-    if(demod->gain * sqrtf(amplitude+noise) > Headroom){ // Target to about -10 dBFS
+    if(demod->gain * sqrtf(amplitude+noise) > demod->headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
-      //      demod->gain = Headroom / demod->amplitude;
-      demod->gain = Headroom / sqrtf(amplitude + noise);
+      //      demod->gain = demod->headroom / demod->amplitude;
+      demod->gain = demod->headroom / sqrtf(amplitude + noise);
       hangcount = hangmax;
     } else {
       // Not a new peak, but the AGC is still hanging at the last peak

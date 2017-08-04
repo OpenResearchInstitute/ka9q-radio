@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.29 2017/07/26 11:21:24 karn Exp karn $
+// $Id: fm.c,v 1.30 2017/08/02 02:30:40 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -83,14 +83,15 @@ void *demod_fm(void *arg){
 
   float lastaudio = 0; // state for impulse noise removal
 
-  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
+  while(!demod->terminate){
+    fillbuf(demod,filter->input.c,filter->ilen);
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
 
-    demod->gain = (Headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
+    demod->gain = (demod->headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
     // Find average magnitude and magnitude^2
     // Approximate for SNR because magnitude has a chi-squared distribution with 2 degrees of freedom
     float avg_squares = 0;

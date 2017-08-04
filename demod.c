@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.25 2017/07/26 11:23:57 karn Exp karn $
+// $Id: demod.c,v 1.26 2017/08/02 02:28:46 karn Exp karn $
 // Common I/Q processing for all modes
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -30,7 +30,6 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
     tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
   }
   int i;
-  complex float buffer[cnt];
   float samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
   float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
   float dotprod = 0;                           // sum of I*Q, for phase balance
@@ -60,7 +59,7 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
       samp = notch(demod->nf,samp);
 
     // Final corrected sample
-    buffer[i] = samp;
+    demod->corr_data[(demod->write_ptr + i) % 65536] = samp;
   }
   // Update estimates of DC offset, signal powers and phase error
   demod->DC_i += DC_alpha * (samp_i_sum - cnt * demod->DC_i);
@@ -71,6 +70,9 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
   float dpn = 2 * dotprod / (samp_i_sq_sum + samp_q_sq_sum);
   demod->sinphi += Power_alpha * cnt * (dpn - demod->sinphi);
 
-  // Pass to demodulator thread (ssb/fm/iq etc)
-  write(demod->corr_iq_write_fd,buffer,sizeof(buffer));
+  pthread_mutex_lock(&demod->data_mutex);
+  demod->write_ptr += cnt;
+  demod->write_ptr %= 65536;
+  pthread_cond_broadcast(&demod->data_cond);
+  pthread_mutex_unlock(&demod->data_mutex);
 }

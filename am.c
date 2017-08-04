@@ -26,7 +26,8 @@ void *demod_am(void *arg){
   demod->filter = filter;
   set_filter(demod,demod->low,demod->high);
 
-  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
+  while(!demod->terminate){
+    fillbuf(demod,filter->input.c,filter->ilen);
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
     execute_filter(filter);
 
@@ -42,7 +43,7 @@ void *demod_am(void *arg){
     demod->snr = (snn*snn) -1; // S/N as power ratio
     
     // AM AGC is carrier-driven
-    //    demod->gain = Headroom / average;
+    //    demod->gain = demod->headroom / average;
     demod->gain = 0.5/average;
     for(n=0; n<filter->olen; n++)
       audio[n] = (audio[n] - average) * demod->gain;

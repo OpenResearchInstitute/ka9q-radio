@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.45 2017/07/24 02:25:54 karn Exp karn $
+// $Id: radio.c,v 1.47 2017/08/02 06:20:05 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -11,6 +11,7 @@
 #include <complex.h>
 #include <fftw3.h>
 #undef I
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -21,77 +22,90 @@
 #include "dsp.h"
 
 
-extern int Ctl_fd;
+// Completely fill buffer from corrected I/O input queue
+// Block until enough data is available
+int fillbuf(struct demod *demod,complex float *buffer,int cnt){
+  // This assumes cnt <= DATASIZE, otherwise it will deadlock!
+  // The mutex protects demod->write_ptr
+  pthread_mutex_lock(&demod->data_mutex);
+  while((DATASIZE + demod->write_ptr - demod->read_ptr) % DATASIZE < cnt)
+    pthread_cond_wait(&demod->data_cond,&demod->data_mutex);
+  pthread_mutex_unlock(&demod->data_mutex);  
 
-
-//const float Headroom = .316227766; // sqrt(0.10) = -10 dB
-const float Headroom = 0.1778; // -15 dB
+  // Copy in contiguous chunks from circular buffer
+  int i = cnt;
+  while(i > 0){
+    int chunk = DATASIZE - demod->read_ptr;
+    chunk = min(chunk,i);    // Largest contiguous segment of buffer before wraparound
+    memcpy(buffer,&demod->corr_data[demod->read_ptr],chunk*sizeof(complex float));
+    demod->read_ptr = (demod->read_ptr + chunk) % DATASIZE;
+    i -= chunk;
+    buffer += chunk;
+  }
+  return cnt;
+}
 
 
 // Get true first LO frequency
 const double get_first_LO(const struct demod *demod){
   assert(demod != NULL);
-  return demod->first_LO * (1 + demod->calibrate);  // True frequency, as adjusted
+  assert(!isnan(demod->status.frequency));
+  assert(!isnan(demod->calibrate));
+	 
+  return demod->status.frequency * (1 + demod->calibrate);  // True frequency, as adjusted
 }
 
 
 // Return current frequency of carrier frequency at current first IF
-// If sweeping, return second LO freq at "offset" samples ahead of current sample
-const double get_second_LO(const struct demod *demod,int offset){
+const double get_second_LO(const struct demod *demod){
   assert(demod != NULL);
+  assert(!isnan(demod->second_LO));
 
-  if(cimag(demod->second_LO_phase_accel) != 0){
-    // sweeping, get instantaneous frequency
-    return M_1_2PI * demod->samprate
-      * (offset * carg(demod->second_LO_phase_accel) + carg(demod->second_LO_phase_step));
-  } else
-    return demod->second_LO;
+  return demod->second_LO;
+
 }
 
 // Set frequency with optional front end tuning
 double set_freq(struct demod *demod,double f,int force){
   assert(demod != NULL);
+  assert(!isnan(f));
 
-  if(demod->samprate == 0)
-    return 0; // Not yet set by the first incoming packet; ignore
-  double change = f - get_freq(demod);
 
-  // See if we can change only LO2
-  // Note lo2 is the negative of the IF
-  double lo2 = get_second_LO(demod,0) - change;
+  // Wait for sample rate to be known
+  pthread_mutex_lock(&demod->status_mutex);
+  while(demod->status.samprate == 0)
+    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
+  double lo1 = get_first_LO(demod);
+  pthread_mutex_unlock(&demod->status_mutex);
+  
+  double new_lo2 = -(f - lo1 - demod->dial_offset);
+  double new_lo1;
   // If the new LO2 is out of range, or if we're forced, recenter LO2
   // and retune LO1
-  if(force || !LO2_in_range(demod,lo2,1)){
-    if(change < 0){
-      // Assume the user will keep tuning down, so put the IF in the
-      // high half (lo2 in the low half)
-      lo2 = -demod->nominal_samprate/4;
-    } else if(change > 0){
-      // Assume the user will keep tuning up
-      lo2 = demod->nominal_samprate/4;
-    } else {
-      // If LO2 is not close to +/-samprate/4, move it there
-      if(fabs(fabs(lo2) - demod->nominal_samprate/4) > 1.0){
-	lo2 = copysign(demod->nominal_samprate/4,lo2);
-      }
-    }
-    double lo1 = f + lo2 - demod->dial_offset;
-
+  if(force || !LO2_in_range(demod,new_lo2,1)){
+    // Assume we'll keep tuning in the same direction
+    if(new_lo2 < 0)
+      new_lo2 = demod->status.samprate/4.;
+    else 
+      new_lo2 = -(demod->status.samprate/4.);
+    new_lo1 = f + new_lo2 - demod->dial_offset;
+    
     // returns actual frequency, which may be a fraction of a Hz
     // different from requested because of calibration offset and
     // the fact that the tuner can only tune in 1 Hz steps
-    lo1 = set_first_LO(demod,lo1,force);
-    // Adjust LO2 for actual LO1
-    lo2 = lo1 - f + demod->dial_offset;
+    lo1 = set_first_LO(demod,new_lo1,force);
+    new_lo2 += (lo1 - new_lo1);
   }
-  set_second_LO(demod,lo2);
+  // If front end doesn't retune don't retune LO2 either (e.g., recording)
+  if(LO2_in_range(demod,new_lo2,1))
+     set_second_LO(demod,new_lo2);
   return f;
 }
 
-// Return current frequency, including effects of any sweep & dial offset
+// Return current frequency, including dial offset
 const double get_freq(const struct demod *demod){
   assert(demod != NULL);
-  return get_first_LO(demod) - get_second_LO(demod,0) + demod->dial_offset;
+  return get_first_LO(demod) - get_second_LO(demod) + demod->dial_offset;
 }
 
 // Set tuner LO
@@ -100,42 +114,57 @@ const double get_freq(const struct demod *demod){
 // incoming status frames so it don't change right away
 double set_first_LO(struct demod *demod,double first_LO,int force){
   assert(demod != NULL);
-
+  assert(!isnan(first_LO));
   if(!force && first_LO == get_first_LO(demod))
     return first_LO;
 
-  // Set tuner to integer nearest requested frequency after decalibration
-  struct status requested_status;
-  requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
-  // No change to gain settings
-  requested_status.lna_gain = 0xff;
-  requested_status.mixer_gain = 0xff;
-  requested_status.if_gain = 0xff;
+  if(first_LO > 0){
+    // Set tuner to integer nearest requested frequency after decalibration
+    demod->requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
+    // These need a way to set
+    demod->requested_status.lna_gain = 1;
+    demod->requested_status.mixer_gain = 1;
+    demod->requested_status.if_gain = 0;
+    
+    // Wait up to 1 sec for the frequency to actually change
+    // We need to limit this to keep two or more receivers from continually fighting over it, or if it's a recording
+    int i;
+    struct timespec ts;
+    struct timeval tv;
+    gettimeofday(&tv,NULL);
+    ts.tv_sec = tv.tv_sec + 1; // Wait 1 sec
+    ts.tv_nsec = 1000 * tv.tv_usec;
 
-  // Send commands to source address of last RTP packet from front end
-  if(sendto(demod->ctl_fd,&requested_status,sizeof(requested_status),0,(struct sockaddr *)&demod->input_source_address,
-	    sizeof(demod->input_source_address)) == -1)
-    perror("sendto control socket");
+    pthread_mutex_lock(&demod->status_mutex);
+    for(i=0;i<10;i++){
+      if(demod->requested_status.frequency == demod->status.frequency)
+	break;
 
-  // Return new true frequency
-  // Wait for it to actually change before we retune the second LO
-  // Adjust LO2 for any fractional Hz error in LO1
-  // (What if we're reading from a recording?)
-  int i;
-  for(i=0;i<10;i++){
-    if(demod->first_LO == requested_status.frequency)
-      break;
-    usleep(50000);
+      if((demod->input_source_address.sa_family == AF_INET || demod->input_source_address.sa_family == AF_INET6)
+	 && sendto(demod->ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address)) == -1)
+	perror("sendto control socket");
+      if(pthread_cond_timedwait(&demod->status_cond,&demod->status_mutex,&ts) == -1)
+	break;
+    }
+    pthread_mutex_unlock(&demod->status_mutex);
+    assert(i < 50);
   }
-  return requested_status.frequency * (1 + demod->calibrate);
+  return demod->status.frequency * (1 + demod->calibrate);
 }
 
 // If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
 // sampling rate, filter setting and alias region
 //
 // If avoid_alias is false, simply test that specified frequency is between +/- samplerate/2
-const int LO2_in_range(const struct demod *demod,double f,int avoid_alias){
+int LO2_in_range(struct demod *demod,double f,int avoid_alias){
   assert(demod != NULL);
+
+  // Wait until the sample rate is known
+  pthread_mutex_lock(&demod->status_mutex);
+  while(demod->samprate == 0)
+    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
+  pthread_mutex_unlock(&demod->status_mutex);
+    
   if(avoid_alias)
     return f >= demod->min_IF + max(0,demod->high)
 	    && f <= demod->max_IF + min(0,demod->low);
@@ -148,65 +177,30 @@ const int LO2_in_range(const struct demod *demod,double f,int avoid_alias){
 // Only limit range to +/- samprate/2; the caller must avoid the alias region, e.g., with LO2_in_range()
 double set_second_LO(struct demod *demod,double second_LO){
   assert(demod != NULL);
+  assert(!isnan(second_LO));
 
-  // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
-  if(second_LO < -demod->samprate/2 || second_LO > demod->samprate/2)
-    return demod->second_LO; // Don't let it go out of range
-
-  demod->second_LO = second_LO;
-  demod->second_LO_phase_step = csincos(2*M_PI*second_LO/demod->samprate);
-  if(demod->second_LO_phase == 0) // In case it wasn't already set
+  // Wait until the sample rate is known
+  pthread_mutex_lock(&demod->status_mutex);
+  while(demod->samprate == 0)
+    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
+  pthread_mutex_unlock(&demod->status_mutex);
+    
+  assert(second_LO <= demod->samprate/2 && second_LO >= -demod->samprate/2);
+  if(isnan(creal(demod->second_LO_phase)) || isnan(cimag(demod->second_LO_phase)) || cnrm(demod->second_LO_phase) < 0.999)
     demod->second_LO_phase = 1;
 
-  return second_LO;
-}
-double set_second_LO_rate(struct demod *demod,double second_LO_rate,int force){
-  assert(demod != NULL);
-
-  if(!force && second_LO_rate == demod->second_LO_rate)
-    return second_LO_rate;
-
-  const double sampsq = demod->samprate * demod->samprate;
-  demod->second_LO_rate = second_LO_rate;
-  if(second_LO_rate == 0){
-    // if stopped, store current frequency in case somebody reads it
-    demod->second_LO_phase_accel = 0;
-    demod->second_LO = demod->samprate * carg(demod->second_LO_phase_step) * M_1_2PI;
-  } else {
-    demod->second_LO_phase_accel = csincos(2*M_PI*second_LO_rate/sampsq);
-  }
-  return second_LO_rate;
+  // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
+  // In case sample rate isn't set yet, just remember the frequency but don't divide by zero
+  demod->second_LO_phase_step = csincos(2*M_PI*second_LO/demod->samprate);
+  return demod->second_LO = second_LO;
 }
 int set_mode(struct demod *demod,enum mode mode){
   assert(demod != NULL);
 
-  if(demod->samprate == 0){
-    demod->start_mode = mode;
-    return -1; // Don't know the sample rate yet. Save for first packet, which will call us again
-  }
   // Send EOF to current demod thread, if any, to cause clean exit
-  if(demod->corr_iq_write_fd > 0){ // 0 is stdin and "can't happen"
-    close(demod->corr_iq_write_fd);
-    demod->corr_iq_write_fd = -1;
-    pthread_join(demod->demod_thread,NULL); // Wait for it to finish
-    demod->corr_iq_read_fd = -1;
-  }
-  // New pipe for front end -> demod thread
-  int sv[2];
-  if(pipe(sv) == -1){
-    perror("pipe");
-    exit(1);
-  }
-  demod->corr_iq_write_fd = sv[1]; // write end
-  demod->corr_iq_read_fd = sv[0]; // read end
-#ifdef F_SETPIPE_SZ // Linux only
-  int sz = fcntl(demod->corr_iq_write_fd,F_SETPIPE_SZ,demod->L * sizeof(complex float));
-#if 0
-  fprintf(stderr,"sock size %d\n",sz);
-#endif
-  if(sz == -1)
-    perror("F_SETPIPE_SZ");
-#endif // F_SETPIPE_SZ
+  demod->terminate = 1;
+  pthread_join(demod->demod_thread,NULL); // Wait for it to finish
+  demod->terminate = 0;
 
   demod->mode = mode;
   demod->dial_offset = Modes[mode].dial;
@@ -219,7 +213,13 @@ int set_mode(struct demod *demod,enum mode mode){
   demod->cphase = NAN;
   demod->plfreq = NAN;
 
-  double lo2 = get_second_LO(demod,0);
+  // Wait until we know the sample rate
+  pthread_mutex_lock(&demod->status_mutex);
+  while(demod->samprate == 0)
+    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
+  pthread_mutex_unlock(&demod->status_mutex);
+
+  double lo2 = get_second_LO(demod);
   // Might now be out of range because of change in filter passband
   if(!LO2_in_range(demod,lo2,1))
     set_freq(demod,get_freq(demod),1);
@@ -309,47 +309,24 @@ int set_cal(struct demod *demod,double cal){
 
   double f = get_freq(demod);
   demod->calibrate = cal;
-  demod->samprate = demod->nominal_samprate * (1 + cal);
-  if(f != 0)
-    set_freq(demod,f,0); // Don't tune if not yet running
+  demod->samprate = demod->status.samprate * (1 + cal);
+  set_freq(demod,f,0);
   return 0;
 }
-int spindown(struct demod *demod,complex float *data,const int len){
+int spindown(struct demod *demod,complex float *data,int len){
   assert(demod != NULL);
   assert(data != NULL);
-
-  if(demod->second_LO_phase == 0) // Make sure it's been initalized
-    demod->second_LO_phase = 1;
+  assert(!isnan(crealf(demod->second_LO_phase_step)) && !isnan(cimagf(demod->second_LO_phase_step)));
+  assert(cnrm(demod->second_LO_phase) != 0);
 
   // Apply 2nd LO
   int n;
   for(n=0; n < len; n++){
+    assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
     data[n] *= demod->second_LO_phase;
     demod->second_LO_phase *= demod->second_LO_phase_step;
-    if(demod->second_LO_phase_accel != 0)
-      demod->second_LO_phase_step *= demod->second_LO_phase_accel; // Frequency sweep
   }
   // Renormalize to guard against accumulated roundoff error
   demod->second_LO_phase /= cabs(demod->second_LO_phase);
-  if(demod->second_LO_phase_accel != 0)
-    demod->second_LO_phase_step /= cabs(demod->second_LO_phase_step);
-
-  if(cimag(demod->second_LO_phase_accel) != 0){
-    // We're sweeping, so ensure we won't run the passband past the edges of the first IF bandwidth
-    double first_if = -get_second_LO(demod,demod->filter->ilen);  // first IF at end of *next* sample block
-    double new_first_if = first_if;
-    if(first_if + max(Modes[demod->mode].high,0) >= demod->max_IF){
-      // Will hit upper end
-      new_first_if = demod->min_IF - min(Modes[demod->mode].low,0);
-    } else if(first_if - min(Modes[demod->mode].low,0) <= demod->min_IF){
-      // Will hit lower end
-      new_first_if = demod->max_IF - max(Modes[demod->mode].high,0);
-    }
-    if(new_first_if != first_if){
-      // Make the changes
-      set_first_LO(demod,get_first_LO(demod) - (new_first_if - first_if),1);
-      set_second_LO(demod,-new_first_if);
-    }
-  }
   return 0;
 }

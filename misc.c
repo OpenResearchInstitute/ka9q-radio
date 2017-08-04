@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.13 2017/08/02 02:30:26 karn Exp karn $
+// $Id: misc.c,v 1.14 2017/08/02 07:44:19 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -15,6 +15,8 @@
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
+
+#include "radio.h"
 
 // return unit magnitude complex number with phase x radians
 const complex float csincosf(const float x){
@@ -74,9 +76,9 @@ const float camplitude(const complex float *data, const int len){
   return sqrtf(amplitude/len);
 }
 
-// Completely fill buffer
+// Fill buffer from pipe
 // Needed because reads from a pipe can be partial
-int fillbuf(const int fd,void *buffer,const int cnt){
+int pipefill(const int fd,void *buffer,const int cnt){
   int i;
   unsigned char *bp = buffer;
   for(i=0;i<cnt;){
@@ -92,6 +94,8 @@ int fillbuf(const int fd,void *buffer,const int cnt){
   return i;
 
 }
+
+
 
 // Remove return or newline, if any, from end of string
 void chomp(char *s){

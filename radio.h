@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.33 2017/07/26 11:19:54 karn Exp karn $
+// $Id: radio.h,v 1.34 2017/08/02 02:28:59 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -66,22 +66,25 @@ struct status {
 };
 
 // Demodulator state block
+#define DATASIZE 65536 // should be a power of 2 for efficiency
 struct demod {
+  pthread_t input_thread;
   char iq_mcast_address_text[256];
   struct sockaddr input_source_address;
   struct sockaddr ctl_address;
   
   // Front end state
-  double nominal_samprate; // Sample rate as given by front end
-  double samprate;  // True A/D sample rate, assuming same TCXO as tuner
+  volatile double samprate;  // True A/D sample rate, assuming same TCXO as tuner
   float min_IF;     // Limits on usable IF due to aliasing, filtering, etc
   float max_IF;
-  double first_LO;  // UNcorrected local copy of frequency sent to front end tuner
   double calibrate; // Tuner TCXO calibration; - -> frequency low, + -> frequency high
-                    // True first LO freq =  (1 + calibrate) * demod.first_LO
-  uint8_t lna_gain; // tracked from A/D and displayed but not currently used
-  uint8_t mixer_gain;
-  uint8_t if_gain;
+                    // True first LO freq =  (1 + calibrate) * demod.status.frequency
+
+  // status is written by the input thread and read by set_first_LO, etc, so it has to be protected
+  pthread_mutex_t status_mutex;
+  pthread_cond_t status_cond;
+  struct status status; // Last status from FCD
+  struct status requested_status; // The status we want the FCD to be in
 
   float DC_i,DC_q;   // Average DC offsets
   float power_i,power_q; // Average channel powers
@@ -92,12 +95,20 @@ struct demod {
   int ctl_port;      // Port number for incoming control packets
   int ctl_fd;        // File descriptor for control input socket
 
+  // corr_data is written by the input thread and read by fillbuf in the demod tasks,
+  // so it has to be protected by a mutex. The buffer is *NOT* protected from overrun, so ony
+  // the reader ever blocks
+  pthread_mutex_t data_mutex;
+  pthread_cond_t data_cond;
+  complex float corr_data[DATASIZE];
+  int write_ptr;
+  int read_ptr;
+
+
   // Per-thread data
-  int corr_iq_write_fd;    // Corrected I/Q data being written to demodulator thread
-  int corr_iq_read_fd;     // Corrected I/Q data being read by demodulator thread
+  int terminate;
   pthread_t demod_thread;
 
-  double startup_freq;
   double dial_offset; // displayed dial frequency = carrier freq + dial_offset (useful for CW)
 
   // Second (software) local oscillator parameters
@@ -106,8 +117,6 @@ struct demod {
                     // Same as second_LO_phase step except when sweeping
                     // Provided because round trip through csincos/carg is less accurate
   complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
-  double second_LO_rate;                // for frequency sweeping
-  complex double second_LO_phase_accel;
 
   int frequency_lock;
 
@@ -124,6 +133,7 @@ struct demod {
   float kaiser_beta;
 
   // Demodulator parameters
+  double start_freq;
   enum mode start_mode;
   enum mode mode;   // USB/LSB/FM/etc
 
@@ -135,6 +145,7 @@ struct demod {
   float pdeviation; // Peak frequency deviation (FM)
   float cphase;     // Carrier phase (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
+  float headroom;   // Audio headroom
 
   struct audio *audio; // Link to audio output system
 
@@ -143,23 +154,24 @@ extern char Libdir[];
 extern int Tunestep;
 extern struct modetab Modes[];
 extern const int Nmodes;
-extern const float Headroom; // Audio headroom ratio
 
+int fillbuf(struct demod *,complex float *,const int);
 int setup_input(char const *,char const *);
 int setup_output(char const *,char const *);
-const int LO2_in_range(const struct demod *,double f,int);
+int LO2_in_range(struct demod *,double f,int);
 const double get_freq(struct demod const *);
 double set_freq(struct demod *,double,int);
 double set_first_LO(struct demod *,double,int);
 const double get_first_LO(struct demod const *);
 double set_second_LO(struct demod *,double);
-const double get_second_LO(struct demod const *,int);
+const double get_second_LO(struct demod const *);
 double set_second_LO_rate(struct demod *,double,int);
 int set_filter(struct demod *,float,float);
 int set_mode(struct demod *,enum mode);
 int set_cal(struct demod *,double);
 int spindown(struct demod *,complex float *,int);
 void proc_samples(struct demod *,int16_t const *,int);
+void activate(struct demod *a,struct demod const *new);
 
 // Save and load (most) receiver state
 int savestate(struct demod *,char const *);
@@ -167,6 +179,7 @@ int loadstate(struct demod *,char const *);
 
 // Thread entry points
 void *display(void *);
+void *keyboard(void *);
 
 // Demodulator thread entry points
 void *demod_fm(void *);

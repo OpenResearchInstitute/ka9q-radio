@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.11 2017/07/29 21:42:33 karn Exp karn $
+// $Id: iqplay.c,v 1.12 2017/07/29 23:59:46 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -88,7 +88,7 @@ int playfile(int sock,int fd,int blocksize){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
-  while(fillbuf(fd,sampbuf,sizeof(sampbuf)) > 0){
+  while(pipefill(fd,sampbuf,sizeof(sampbuf)) > 0){
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
     timestamp += blocksize;

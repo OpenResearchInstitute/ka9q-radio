@@ -38,7 +38,8 @@ void *demod_ssb(void *arg){
   struct notchfilter *nf = notch_create(48000./demod->samprate,0.001);
 #endif
 
-  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
+  while(!demod->terminate){
+    fillbuf(demod,filter->input.c,filter->ilen);
 #if 0
     // experimental notch
     {
@@ -53,9 +54,9 @@ void *demod_ssb(void *arg){
     demod->amplitude = amplitude(filter->output.r,filter->olen);
     float const snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
     demod->snr = (snn*snn) -1; // S/N as power ratio
-    if(demod->gain * demod->amplitude > Headroom){ // Target to about -10 dBFS
+    if(demod->gain * demod->amplitude > demod->headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
-      demod->gain = Headroom / demod->amplitude;
+      demod->gain = demod->headroom / demod->amplitude;
       hangcount = hangmax;
     } else {
       // Not a new peak, but the AGC is still hanging at the last peak

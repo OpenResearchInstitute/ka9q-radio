@@ -7,6 +7,7 @@
 #include <complex.h>
 #undef I
 #include <fftw3.h>
+#include <string.h>
 
 #include "dsp.h"
 #include "filter.h"
@@ -18,18 +19,48 @@ void *demod_cam(void *arg){
   assert(arg != NULL);
   struct demod * const demod = arg;
 
+  assert(demod->decimate == 4);
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;
-  set_filter(demod,demod->low,demod->high);
+  set_filter(demod,demod->low,demod->high);   
+
+  {
+    int i;
+    for(i=0;i<filter->ilen;i++)
+      assert(!isnan(crealf(filter->response[i])) && !isnan(cimagf(filter->response[i])));
+  }
 
   complex float lastphase = 0;
-  while(fillbuf(demod->corr_iq_read_fd,filter->input.c,filter->ilen*sizeof(*filter->input.c)) > 0){
+  memset(filter->input_buffer.c,0,(filter->impulse_length - 1)*sizeof(complex float)); 
+  while(!demod->terminate){
+    fillbuf(demod,filter->input.c,filter->ilen);
+    {
+      int i;
+      for(i=0;i<filter->ilen;i++)
+	assert(!isnan(crealf(filter->input.c[i])) && !isnan(cimagf(filter->input.c[i])));
+    }
+
     spindown(demod,filter->input.c,filter->ilen); // 2nd LO
+    {
+      int i;
+      for(i=0;i<filter->ilen;i++)
+	assert(!isnan(crealf(filter->input.c[i])) && !isnan(cimagf(filter->input.c[i])));
+    }
     execute_filter(filter);
+    {
+      int i;
+      for(i=0;i<filter->olen;i++)
+	assert(!isnan(crealf(filter->output.c[i])) && !isnan(cimagf(filter->output.c[i])));
+    }
 
     // Grab carrier phase from DC bin of frequency domain
     complex float phase = filter->f_fdomain[0];
-    phase = conj(phase) / cabs(phase);
+    assert(!isnan(crealf(phase)) && !isnan(cimagf(phase)));
+    
+    float amp = cabsf(phase);
+    if(amp == 0)
+      continue; // All zeroes? skip
+    phase = conj(phase) / amp;
     // Rotate signal onto I axis, measure DC (carrier) level
     float amplitude = 0;
     float noise = 0;
@@ -50,12 +81,13 @@ void *demod_cam(void *arg){
     // Phase was already flipped, hence the minus
     // Only move a fraction of the error at one time
     double const freqerror = -0.01 * carg(phase * conj(lastphase)) * M_1_2PI * demod->samprate/filter->ilen;
+    assert(!isnan(freqerror));
     lastphase = phase;
     set_second_LO(demod,-freqerror + demod->second_LO);
 
     // Remove carrier DC
     // AM AGC is carrier-driven
-    //    demod->gain = Headroom / demod->amplitude;
+    //    demod->gain = demod->headroom / demod->amplitude;
     demod->gain = 0.5/demod->amplitude;
 
     float audio[filter->olen];

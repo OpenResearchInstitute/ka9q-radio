@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.60 2017/08/02 07:46:05 karn Exp karn $
+// $Id: display.c,v 1.59 2017/08/02 02:31:48 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
 #define _GNU_SOURCE 1
@@ -40,7 +40,7 @@
 
 float Spare; // General purpose knob for experiments
 
-int Update_interval = 100;
+int Update_interval = 100000; // microseconds
 int Tunestep;
 
 
@@ -76,9 +76,7 @@ void popup(const char *filename){
   fclose(fp);
   wnoutrefresh(pop);
   doupdate();
-  timeout(-1); // blocking read - wait indefinitely
   (void)getch(); // Read and discard one character
-  timeout(Update_interval);
   werase(pop);
   wrefresh(pop);
   delwin(pop);
@@ -90,23 +88,22 @@ void getentry(char const *prompt,char *response,int len){
   WINDOW *pwin = newwin(3,70,20,0);
   box(pwin,0,0);
   mvwprintw(pwin,1,1,prompt);
-  wrefresh(pwin);
+  wnoutrefresh(pwin);
   echo();
-  timeout(-1);
   // Manpage for wgetnstr doesn't say whether a terminating
   // null is stashed. Hard to believe it isn't, but this is to be sure
   memset(response,0,len);
   wgetnstr(pwin,response,len);
   chomp(response);
-  timeout(Update_interval);
   noecho();
   werase(pwin);
   wrefresh(pwin);
   delwin(pwin);
+  doupdate();
 }
 
 
-void display_cleanup(void *arg){
+void display_cleanup(){
   echo();
   nocbreak();
   endwin();
@@ -194,20 +191,17 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
 // Thread to display receiver state, updated at 10Hz by default
 // Uses the ancient ncurses text windowing library
 // Also services keyboard and tuning knob, if present
+int Dial_fd;
+
+int tuneitem = 0;
+extern int Delayed,Skips;
+
 void *display(void *arg){
   pthread_setname("display");
   assert(arg != NULL);
   struct demod * const demod = arg;
-  double tunestep10 = pow(10.,Tunestep);
-  int tuneitem = 0;
-
-  pthread_cleanup_push(display_cleanup,demod);
 
   initscr();
-  keypad(stdscr,TRUE);
-  timeout(Update_interval); // This sets the update interval when nothing is typed
-  cbreak();
-  noecho();
 #if 0
   WINDOW * const deb = newwin(5,40,14,40);
   scrollok(deb,1);
@@ -216,14 +210,15 @@ void *display(void *arg){
   WINDOW * const sig = newwin(10,25,10,0);
   WINDOW * const sdr = newwin(10,30,10,25);
   WINDOW * const net = newwin(6,70,21,0);
-  
-  int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
 
   struct sockaddr old_input_source_address;
   char source[INET6_ADDRSTRLEN];
   char sport[256];
   source[0] = 0;
   sport[0] = 0;
+
+  extern pthread_t Keyboard_thread;
+  pthread_create(&Keyboard_thread,NULL,keyboard,demod);
 
   for(;;){
     struct bandplan const *bp;
@@ -334,8 +329,6 @@ void *display(void *arg){
     wprintw(sdr,"Mix gain %10u\n",demod->status.mixer_gain);
     wprintw(sdr,"IF gain  %10u dB\n",demod->status.if_gain);
     wnoutrefresh(sdr);
-    
-    extern int Delayed,Skips;
 
     if(memcmp(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address)) != 0){
       // First time, or source has changed
@@ -358,10 +351,25 @@ void *display(void *arg){
 
     wnoutrefresh(net);
     doupdate();
+    usleep(Update_interval);
+  }
+}
 
+void *keyboard(void *arg){
+  pthread_setname("keyboard");
+  assert(arg != NULL);
+  struct demod *demod = arg;
+
+  Dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
+  double tunestep10 = pow(10.,Tunestep);
+  keypad(stdscr,TRUE);
+  cbreak();
+  noecho();
+
+  while(1){
 
     // Poll Griffin Powermate knob, if present
-
+    
     // Redefine stuff we need from linux/input.h
     // We can't include it because it conflicts with ncurses.h!
 #define EV_SYN 0
@@ -376,9 +384,9 @@ void *display(void *arg){
       int32_t value;
     };
     // End of redefined input stuff
-
+    
     struct input_event event;
-    if(read(dial_fd,&event,sizeof(event)) == sizeof(event)){
+    if(read(Dial_fd,&event,sizeof(event)) == sizeof(event)){
       // Got something from the powermate knob
       if(event.type == EV_SYN){
 	// Ignore
@@ -399,11 +407,13 @@ void *display(void *arg){
     }
 
     int c;
-    c = getch(); // read keyboard with timeout
-
+    c = getch(); // read keyboard
+    
     switch(c){
     case ERR:   // no key; timed out. Do nothing.
       break;
+    case 'a':   // for testing only
+      abort();
     case 'q':   // Exit radio program
       goto done;
     case 'h':
@@ -413,26 +423,20 @@ void *display(void *arg){
     case 'r':
       {
 	char str[160];
-	char tmp[256];
-
 	getentry("Load state file: ",str,sizeof(str));
 	if(strlen(str) > 0){
-	  if(loadstate(demod,str) == 0)
-	    break;
-	  snprintf(tmp,sizeof(tmp),"%s/.radiostate/%s",getenv("HOME"),str);
-	  loadstate(demod,tmp);
+	  struct demod Temp;
+	  if(loadstate(&Temp,str) == 0)
+	    activate(demod,&Temp);
 	}
       }
       break;
     case 'w':
       {
 	char str[160];
-	char tmp[256];
-
 	getentry("Save state file: ",str,sizeof(str));
 	if(strlen(str) > 0){
-	  snprintf(tmp,sizeof(tmp),"%s/.radiostate/%s",getenv("HOME"),str);
-	  savestate(demod,tmp);
+	  savestate(demod,str);
 	}
       }
       break;
@@ -443,9 +447,9 @@ void *display(void *arg){
 	if(strlen(str) > 0){
 	  int const i = setup_mcast(str,Mcast_dest_port,0);
 	  int const j = demod->input_fd;
-	  if(i != -1){
+	  if(i > 0){
 	    demod->input_fd = i;
-	    if(j != -1)
+	    if(j > 0)
 	      close(j);
 	    strncpy(demod->iq_mcast_address_text,str,sizeof(demod->iq_mcast_address_text));
 	    // Reset error counts
@@ -545,15 +549,15 @@ void *display(void *arg){
 	if(f > 0){
 	  // If frequency would be out of range, guess kHz or MHz
 	  if(f >= 0.1 && f < 100)
-	    set_freq(demod,f*1e6,1); // 0.1 - 99.999 Only MHz can be valid
+	    set_freq(demod,f*1e6,0); // 0.1 - 99.999 Only MHz can be valid
 	  else if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
-	    set_freq(demod,f*1e6,1);
+	    set_freq(demod,f*1e6,0);
 	  else if(f < 2000)        // Could be kHz or MHz, arbitarily assume kHz
-	    set_freq(demod,f*1e3,1);
+	    set_freq(demod,f*1e3,0);
 	  else if(f < 100000)      // Can only be kHz
-	    set_freq(demod,f*1e3,1);
+	    set_freq(demod,f*1e3,0);
 	  else                     // accept directly
-	    set_freq(demod,f,1); 
+	    set_freq(demod,f,0);
 	}
       }
       break;
@@ -567,11 +571,7 @@ void *display(void *arg){
 	int const u = strtol(str,&ptr,0);
 	if(ptr != str){
 	  if(u > 50){
-	    Update_interval = u;
-	    timeout(Update_interval);
-	  } else if(u <= 0){
-	    Update_interval = -1; // No automatic update
-	    timeout(Update_interval);
+	    Update_interval = 1000* u;
 	  }
 	}
       }
@@ -591,10 +591,10 @@ void *display(void *arg){
       //      fprintf(stderr,"char %d 0x%x",c,c);
       break;
     }
-    doupdate();
+    //    doupdate();
   }
  done:;
-  pthread_cleanup_pop(1);
+  display_cleanup();
   // Dump receiver state to default
   savestate(demod,"default");
   exit(0);
