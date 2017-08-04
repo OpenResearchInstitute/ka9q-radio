@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.30 2017/08/02 02:30:40 karn Exp karn $
+// $Id: fm.c,v 1.31 2017/08/04 03:35:55 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -163,21 +163,25 @@ void *demod_fm(void *arg){
       fftwf_execute(pl_plan);
       int peakbin = -1;
       float peakenergy = 0;
+      float totenergy = 0; // Total energy, all bins
       assert(malloc_usable_size(pl_spectrum) >= pl_fft_size/2 * sizeof(complex float));
       for(n=1;n<pl_fft_size/2;n++){
-	if(cnrmf(pl_spectrum[n]) > peakenergy){
-	  peakenergy = cnrmf(pl_spectrum[n]);
+	float energy = cnrmf(pl_spectrum[n]);
+	totenergy += energy;
+	if(energy > peakenergy){
+	  peakenergy = energy;
 	  peakbin = n;
 	}
       }
-      if(peakbin > 0){
+      if(peakbin > 0 && peakenergy > 0.5 * totenergy ){
 	// Standard PL tones range from 67.0 to 254.1 Hz; ignore out of range results
 	// as they can be falsed by voice in the absence of a tone
-	// This needs to be enhanced as we still get random results on no tone
+	// Give a result only if the energy in the tone is at least half of the total (arbitrary)
 	float f = (float)peakbin * PL_samprate / pl_fft_size;
 	if(f > 67 && f < 255)
 	  demod->plfreq = f;
-      }
+      } else
+	demod->plfreq = NAN;
     }
   }
   fftwf_destroy_plan(pl_plan);
