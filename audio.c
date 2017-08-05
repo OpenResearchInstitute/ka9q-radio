@@ -264,6 +264,8 @@ int setup_audio(struct audio *audio){
   
   assert(audio != NULL);
 
+  audio->bitrate = 0;
+  
   // Set up audio output stream(s)
   if(audio->audio_mcast_fd > 0)
     close(audio->audio_mcast_fd);
