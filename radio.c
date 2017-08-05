@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.49 2017/08/04 14:55:17 karn Exp karn $
+// $Id: radio.c,v 1.50 2017/08/05 08:07:33 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -325,6 +325,10 @@ int set_cal(struct demod *demod,double cal){
 }
 int spindown(struct demod *demod,complex float *data,int len){
   assert(demod != NULL);
+
+  if(demod->second_LO == 0)
+    return 0; // Probably not set yet, but in any event nothing to do
+
   assert(data != NULL);
   assert(!isnan(creal(demod->second_LO_phase_step)) && !isnan(cimag(demod->second_LO_phase_step)));
   assert(cnrm(demod->second_LO_phase) != 0);
