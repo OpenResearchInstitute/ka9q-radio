@@ -397,11 +397,12 @@ void *display(void *arg){
       wprintw(sdr,"PCM%'16.0f bps\n",(float)audio->samprate);
     struct timeval tv;
     gettimeofday(&tv,0);
-    long long dt = 1000000 * (tv.tv_sec - last_time.tv_sec) +
+    long dt = 1000000 * (tv.tv_sec - last_time.tv_sec) +
       tv.tv_usec - last_time.tv_usec;
     last_time = tv;
-    float decay;
-    decay = exp(-0.5 * dt/1.0e6);
+    float decay = expf(-0.5 * dt/1.0e6);
+    assert(!isnan(decay));
+    assert(!isnan(audio->bitrate));
     audio->bitrate *= decay;
 
       

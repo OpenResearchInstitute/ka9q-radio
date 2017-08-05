@@ -137,7 +137,9 @@ void *stereo_opus_audio(void *arg){
 	break;
       }
       audio->audio_packets++;
+      assert(!isnan(audio->bitrate));
       audio->bitrate += dlen * 8;
+      assert(!isnan(audio->bitrate));
     }
     // always update timestamp so decoder will know how much was dropped
     timestamp += opus_blocksize;
@@ -195,7 +197,9 @@ void *stereo_pcm_audio(void *arg){
       perror("stereo_pcm: sendmsg");
       break;
     }
+    assert(!isnan(audio->bitrate));
     audio->bitrate += 8 * sizeof(PCM_buf);
+    assert(!isnan(audio->bitrate));
     audio->audio_packets++;
   }
   close(audio->pcm_stereo_read_fd);
@@ -248,7 +252,9 @@ void *mono_pcm_audio(void *arg){
       perror("stereo_pcm: sendmsg");
       break;
     }
+    assert(!isnan(audio->bitrate));
     audio->bitrate += 8 * sizeof(PCM_buf);
+    assert(!isnan(audio->bitrate));
     audio->audio_packets++;
   }
   close(audio->pcm_mono_read_fd);
