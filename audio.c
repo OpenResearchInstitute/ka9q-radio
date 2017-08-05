@@ -1,5 +1,8 @@
-// $Id: audio.c,v 1.32 2017/08/04 03:35:55 karn Exp karn $
-// Multicast PCM audio
+// $Id: audio.c,v 1.33 2017/08/04 14:53:06 karn Exp karn $
+// Audio multicast routines for KA9Q SDR receiver
+// Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
+// Copyright 2017 Phil Karn, KA9Q
+
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <pthread.h>
@@ -17,6 +20,7 @@
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <opus/opus.h>
@@ -29,7 +33,7 @@
 #define PCM_BUFSIZE 512        // 16-bit word count; must fit in Ethernet MTU
 
 
-short const scaleclip(float x){
+static short const scaleclip(float x){
   if(x >= 1.0)
     return SHRT_MAX;
   else if(x <= -1.0)
@@ -37,6 +41,7 @@ short const scaleclip(float x){
   return (short)(SHRT_MAX * x);
 }
   
+// Send 'size' stereo samples, each in a complex float
 int send_stereo_audio(struct audio *audio,complex float const *buffer,int size){
   if(audio->opus_bitrate != 0)
     write(audio->opus_stereo_write_fd,buffer,size * sizeof(*buffer));
@@ -45,8 +50,10 @@ int send_stereo_audio(struct audio *audio,complex float const *buffer,int size){
   return 0;
 }
 
+// Send 'size' mono samples, each in a float
 int send_mono_audio(struct audio *audio,float const *buffer,int size){
   if(audio->opus_bitrate != 0){
+    // Send to opus encoder as stereo with duplicate channels
     complex float obuf[size];
     int i;
     for(i=0;i<size;i++)
@@ -58,7 +65,7 @@ int send_mono_audio(struct audio *audio,float const *buffer,int size){
   return 0;
 }
 
-
+// Thread for compressing and multicasting audio with Opus codec
 void *stereo_opus_audio(void *arg){
   pthread_setname("opus");
   assert(arg != NULL);
@@ -88,7 +95,7 @@ void *stereo_opus_audio(void *arg){
     return NULL;
   }
   opus_encoder_ctl(audio->opus,OPUS_SET_BITRATE(audio->opus_bitrate));
-  opus_encoder_ctl(audio->opus,OPUS_SET_DTX(1));
+  opus_encoder_ctl(audio->opus,OPUS_SET_DTX(audio->opus_dtx));
   opus_encoder_ctl(audio->opus,OPUS_SET_LSB_DEPTH(16));
 
   struct rtp_header rtp;
@@ -119,9 +126,8 @@ void *stereo_opus_audio(void *arg){
       fprintf(stderr,"opus encode error %d\n",dlen);
       continue;
     }
-    if(dlen > 2){
-      // Discontinuous transmission; don't send frames of 2 bytes or less,
-      // but update timestamp so decoder will know how much was dropped
+    // Don't transmit if discontinuous mode is selected and frame is <= 2 bytes
+    if(!audio->opus_dtx || dlen > 2){
       rtp.seq = htons(seq++);
       rtp.timestamp = htonl(timestamp);
       iovec[1].iov_len = dlen; // Length varies
@@ -130,7 +136,10 @@ void *stereo_opus_audio(void *arg){
 	perror("opus: sendmsg");
 	break;
       }
+      audio->audio_packets++;
+      audio->bitrate += dlen * 8;
     }
+    // always update timestamp so decoder will know how much was dropped
     timestamp += opus_blocksize;
   }
   close(audio->opus_stereo_read_fd);
@@ -186,6 +195,8 @@ void *stereo_pcm_audio(void *arg){
       perror("stereo_pcm: sendmsg");
       break;
     }
+    audio->bitrate += 8 * sizeof(PCM_buf);
+    audio->audio_packets++;
   }
   close(audio->pcm_stereo_read_fd);
   audio->pcm_stereo_read_fd = -1;
@@ -237,6 +248,8 @@ void *mono_pcm_audio(void *arg){
       perror("stereo_pcm: sendmsg");
       break;
     }
+    audio->bitrate += 8 * sizeof(PCM_buf);
+    audio->audio_packets++;
   }
   close(audio->pcm_mono_read_fd);
   audio->pcm_mono_read_fd = -1;

@@ -1,6 +1,6 @@
-// $Id: display.c,v 1.61 2017/08/04 03:35:55 karn Exp karn $
+// $Id: display.c,v 1.62 2017/08/04 14:57:38 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
-// Copyright 2017 Phil Karn, KA9Q - may be used under the Gnu Public License v2.
+// Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <errno.h>
 #include <stdio.h>
@@ -16,6 +16,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -42,11 +43,12 @@ float Spare; // General purpose knob for experiments
 
 extern int Update_interval;
 
-// Pop up a temporary window with the contents of a file,
-// then wait for a kb character to clear it
-#define MAXCOLS 256
-void popup(const char *filename){
+// Pop up a temporary window with the contents of a file in the
+// library directory (usually /usr/local/share/ka9q-radio/)
+// then wait for a single keyboard character to clear it
 
+void popup(const char *filename){
+  static const int maxcols = 256;
   char fname[PATH_MAX];
   snprintf(fname,sizeof(fname),"%s/%s",Libdir,filename);
   FILE *fp;
@@ -54,22 +56,22 @@ void popup(const char *filename){
     return;
   // Determine size of box
   int rows=0, cols=0;
-  char line[MAXCOLS];
+  char line[maxcols];
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
     rows++;
     if(strlen(line) > cols)
-      cols = strlen(line);
+      cols = strlen(line); // Longest line
   }
   rewind(fp);
   
   // Allow room for box
   WINDOW * const pop = newwin(rows+2,cols+2,0,0);
   box(pop,0,0);
-  int row = 0;
+  int row = 1; // Start inside box
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
-    mvwprintw(pop,++row,1,line);
+    mvwprintw(pop,row++,1,line);
   }
   fclose(fp);
   wnoutrefresh(pop);
@@ -109,8 +111,6 @@ void display_cleanup(void *arg){
   nocbreak();
   endwin();
 }
-
-WINDOW *deb;
 
 // Adjust the selected item up or down one step
 static void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
@@ -196,6 +196,7 @@ void *display(void *arg){
   pthread_setname("display");
   assert(arg != NULL);
   struct demod * const demod = arg;
+  struct audio * const audio = demod->audio;
   double tunestep10 = pow(10.,demod->tunestep);
   int tuneitem = 0;
 
@@ -203,32 +204,30 @@ void *display(void *arg){
 
   initscr();
   keypad(stdscr,TRUE);
-  timeout(Update_interval); // This sets the update interval when nothing is typed
+  timeout(Update_interval); // update interval when nothing is typed
   cbreak();
   noecho();
-#if 0
-  WINDOW * const deb = newwin(5,40,14,40);
-  scrollok(deb,1);
-#endif
-  WINDOW * const fw = newwin(9,70,0,0);
-  WINDOW * const sig = newwin(13,40,10,0);
-  WINDOW * const sdr = newwin(16,40,6,40);
-  WINDOW * const status = newwin(5,40,0,40);
+
+  WINDOW * const fw = newwin(9,70,0,0);    // Frequency information
+  WINDOW * const sig = newwin(13,40,10,0); // Signal information
+  WINDOW * const sdr = newwin(17,40,6,40); // SDR information
+  WINDOW * const status = newwin(5,40,0,40); // Misc status information
   
-  int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
+  int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);  // Powermate knob?
 
   struct sockaddr old_input_source_address;
   char source[INET6_ADDRSTRLEN];
   char sport[256];
-  source[0] = 0;
-  sport[0] = 0;
+  memset(source,0,sizeof(source));
+  memset(sport,0,sizeof(sport));
+
+  struct timeval last_time;
 
   for(;;){
 
-    
     // Update display
     // Frequency control section - these can be adjusted by the user
-    // using the keyboard or tuning knob
+    // using the keyboard or tuning knob, so be careful with formatting
     wmove(fw,0,0);
     wclrtobot(fw);
     wprintw(fw,"Frequency   %'17.3f Hz",get_freq(demod));
@@ -237,6 +236,8 @@ void *display(void *arg){
 
     wprintw(fw,"\n");
       
+    // second LO frequency is negative of IF, i.e., a signal at +48 kHz
+    // needs a second LO frequency of -48 kHz to bring it to zero
     wprintw(fw,"First LO    %'17.3f Hz\n",get_first_LO(demod));
     wprintw(fw,"IF          %'17.3f Hz\n",-get_second_LO(demod));
     wprintw(fw,"Dial offset %'17.3f Hz\n",demod->dial_offset);
@@ -245,25 +246,25 @@ void *display(void *arg){
     wprintw(fw,"Filter high %'17.3f Hz\n",demod->high);
     wprintw(fw,"Kaiser Beta %'17.3f\n",demod->kaiser_beta);
     wprintw(fw,"Spare       %'17.3f\n",Spare);
+
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
     // They come from the ' option in the printf formats
-    int x;
-
+    int hcol;
     if(demod->tunestep >= -3 && demod->tunestep <= -1){ // .001 or .01 or .1
-      x = 24 - demod->tunestep + 1;
+      hcol = 24 - demod->tunestep + 1;
     } else if(demod->tunestep >= 0 && demod->tunestep <= 2){
-      x = 24 - demod->tunestep;  // 1, 10, 100
+      hcol = 24 - demod->tunestep;  // 1, 10, 100
     } else if(demod->tunestep >= 3 && demod->tunestep <= 5){
-      x = 24 - demod->tunestep - 1; // 1,000; 10,000; 100,000
+      hcol = 24 - demod->tunestep - 1; // 1,000; 10,000; 100,000
     } else if(demod->tunestep >= 6 && demod->tunestep <= 8){
-      x = 24 - demod->tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
+      hcol = 24 - demod->tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
     } else if(demod->tunestep >= 9 && demod->tunestep <= 9){
-      x = 24 - demod->tunestep - 3; // 1,000,000,000
+      hcol = 24 - demod->tunestep - 3; // 1,000,000,000
     } else
-      x = 0; // can't happen, but shuts up compiler
+      hcol = 0; // can't happen, but shuts up compiler
     // Highlight digit
-    mvwchgat(fw,tuneitem,x,1,A_STANDOUT,0,NULL);
+    mvwchgat(fw,tuneitem,hcol,1,A_STANDOUT,0,NULL);
     wnoutrefresh(fw);
 
 
@@ -273,13 +274,16 @@ void *display(void *arg){
     struct bandplan const *bp_low,*bp_high;
     bp_low = lookup_frequency(get_freq(demod)+demod->low);
     bp_high = lookup_frequency(get_freq(demod)+demod->high);
+    // Make sure entire receiver passband is in the band
     if(bp_low != NULL && bp_high != NULL){
       struct bandplan intersect;
 
+      // If the passband straddles a mode or class boundary, form
+      // the intersection to give the more restrictive answers
       intersect.classes = bp_low->classes & bp_high->classes;
       intersect.modes = bp_low->modes & bp_high->modes;
 
-      wprintw(status,"%s\n",bp_low->name); // Should be the same
+      wprintw(status,"%s\n",bp_low->name); // bp_high->name should be the same
       if(intersect.modes & CW)
 	wprintw(status,"CW ");
       if(intersect.modes & DATA)
@@ -301,13 +305,15 @@ void *display(void *arg){
 	wprintw(status,"Novice ");
       wprintw(status,"\n");
 
-
+      // Any power limits (except for Novices?)
       if(bp_low->power != 0)
 	wprintw(status,"Limit %.0lf watts\n",bp_low->power);
       else if(bp_high->power != 0)
 	wprintw(status,"Limit %.0lf watts\n",bp_high->power);
     }
     if(!LO2_in_range(demod,get_second_LO(demod),1)){
+      // LO2 is near its edges where signals from the opposite edge
+      // get aliased; warn about this
       double alias;
       if(get_second_LO(demod) > 0)
 	alias = get_first_LO(demod) - get_second_LO(demod) + demod->samprate;
@@ -315,7 +321,6 @@ void *display(void *arg){
 	alias = get_first_LO(demod) - get_second_LO(demod) - demod->samprate;	
       wprintw(status,"alias %'.3f Hz\n",alias);
     }
-
     wnoutrefresh(status);
 
 
@@ -336,6 +341,7 @@ void *display(void *arg){
     float n0 = ((demod->power_i + demod->power_q) - (demod->amplitude * demod->amplitude))
       / (demod->samprate - fabs(demod->high-demod->low));
 #endif
+    // Display these only if they're in use by the current mode
     if(!isnan(demod->snr))
       wprintw(sig,"SNR     %10.1f dB\n",power2dB(demod->snr));
 
@@ -365,28 +371,49 @@ void *display(void *arg){
     wmove(sdr,0,0);
     wclrtobot(sdr);
     extern int Delayed,Skips;
-    wprintw(sdr,"Src   %s:%s\n",source,sport);
+    wprintw(sdr,"Src   %s:%s\n",source,sport); // Actual sender of mcasts
     wprintw(sdr,"Mcast %s:%s\n",demod->iq_mcast_address_text,Mcast_dest_port);
-    wprintw(sdr,"Late     %10d\n",Delayed);
-    wprintw(sdr,"Skips    %10d\n",Skips);
-    wprintw(sdr,"Samprate %'10d Hz\n",demod->status.samprate);
-    wprintw(sdr,"I offset %10.6f\n",demod->DC_i);
-    wprintw(sdr,"Q offset %10.6f\n",demod->DC_q);
-    wprintw(sdr,"I/Q imbal%10.3f dB\n",power2dB(demod->power_i/demod->power_q));
-    wprintw(sdr,"I/Q phi  %10.5f rad\n",demod->sinphi);
-    wprintw(sdr,"LNA      %10u\n",demod->status.lna_gain);
-    wprintw(sdr,"Mix gain %10u\n",demod->status.mixer_gain);
-    wprintw(sdr,"IF gain  %10u dB\n",demod->status.if_gain);
-    wprintw(sdr,"Dest  %s:%s\n",demod->audio->audio_mcast_address_text,Mcast_dest_port);
-    if(demod->audio->opus_bitrate > 0){
-      wprintw(sdr,"Opus %3.0f ms %'7d bps\n",demod->audio->opus_blocktime,demod->audio->opus_bitrate);
-    } else
-      wprintw(sdr,"PCM         %'7d Hz\n",DAC_samprate);
+    wprintw(sdr,"IQ Pkts%'14lld\n",demod->iq_packets);
+    wprintw(sdr,"Late%17d\n",Delayed);
+    wprintw(sdr,"Skips%16d\n",Skips);
+    wprintw(sdr,"Samprate%'13d Hz\n",demod->status.samprate); // Nominal
+    wprintw(sdr,"I offset%13.6f\n",demod->DC_i);  // Scaled to +/-1
+    wprintw(sdr,"Q offset%13.6f\n",demod->DC_q);
+    wprintw(sdr,"I/Q imbal%12.3f dB\n",power2dB(demod->power_i/demod->power_q));
+    wprintw(sdr,"I/Q phi%14.5f rad\n",demod->sinphi);
+    wprintw(sdr,"LNA%18u\n",demod->status.lna_gain);   // SDR dependent
+    wprintw(sdr,"Mix gain%13u\n",demod->status.mixer_gain); // SDR dependent
+    wprintw(sdr,"IF gain%14u dB\n",demod->status.if_gain); // SDR dependent
+    // Audio output dest address (usually multicast)
+    wprintw(sdr,"Dest  %s:%s\n",audio->audio_mcast_address_text,Mcast_dest_port);
+    if(audio->opus_bitrate > 0){
+      wprintw(sdr,"Opus%3.0fms %s%'8.0f bps\n",
+	      audio->opus_blocktime,
+	      audio->opus_dtx ? "dtx":"   ",
+
+	      (float)audio->opus_bitrate);
+    } else // Actual data rate depends on mono/stereo
+           // 16xDAC_samprate for mono, 32xDAC_samprate for stereo
+      wprintw(sdr,"PCM%'16.0f bps\n",(float)audio->samprate);
+    struct timeval tv;
+    gettimeofday(&tv,0);
+    long long dt = 1000000 * (tv.tv_sec - last_time.tv_sec) +
+      tv.tv_usec - last_time.tv_usec;
+    last_time = tv;
+    float decay;
+    decay = exp(-0.5 * dt/1.0e6);
+    audio->bitrate *= decay;
+
+      
+    wprintw(sdr,"traffic%'14.0f bps\n",audio->bitrate);
+    audio->bitrate *= decay;
+
+    wprintw(sdr,"Pkts%'17lld\n",audio->audio_packets);
 
     wnoutrefresh(sdr);
-    
     doupdate();
 
+    
 
     // Poll Griffin Powermate knob, if present
 
@@ -426,12 +453,13 @@ void *display(void *arg){
       continue; // Start again with display refresh
     }
 
+    // Scan and process keyboard commands
     int c = getch(); // read keyboard with timeout
 
     switch(c){
     case ERR:   // no key; timed out. Do nothing.
       break;
-    case 'q':   // Exit radio program
+    case 'q':   // Exit entire radio program
       goto done;
     case 'h':
     case '?':
@@ -457,10 +485,13 @@ void *display(void *arg){
 	  beep();
 	  break;
 	}
+	// demod->input_fd is not protected by a mutex, so swap it carefully
+	// Mutex protection would be difficult because input thread is usually
+	// blocked on the socket, and if there's no I/Q input we'd hang
 	int const j = demod->input_fd;
 	demod->input_fd = i;
 	if(j != -1)
-	  close(j);
+	  close(j); // This should cause the input thread to see an error
 	strncpy(demod->iq_mcast_address_text,str,sizeof(demod->iq_mcast_address_text));
 	// Reset error counts
 	Skips = Delayed = 0;
@@ -469,15 +500,15 @@ void *display(void *arg){
     case 'l': // Toggle RF tuning lock; affects how adjustments to LO and IF behave
       demod->frequency_lock = !demod->frequency_lock;
       break;
-    case KEY_NPAGE: // Page Down key
-    case '\t':      // tab: cycle forwards through tuning fields
+    case KEY_NPAGE: // Page Down/tab key
+    case '\t':      // go to next tuning item
       tuneitem = (tuneitem + 1) % 9;
       break;
-    case KEY_BTAB:  // Backtab, i.e., shifted tab: cycle backwards through tuning fields
-    case KEY_PPAGE: // Page Up
+    case KEY_BTAB:  // Page Up/Backtab, i.e., shifted tab:
+    case KEY_PPAGE: // go to previous tuning item
       tuneitem = (9 + tuneitem - 1) % 9;
       break;
-    case KEY_HOME: // Go back to top row
+    case KEY_HOME: // Go back to item 0
       tuneitem = 0;
       demod->tunestep = 0;
       tunestep10 = 1;
@@ -496,7 +527,7 @@ void *display(void *arg){
 	tunestep10 /= 10;
       }
       break;
-    case KEY_UP:        // Increase whatever we're tuning
+    case KEY_UP:        // Increase whatever digit we're tuning
       adjust_item(demod,tuneitem,tunestep10);
       break;
     case KEY_DOWN:      // Decrease whatever we're tuning
@@ -505,7 +536,8 @@ void *display(void *arg){
     case '\f':  // Screen repaint (formfeed, aka control-L)
       clearok(curscr,TRUE);
       break;
-    case 'b':   // Blocksize - both data and impulse response-1
+    case 'b':   // Blocksize - sets both data and impulse response-1
+                // They should be separably set. Do this in the state file for now
       {
 	char str[160],*ptr;
 	getentry("Enter blocksize in samples: ",str,sizeof(str));
@@ -513,14 +545,14 @@ void *display(void *arg){
 	if(ptr != str){
 	  demod->L = i;
 	  demod->M = demod->L + 1;
-	  set_mode(demod,demod->mode); // Restart demod thread
+	  set_mode(demod,demod->mode,0); // Restart demod thread
 	}
       }
       break;
     case 'c':   // TCXO calibration offset, also affects sampling clock
       {
 	char str[160],*ptr;
-	getentry("Enter calibrate offset in ppm: ",str,sizeof(str));
+	getentry("Enter calibration offset in ppm: ",str,sizeof(str));
 	double const f = strtod(str,&ptr);
 	if(ptr != str)
 	  set_cal(demod,f * 1e-6);
@@ -529,7 +561,7 @@ void *display(void *arg){
     case 'n':   // Set noise reference to current amplitude; hit with no sig
       demod->noise = demod->amplitude;
       break;
-    case 'm':   // Select demod mode from list
+    case 'm':   // Select demod mode from list. Note: overwrites filters
       {
 	char str[160];
 	strncpy(str,"Enter mode [ ",sizeof(str));
@@ -543,7 +575,7 @@ void *display(void *arg){
 	if(strlen(str) > 0){
 	  for(i=0;i < Nmodes;i++){
 	    if(strcasecmp(str,Modes[i].name) == 0){
-	      set_mode(demod,Modes[i].mode);
+	      set_mode(demod,Modes[i].mode,1); // With default filters
 	      break;
 	    }
 	  }
@@ -556,23 +588,23 @@ void *display(void *arg){
       {
 	char str[160];
 	getentry("Enter frequency: ",str,sizeof(str));
-	double const f = parse_frequency(str);
+	double const f = parse_frequency(str); // Handles funky forms like 147m435
 	if(f > 0){
 	  // If frequency would be out of range, guess kHz or MHz
 	  if(f >= 0.1 && f < 100)
 	    set_freq(demod,f*1e6,1); // 0.1 - 99.999 Only MHz can be valid
-	  else if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
+	  else if(f < 500)         // 100-499.999 could be kHz or MHz, assume MHz
 	    set_freq(demod,f*1e6,1);
-	  else if(f < 2000)        // Could be kHz or MHz, arbitarily assume kHz
+	  else if(f < 2000)        // 500-1999.999 could be kHz or MHz, assume kHz
 	    set_freq(demod,f*1e3,1);
-	  else if(f < 100000)      // Can only be kHz
+	  else if(f < 100000)      // 2000-99999.999 can only be kHz
 	    set_freq(demod,f*1e3,1);
 	  else                     // accept directly
 	    set_freq(demod,f,1); 
 	}
       }
       break;
-    case 'i':    // Recenter IF
+    case 'i':    // Recenter IF to +/- samprate/4
       set_freq(demod,get_freq(demod),1);
       break;
     case 'u': // Display update rate

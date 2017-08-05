@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.48 2017/08/04 03:35:55 karn Exp karn $
+// $Id: radio.c,v 1.49 2017/08/04 14:55:17 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -199,7 +199,8 @@ double set_second_LO(struct demod *demod,double second_LO){
   demod->second_LO_phase_step = csincos(2*M_PI*second_LO/demod->samprate);
   return demod->second_LO = second_LO;
 }
-int set_mode(struct demod *demod,enum mode mode){
+
+int set_mode(struct demod *demod,enum mode mode,int defaults){
   assert(demod != NULL);
 
   // Send EOF to current demod thread, if any, to cause clean exit
@@ -208,9 +209,12 @@ int set_mode(struct demod *demod,enum mode mode){
   demod->terminate = 0;
 
   demod->mode = mode;
-  demod->dial_offset = Modes[mode].dial;
-  demod->low = Modes[mode].low;
-  demod->high = Modes[mode].high;
+  if(defaults || isnan(demod->dial_offset))
+    demod->dial_offset = Modes[mode].dial;
+  if(defaults || isnan(demod->low))
+    demod->low = Modes[mode].low;
+  if(defaults || isnan(demod->high))
+    demod->high = Modes[mode].high;
   // Suppress these in display unless they're used
   demod->snr = NAN;
   demod->foffset = NAN;
@@ -322,7 +326,7 @@ int set_cal(struct demod *demod,double cal){
 int spindown(struct demod *demod,complex float *data,int len){
   assert(demod != NULL);
   assert(data != NULL);
-  assert(!isnan(crealf(demod->second_LO_phase_step)) && !isnan(cimagf(demod->second_LO_phase_step)));
+  assert(!isnan(creal(demod->second_LO_phase_step)) && !isnan(cimag(demod->second_LO_phase_step)));
   assert(cnrm(demod->second_LO_phase) != 0);
 
   // Apply 2nd LO
@@ -335,4 +339,68 @@ int spindown(struct demod *demod,complex float *data,int len){
   // Renormalize to guard against accumulated roundoff error
   demod->second_LO_phase /= cabs(demod->second_LO_phase);
   return 0;
+}
+float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset estimates, per sample
+float const Power_alpha = 0.00001; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
+float const SCALE = 1./SHRT_MAX;   // Scale signed 16-bit int to float in range -1, +1
+
+// Preprocessing of samples performed for all demodulators
+// Remove DC biases, equalize I/Q power, correct phase imbalance
+// Update power measurement
+void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
+  // gain and phase balance coefficients
+  float gain_i=1, gain_q=1, secphi=1, tanphi=0;
+  if(demod->power_i != 0 && demod->power_q != 0){ // Avoid floating point exceptions at startup
+    float const totpower = demod->power_i + demod->power_q;
+    gain_q = sqrtf(totpower/(2*demod->power_q));         // Power ratio to amplitude ratio requires sqrt()
+    gain_i = sqrtf(totpower/(2*demod->power_i));
+    secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
+    tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
+  }
+  int i;
+  float samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
+  float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
+  float dotprod = 0;                           // sum of I*Q, for phase balance
+
+  for(i=0;i<cnt;i++){
+    // Remove and update DC offsets
+    float samp_i = *sp++ * SCALE;
+    samp_i_sum += samp_i;
+    samp_i -= demod->DC_i;
+    samp_i_sq_sum += samp_i * samp_i;
+
+    float samp_q = *sp++ * SCALE;
+    samp_q_sum += samp_q;
+    samp_q -= demod->DC_q;
+    samp_q_sq_sum += samp_q * samp_q;
+
+    // Balance gains, keeping constant total energy
+    samp_i *= gain_i;                  samp_q *= gain_q;
+
+    dotprod += samp_i * samp_q;
+    // Correct phase
+    samp_q = secphi * samp_q - tanphi * samp_i;
+    assert(!isnan(samp_q) && !isnan(samp_i));
+    complex float samp = CMPLXF(samp_i,samp_q);
+    // Experimental notch filter
+    if(demod->nf)
+      samp = notch(demod->nf,samp);
+
+    // Final corrected sample
+    demod->corr_data[(demod->write_ptr + i) % DATASIZE] = samp;
+  }
+  // Update estimates of DC offset, signal powers and phase error
+  demod->DC_i += DC_alpha * (samp_i_sum - cnt * demod->DC_i);
+  demod->DC_q += DC_alpha * (samp_q_sum - cnt * demod->DC_q);
+  demod->power_i += Power_alpha * (samp_i_sq_sum - cnt * demod->power_i);
+  demod->power_q += Power_alpha * (samp_q_sq_sum - cnt * demod->power_q);
+
+  float dpn = 2 * dotprod / (samp_i_sq_sum + samp_q_sq_sum);
+  demod->sinphi += Power_alpha * cnt * (dpn - demod->sinphi);
+
+  pthread_mutex_lock(&demod->data_mutex);
+  demod->write_ptr += cnt;
+  demod->write_ptr %= 65536;
+  pthread_cond_broadcast(&demod->data_cond);
+  pthread_mutex_unlock(&demod->data_mutex);
 }

@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.9 2017/07/31 03:15:08 karn Exp karn $
+# $Id: Makefile.osx,v 1.10 2017/08/04 15:13:24 karn Exp karn $
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -32,7 +32,7 @@ modulate: modulate.o misc.o filter.o modes.o
 monitor: monitor.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lm
 
-radio: main.o radio.o demod.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
+radio: main.o radio.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
 am.o: am.c dsp.h filter.h radio.h audio.h
@@ -41,7 +41,6 @@ audio.o: audio.c dsp.h audio.h rtp.h
 bandplan.o: bandplan.c bandplan.h
 cam.o: cam.c dsp.h filter.h radio.h audio.h
 control.o: control.c dsp.h radio.h
-demod.o: demod.c radio.h
 display.o: display.c radio.h audio.h dsp.h filter.h bandplan.h multicast.h rtp.h
 dsb.o: dsb.c dsp.h filter.h radio.h audio.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h

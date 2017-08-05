@@ -1,4 +1,4 @@
-// $Id: demod.c,v 1.26 2017/08/02 02:28:46 karn Exp karn $
+// $Id: demod.c,v 1.27 2017/08/04 03:35:55 karn Exp karn $
 // Common I/Q processing for all modes
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -59,7 +59,7 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
       samp = notch(demod->nf,samp);
 
     // Final corrected sample
-    demod->corr_data[(demod->write_ptr + i) % 65536] = samp;
+    demod->corr_data[(demod->write_ptr + i) % DATASIZE] = samp;
   }
   // Update estimates of DC offset, signal powers and phase error
   demod->DC_i += DC_alpha * (samp_i_sum - cnt * demod->DC_i);

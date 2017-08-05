@@ -1,7 +1,8 @@
-// $Id: main.c,v 1.60 2017/08/04 03:36:22 karn Exp karn $
-// Read complex float samples from stdin (e.g., from funcube.c)
-// downconvert, filter and demodulate
+// $Id: main.c,v 1.61 2017/08/04 14:56:11 karn Exp karn $
+// Read complex float samples from multicast stream (e.g., from funcube.c)
+// downconvert, filter, demodulate and multicast audio
 // Take commands from UDP socket
+// Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <limits.h>
@@ -31,12 +32,12 @@
 void closedown(int);
 void *input_loop(void *);
 int process_command(struct demod *,char const *,int);
-void activate(struct demod *a,struct demod const *new);
 
 pthread_t Display_thread;
 
-
-struct demod Demod; // Note: initialized to all zeroes, like all global variables
+// Primary control blocks for downconvert/filter/demodulate and audio output
+// Note: initialized to all zeroes, like all global variables
+struct demod Demod;
 struct audio Audio;
 
 // Multicast receive statistics
@@ -95,6 +96,15 @@ int main(int argc,char *argv[]){
   demod->audio->opus_bitrate = 32000;  // 32 kb/s
   demod->audio->opus_blocktime = 20;   // 20 ms
   strncpy(demod->audio->audio_mcast_address_text,"239.2.1.1",sizeof(demod->audio->audio_mcast_address_text));
+  demod->tunestep = 0;
+  demod->calibrate = 0;
+
+  // If these aren't set on the command line or in the state file, they'll
+  // be set by set_mode
+  demod->low = NAN;
+  demod->high = NAN;
+  demod->dial_offset = NAN;
+
 
   // Find any file argument and load it
   int c;
@@ -102,39 +112,38 @@ int main(int argc,char *argv[]){
     ;
   if(argc > optind)
     loadstate(demod,argv[optind]);
+  else
+    loadstate(demod,"default");
   
   // Go back and re-read args for real this time
   optind = 1;
-  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:v")) != EOF){
+  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:vx")) != EOF){
     int i;
 
     switch(c){
-    case 'u':
-      Update_interval = strtol(optarg,NULL,0);
-      break;
-    case 'B':
+    case 'B':   // Opus encoder block time; must be 2.5, 5, 10, 20, 40, 60, 80, 120
       Audio.opus_blocktime = strtod(optarg,NULL);
       break;
-    case 'c':
+    case 'c':   // SDR TCXO and A/D clock calibration in parts per million
       set_cal(demod,1e-6*strtod(optarg,NULL));
       break;
-    case 'f':
+    case 'f':   // Initial tuning frequency
       demod->start_freq = parse_frequency(optarg);
       break;
-    case 'I':
+    case 'I':   // Multicast address to listen to for I/Q data
       strncpy(demod->iq_mcast_address_text,optarg,sizeof(demod->iq_mcast_address_text));
       break;
-    case 'k':
+    case 'k':   // Kaiser window shape parameter; 0 = rectangular
       demod->kaiser_beta = strtod(optarg,NULL);
       break;
-    case 'l':
+    case 'l':  // Locale, mainly for numerical output format
       strncpy(Locale,optarg,sizeof(Locale));
       setlocale(LC_ALL,Locale);
       break;
-    case 'L':
+    case 'L':  // Filter block size
       demod->L = strtol(optarg,NULL,0);
       break;
-    case 'm':
+    case 'm': // receiver mode (AM/FM, etc)
       for(i = 0; i < Nmodes;i++){
 	if(strcasecmp(optarg,Modes[i].name) == 0){
 	  demod->mode = Modes[i].mode;
@@ -143,32 +152,38 @@ int main(int argc,char *argv[]){
       }
       break;
     case 'M':
-      demod->M = strtol(optarg,NULL,0);
+      demod->M = strtol(optarg,NULL,0); // Filter impulse length
       break;
-    case 'p':
+    case 'o': // Set Opus compressed bit rate target
+      Audio.opus_bitrate = strtol(optarg,NULL,0);
+      break;
+    case 'p': // Input control port. Don't use for now, needs work (and security)
       demod->ctl_port = strtol(optarg,NULL,0);
       break;
     case 'q':
       Quiet++; // Suppress display
       break;
-    case 'o':
-      Audio.opus_bitrate = strtol(optarg,NULL,0);
-      break;
-    case 'R':
+    case 'R': // Set audio multicast address
       strncpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
       break;
-    case 't':
+    case 't': // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);
       fftwf_init_threads();
       fftwf_plan_with_nthreads(Nthreads);
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
+    case 'u':
+      Update_interval = strtol(optarg,NULL,0); // Display update rate
+      break;
     case 'v':
       Verbose++;
       break;
+    case 'x':
+      Audio.opus_dtx = 1; // Enable Opus discontinuous mode
+      break;
     default:
       fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-t threads] [-u update_ms] [-v]\n",argv[0]);
-      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d -u %d\n",
+      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d -u %d [-x]\n",
 	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,"default",demod->start_freq,demod->iq_mcast_address_text,Locale,demod->L,Modes[demod->start_mode].name,demod->M,Audio.audio_mcast_address_text,Audio.opus_bitrate,Nthreads,Update_interval);
       exit(1);
       break;
@@ -196,6 +211,8 @@ int main(int argc,char *argv[]){
   demod->second_LO_phase_step = NAN;
 #endif
 
+  demod->corr_data = malloc(DATASIZE * sizeof(*demod->corr_data));
+  
   pthread_mutex_init(&demod->status_mutex,NULL);
   pthread_cond_init(&demod->status_cond,NULL);
   pthread_mutex_init(&demod->data_mutex,NULL);
@@ -224,16 +241,18 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
   }
-  pthread_create(&demod->input_thread,NULL,input_loop,demod);
-  set_second_LO(demod,demod->second_LO);
-  set_freq(demod,demod->start_freq,1);
-  demod->start_freq = 0;
-  set_mode(demod,demod->start_mode);
-  demod->start_mode = NO_MODE;
-
-
   if(!Quiet)
     pthread_create(&Display_thread,NULL,display,demod);
+
+  // The input thread must run before calling these next functions
+  pthread_create(&demod->input_thread,NULL,input_loop,demod);
+
+  // Actually set the mode and frequency already specified
+  // Can't do this until the input thread is running, as it would deadlock
+  set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
+  //  set_second_LO(demod,demod->second_LO);
+  set_freq(demod,demod->start_freq,1);
+  demod->start_freq = 0;
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -242,7 +261,6 @@ int main(int argc,char *argv[]){
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
-
 
   while(1)
     usleep(1000000); // probably get rid of this
@@ -260,8 +278,10 @@ void closedown(int a){
   exit(1);
 }
 
-// Read from RTP network socket, assemble blocks of samples with corrections done
-
+// Read from RTP network socket, remove DC offsets, balance I/Q gains,
+// compensate for non-orthogonality of I/Q
+// Write corrected data to circular buffer, wake up demodulator thread(s)
+// when data is available and when SDR status (frequency, sampling rate) changes
 void *input_loop(void *arg){
   pthread_setname("input");
   assert(arg != NULL);
@@ -272,6 +292,9 @@ void *input_loop(void *arg){
   struct rtp_header rtp;
   struct iovec iovec[3];
 
+  // Packet consists of Ethernet, IP and UDP header (already stripped)
+  // then standard Real Time Protocol (RTP), a status header and the PCM
+  // I/Q data (stereo 16-bit linear)
   iovec[0].iov_base = &rtp;
   iovec[0].iov_len = sizeof(rtp);
   iovec[1].iov_base = &new_status;
@@ -292,6 +315,7 @@ void *input_loop(void *arg){
 
   while(1){
 
+    // Listen either for an I/Q packet or a command packet (if enabled)
     fd_set mask,errmask;
     FD_ZERO(&mask);
     FD_ZERO(&errmask);
@@ -333,7 +357,8 @@ void *input_loop(void *arg){
       if(cnt < sizeof(rtp) + sizeof(demod->status))
 	continue; // Too small, ignore
       
-      // Host byte order
+      // Convert RTP header to host byte order
+      demod->iq_packets++;
       rtp.ssrc = ntohl(rtp.ssrc);
       rtp.seq = ntohs(rtp.seq);
       rtp.timestamp = ntohl(rtp.timestamp);
@@ -346,20 +371,25 @@ void *input_loop(void *arg){
       }
       eseq = rtp.seq + 1;
 
-      pthread_mutex_lock(&demod->status_mutex);
       if(memcmp(&demod->status,&new_status,sizeof(demod->status)) != 0){
-	// Status has changed; update and signal anybody waiting
+	// Protect status with a mutex and signal a condition when it changes
+	// since threads will be waiting for this
+	pthread_mutex_lock(&demod->status_mutex);
 	memcpy(&demod->status,&new_status,sizeof(demod->status));
-	// We now know the A/D sample rate, or it's changed
+	// We now know the A/D sample rate
 	// These need to be set before the demod thread starts!
 	// Signalled every time the status is updated
-	demod->samprate = demod->status.samprate * (1 + demod->calibrate * 1e-6);
+	// status.samprate contains *nominal* A/D sample rate
+	// demod->samprate contains *corrected* A/D sample rate
+	demod->samprate = demod->status.samprate * (1 + demod->calibrate);
 	demod->max_IF = demod->status.samprate/2 - 16000; // Hardwired for Funcube, make this more general somehow
 	demod->min_IF = -demod->max_IF;
-	demod->decimate = demod->status.samprate / DAC_samprate;
+	// Use nominal rates here so result is clean integer
+	demod->decimate = demod->status.samprate / Audio.samprate;
 	pthread_cond_broadcast(&demod->status_cond);
+	pthread_mutex_unlock(&demod->status_mutex);
       }
-      pthread_mutex_unlock(&demod->status_mutex);
+      // Pass PCM I/Q samples to corrector and input queue
       cnt -= sizeof(rtp) + sizeof(demod->status);
       cnt /= 4; // count 4-byte stereo samples
       proc_samples(demod,samples,cnt);
@@ -367,6 +397,8 @@ void *input_loop(void *arg){
   }
   return NULL;
 }
+// Receiver remote control
+// Needs a lot of work
 int process_command(struct demod *demod,char const *cmdbuf,int len){
   struct command command;
 
@@ -389,7 +421,7 @@ int process_command(struct demod *demod,char const *cmdbuf,int len){
       if(command.second_LO >= -demod->samprate/2 && command.second_LO <= demod->samprate/2)
 	set_second_LO(demod,command.second_LO);
       if(command.mode < Nmodes)
-	set_mode(demod,command.mode);
+	set_mode(demod,command.mode,1);
       if(fabs(command.calibrate) < 1)
 	set_cal(demod,command.calibrate);
       break;
@@ -400,12 +432,17 @@ int process_command(struct demod *demod,char const *cmdbuf,int len){
   return 0;
 }
  
-// Save receiver state in file
-int savestate(struct demod *dp,char const *statefile){
+// Save receiver state to file
+// Path is Statepath[] = $HOME/.radiostate
+int savestate(struct demod *dp,char const *filename){
   // Dump receiver state to file
-  char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,statefile);
   FILE *fp;
+  char pathname[PATH_MAX];
+  if(filename[0] == '/')
+    strncpy(pathname,filename,sizeof(pathname));    // Absolute path
+  else
+    snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,filename);
+
   if((fp = fopen(pathname,"w")) == NULL){
     fprintf(stderr,"Can't write state file %s\n",pathname);
     return -1;
@@ -424,7 +461,6 @@ int savestate(struct demod *dp,char const *statefile){
   fprintf(fp,"Frequency %.3f Hz\n",get_freq(dp));
   fprintf(fp,"Mode %s\n",Modes[dp->mode].name);
   fprintf(fp,"Dial offset %.3f Hz\n",dp->dial_offset);
-  fprintf(fp,"Kaiser Beta %.3f\n",dp->kaiser_beta);
   fprintf(fp,"Filter low %.3f Hz\n",dp->low);
   fprintf(fp,"Filter high %.3f Hz\n",dp->high);
   fprintf(fp,"Tunestep %d\n",dp->tunestep);
@@ -437,15 +473,17 @@ int savestate(struct demod *dp,char const *statefile){
 // table when the mode is actually set on the first A/D packet:
 // dial_offset, filter low, filter high, tuning step (not currently set)
 // 
-int loadstate(struct demod *dp,char const *statefile){
-  char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,statefile);
+int loadstate(struct demod *dp,char const *filename){
   FILE *fp;
+  char pathname[PATH_MAX];
+  if(filename[0] == '/')
+    strncpy(pathname,filename,sizeof(pathname));
+  else
+    snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,filename);
   if((fp = fopen(pathname,"r")) == NULL){
     fprintf(stderr,"Can't read state file %s\n",pathname);
     return -1;
   }
-
   char line[PATH_MAX];
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
@@ -455,7 +493,7 @@ int loadstate(struct demod *dp,char const *statefile){
       int i;
       for(i=0;i<Nmodes;i++){
 	if(strncasecmp(Modes[i].name,&line[5],strlen(Modes[i].name)) == 0){
-	  dp->start_mode = Modes[i].mode;
+	  dp->mode = Modes[i].mode;
 	  break;
 	}
       }

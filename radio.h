@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.35 2017/08/04 03:35:55 karn Exp karn $
+// $Id: radio.h,v 1.36 2017/08/04 14:53:55 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -86,6 +86,8 @@ struct demod {
   struct status status; // Last status from FCD
   struct status requested_status; // The status we want the FCD to be in
 
+  long long iq_packets;
+
   float DC_i,DC_q;   // Average DC offsets
   float power_i,power_q; // Average channel powers
   float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
@@ -100,7 +102,7 @@ struct demod {
   // the reader ever blocks
   pthread_mutex_t data_mutex;
   pthread_cond_t data_cond;
-  complex float corr_data[DATASIZE];
+  complex float *corr_data;
   int write_ptr;
   int read_ptr;
 
@@ -168,7 +170,7 @@ double set_second_LO(struct demod *,double);
 const double get_second_LO(struct demod const *);
 double set_second_LO_rate(struct demod *,double,int);
 int set_filter(struct demod *,float,float);
-int set_mode(struct demod *,enum mode);
+int set_mode(struct demod *,enum mode,int);
 int set_cal(struct demod *,double);
 int spindown(struct demod *,complex float *,int);
 void proc_samples(struct demod *,int16_t const *,int);
