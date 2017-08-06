@@ -61,21 +61,22 @@ void *demod_cam(void *arg){
     if(amp == 0)
       continue; // All zeroes? skip
     phase = conj(phase) / amp;
-    // Rotate signal onto I axis, measure DC (carrier) level
+    // Rotate signal onto I axis, measure sighal (I), noise (Q) and DC (carrier) levels
     float amplitude = 0;
     float noise = 0;
     int n;
     for(n=0; n < filter->olen; n++){
       // Sample with signal rotated onto I axis
-      complex float rsamp = filter->output.c[n] *= phase;
-      amplitude += creal(rsamp) * creal(rsamp);
-      noise += cimag(rsamp) * cimag(rsamp);
+      complex float const rsamp = filter->output.c[n] *= phase;
+      amplitude += crealf(rsamp) * crealf(rsamp);
+      noise += cimagf(rsamp) * cimagf(rsamp);
     }
     // RMS signal+noise and noise amplitudes
-    demod->amplitude = sqrtf(amplitude / filter->olen);
-    demod->noise = sqrtf(noise / filter->olen);
-    float const snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
-    demod->snr = (snn*snn) -1; // S/N as power ratio
+    amplitude /= filter->olen;
+    noise /= filter->olen;
+    demod->amplitude = sqrtf(amplitude); // RMS amplitude of I channel
+    demod->noise = sqrtf(noise);         // RMS amplitude of Q channel
+    demod->snr = (amplitude / noise) - 1; // S/N as power ratio
 
     // Frequency error is the phase of this block minus the last, times blocks/sec
     // Phase was already flipped, hence the minus
@@ -87,13 +88,11 @@ void *demod_cam(void *arg){
 
     // Remove carrier DC
     // AM AGC is carrier-driven
-    //    demod->gain = demod->headroom / demod->amplitude;
-    demod->gain = 0.5/demod->amplitude;
+    demod->gain = demod->headroom / demod->amplitude;
 
     float audio[filter->olen];
     for(n=0; n < filter->olen; n++)
       audio[n] = demod->gain * (creal(filter->output.c[n]) - demod->amplitude);
-
     send_mono_audio(demod->audio,audio,n);
   }
   delete_filter(filter);
