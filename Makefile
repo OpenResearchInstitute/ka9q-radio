@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.57 2017/08/04 15:13:24 karn Exp karn $
+# $Id: Makefile,v 1.58 2017/08/05 08:07:33 karn Exp karn $
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -19,7 +19,7 @@ clean:
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lm
 
-funcube: funcube.o gr.o libfcd.a
+funcube: funcube.o multicast.o gr.o libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lm
 
 iqplay: iqplay.o multicast.o attr.o misc.o
@@ -52,7 +52,7 @@ dsb.o: dsb.c dsp.h filter.h radio.h audio.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c dsp.h filter.h
 fm.o: fm.c dsp.h filter.h radio.h audio.h
-funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h dsp.h rtp.h
+funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h dsp.h rtp.h multicast.h
 gr.o: gr.c sdr.h
 hid-libusb.o: hid-libusb.c hidapi.h
 iq.o: iq.c dsp.h filter.h radio.h audio.h

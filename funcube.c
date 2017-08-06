@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.16 2017/07/02 04:29:52 karn Exp karn $
+// $Id: funcube.c,v 1.17 2017/07/23 23:30:30 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -24,6 +24,7 @@
 #include "radio.h"
 #include "dsp.h"
 #include "rtp.h"
+#include "multicast.h"
 
 void *display(void *arg);
 pthread_t Display_thread;
@@ -54,6 +55,10 @@ int ADC_samprate = 192000;
 int Verbose;
 int No_hold_open; // if set, close control between commands
 int Dongle;       // Which of several funcube dongles to use
+int Blocksize = 256;      // Could be up to 356 bytes with 20 bytes available for tunneling, but this is a power of 2
+int Dongle = 0;
+char *Locale;
+
 
 void *fcd_command(void *arg);
 int process_fc_command(char *,int);
@@ -62,25 +67,22 @@ double set_fc_LO(double);
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 
 int main(int argc,char *argv[]){
-  char *locale;
-  int c;
-  int blocksize = 356;      // Makes a 1480 byte IPv4 datagram; 20 bytes available for tunneling
-  int Dongle = 0;
   struct rtp_header rtp;
-
   char *dest = "239.1.2.1"; // Default for testing
-  int dest_port = 5004;     // Default for testing; recommended default RTP port
-  int dest_is_ipv6 = -1;
+  char *dest_port = "5004";     // Recommended default RTP port
 
-  locale = getenv("LANG");
+  Locale = getenv("LANG");
+  if(Locale == NULL || strlen(Locale) == 0)
+    Locale = "en_US.UTF-8";
 
+  int c;
   while((c = getopt(argc,argv,"d:vp:l:b:oR:P:")) != EOF){
     switch(c){
     case 'R':
       dest = optarg;
       break;
     case 'P':
-      dest_port = strtol(optarg,NULL,0);
+      dest_port = optarg;
       break;
     case 'o':
       No_hold_open++; // Close USB control port between commands so fcdpp can be used
@@ -92,79 +94,35 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     case 'l':
-      locale = optarg;
+      Locale = optarg;
       break;
     case 'b':
-      blocksize = strtol(optarg,NULL,0);
+      Blocksize = strtol(optarg,NULL,0);
       break;
     }
   }
-  if(Verbose){
-    fprintf(stderr,"funcube dongle %d: blocksize %d\n",
-	    Dongle,blocksize);
+  if(Verbose)
+    fprintf(stderr,"funcube dongle %d: blocksize %d\n",Dongle,Blocksize);
+
+  setlocale(LC_ALL,Locale);
+  
+  // Set up RTP output socket
+  Rtp_sock = setup_mcast(dest,dest_port,1);
+  if(Rtp_sock == -1){
+    fprintf(stderr,"Can't create multicast socket\n");
+    exit(1);
   }
-  setlocale(LC_ALL,locale);
+  if(front_end_init(Dongle,ADC_samprate,Blocksize) == -1){
+    fprintf(stderr,"front_end_init(%d,%d,%d) failed\n",Dongle,ADC_samprate,Blocksize);
+    exit(1);
+  }
+  usleep(100000); // Let things settle
+  
   signal(SIGPIPE,SIG_IGN);
   signal(SIGINT,closedown);
   signal(SIGKILL,closedown);
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);        
-  
-  // Set up RTP output socket
-  struct sockaddr_in address4;  
-  struct sockaddr_in6 address6;
-  if(inet_pton(AF_INET,dest,&address4.sin_addr) == 1){
-    // Destination is IPv4
-    dest_is_ipv6 = 0;
-    if((Rtp_sock = socket(PF_INET,SOCK_DGRAM,0)) == -1){
-      perror("funcube: can't create IPv4 output socket");
-      exit(1);
-    }
-    address4.sin_family = AF_INET;
-    address4.sin_port = htons(dest_port);
-
-    if(IN_MULTICAST(ntohl(address4.sin_addr.s_addr))){
-      // Destination is multicast; join it
-      struct group_req group_req;
-      group_req.gr_interface = 0;
-      memcpy(&group_req.gr_group,&address4,sizeof(address4));
-      if(setsockopt(Rtp_sock,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-	perror("setsockopt ipv4 multicast join group failed");
-    } // IN_MULTICAST
-  } else if(inet_pton(AF_INET6,dest,&address6.sin6_addr) == 1){
-    // Destination is IPv6
-    dest_is_ipv6 = 1;
-    address6.sin6_family = AF_INET6;
-    address6.sin6_flowinfo = 0;  
-    address6.sin6_port = htons(dest_port);
-    address6.sin6_scope_id = 0;
-    if((Rtp_sock = socket(PF_INET6,SOCK_DGRAM,0)) == -1){
-      perror("funcube: can't create IPv6 output socket");
-      exit(1);
-    }
-    if(IN6_IS_ADDR_MULTICAST(&address6)){
-      // Destination is multicast; join it
-      struct group_req group_req;
-      group_req.gr_interface = 0;
-      memcpy(&group_req.gr_group,&address6,sizeof(address6));
-      if(setsockopt(Rtp_sock,IPPROTO_IPV6,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0)
-	perror("setsockopt ipv6 multicast join group failed");
-    } // IN6_IS_ADDR_MULTICAST
-  } else {
-    fprintf(stderr,"Can't parse destination %s\n",dest);
-    exit(1);
-  }
-  // Apparently works for both IPv4 and IPv6
-  u_char loop = 1;
-  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0)
-    perror("setsockopt multicast loop failed");
-
-  u_char ttl = 1;
-  if(setsockopt(Rtp_sock,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0)
-    perror("setsockopt multicast ttl failed");
-      
-  front_end_init(Dongle,ADC_samprate,blocksize);
-  usleep(100000); // Let things settle
 
   if(Verbose > 1)
     pthread_create(&Display_thread,NULL,display,NULL);
@@ -178,7 +136,7 @@ int main(int argc,char *argv[]){
   rtp.mpt = 97;         // ordinarily dynamically allocated
   rtp.ssrc = htonl(ssrc);
 
-  short sampbuf[2*blocksize];
+  short sampbuf[2*Blocksize];
   struct iovec iovec[3];
   iovec[0].iov_base = &rtp;
   iovec[0].iov_len = sizeof(rtp);
@@ -188,16 +146,8 @@ int main(int argc,char *argv[]){
   iovec[2].iov_len = sizeof(sampbuf);
 
   struct msghdr message;
-  if(dest_is_ipv6){
-    message.msg_name = &address6;
-    message.msg_namelen = sizeof(address6);
-  } else if(!dest_is_ipv6){
-    message.msg_name = &address4;
-    message.msg_namelen = sizeof(address4);
-  } else {
-    fprintf(stderr,"No valid dest address\n");
-    exit(1);
-  }
+  message.msg_name = NULL;
+  message.msg_namelen = 0;
   message.msg_iov = &iovec[0];
   message.msg_iovlen = 3;
   message.msg_control = NULL;
@@ -208,22 +158,22 @@ int main(int argc,char *argv[]){
   int seq = 0;
   while(1){
 
-    get_adc(sampbuf,blocksize);
+    get_adc(sampbuf,Blocksize);
     if(Verbose > 1){
       // Only used by display, so don't calculate if the display isn't running
       // average energy (I+Q) in each sample, current block, **including DC offset**
       // At low levels, will disagree with demod's IF1 figure, which has the DC removed
       float sumsq = 0;
       int i;
-      for(i=0;i<2*blocksize;i++)
+      for(i=0;i<2*Blocksize;i++)
 	sumsq += (float)sampbuf[i] * sampbuf[i];
 
-      FCD.power = sumsq/blocksize;
+      FCD.power = sumsq/Blocksize;
     }
 
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
-    timestamp += blocksize;
+    timestamp += Blocksize;
 
     if(sendmsg(Rtp_sock,&message,0) == -1)
       perror("sendmsg");
@@ -362,7 +312,8 @@ int get_adc(short *buffer,const int L){
       snd_pcm_prepare(FCD.sdr_handle);
     }
     if((r = snd_pcm_readi(FCD.sdr_handle,buffer,L)) < 0){
-      fprintf(stderr,"funcube read error %s\n",snd_strerror(r));
+      fprintf(stderr,"funcube read error %s, reinit...\n",snd_strerror(r));
+      front_end_init(Dongle,ADC_samprate,Blocksize);
       usleep(500000); // Just to keep from locking things up
     }
   } while(r != L);
