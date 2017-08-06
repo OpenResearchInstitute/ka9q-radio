@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.64 2017/08/05 18:54:08 karn Exp karn $
+// $Id: display.c,v 1.65 2017/08/06 00:08:25 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -417,7 +417,7 @@ void *display(void *arg){
     // End of redefined input stuff
 
     struct input_event event;
-    if(read(dial_fd,&event,sizeof(event)) == sizeof(event)){
+    if(dial_fd != -1 && read(dial_fd,&event,sizeof(event)) == sizeof(event)){
       // Got something from the powermate knob
       if(event.type == EV_SYN){
 	// Ignore
