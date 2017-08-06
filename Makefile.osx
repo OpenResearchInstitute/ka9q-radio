@@ -1,6 +1,7 @@
-# $Id: Makefile.osx,v 1.10 2017/08/04 15:13:24 karn Exp karn $
+# $Id: Makefile.osx,v 1.11 2017/08/05 08:07:33 karn Exp karn $
 INCLUDES=-I /opt/local/include
-COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+#COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio

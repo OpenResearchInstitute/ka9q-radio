@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.36 2017/08/04 14:53:55 karn Exp karn $
+// $Id: radio.h,v 1.37 2017/08/05 08:07:33 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -86,7 +86,7 @@ struct demod {
   struct status status; // Last status from FCD
   struct status requested_status; // The status we want the FCD to be in
 
-  long long iq_packets;
+  unsigned long long iq_packets;
 
   float DC_i,DC_q;   // Average DC offsets
   float power_i,power_q; // Average channel powers

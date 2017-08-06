@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.61 2017/08/04 14:56:11 karn Exp karn $
+// $Id: main.c,v 1.62 2017/08/05 08:07:33 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate and multicast audio
 // Take commands from UDP socket
@@ -108,7 +108,8 @@ int main(int argc,char *argv[]){
 
   // Find any file argument and load it
   int c;
-  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:v")) != EOF)
+  char optstring[] = "B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:vx";
+  while((c = getopt(argc,argv,optstring)) != EOF)
     ;
   if(argc > optind)
     loadstate(demod,argv[optind]);
@@ -117,7 +118,7 @@ int main(int argc,char *argv[]){
   
   // Go back and re-read args for real this time
   optind = 1;
-  while((c = getopt(argc,argv,"B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:vx")) != EOF){
+  while((c = getopt(argc,argv,optstring)) != EOF){
     int i;
 
     switch(c){

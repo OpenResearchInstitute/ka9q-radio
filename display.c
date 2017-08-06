@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.62 2017/08/04 14:57:38 karn Exp karn $
+// $Id: display.c,v 1.64 2017/08/05 18:54:08 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -208,8 +208,8 @@ void *display(void *arg){
   cbreak();
   noecho();
 
-  WINDOW * const fw = newwin(9,70,0,0);    // Frequency information
-  WINDOW * const sig = newwin(13,40,10,0); // Signal information
+  WINDOW * const fw = newwin(11,70,0,0);    // Frequency information
+  WINDOW * const sig = newwin(11,40,12,0); // Signal information
   WINDOW * const sdr = newwin(17,40,6,40); // SDR information
   WINDOW * const status = newwin(5,40,0,40); // Misc status information
   
@@ -220,8 +220,6 @@ void *display(void *arg){
   char sport[256];
   memset(source,0,sizeof(source));
   memset(sport,0,sizeof(sport));
-
-  struct timeval last_time;
 
   for(;;){
 
@@ -246,6 +244,9 @@ void *display(void *arg){
     wprintw(fw,"Filter high %'17.3f Hz\n",demod->high);
     wprintw(fw,"Kaiser Beta %'17.3f\n",demod->kaiser_beta);
     wprintw(fw,"Spare       %'17.3f\n",Spare);
+    wprintw(fw,"Blocksize   %'17d samp\n",demod->L);
+    wprintw(fw,"Impulse len %'17d samp\n",demod->M);
+
 
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
@@ -328,8 +329,6 @@ void *display(void *arg){
     wmove(sig,0,0);
     wclrtobot(sig);     // clear previous stuff in case we stop showing the last lines
     wprintw(sig,"Mode    %10s\n",Modes[demod->mode].name);
-    wprintw(sig,"Block   %'10d samp\n",demod->L);
-    wprintw(sig,"Impulse %'10d samp\n",demod->M);
     wprintw(sig,"IF      %10.1f dBFS\n",power2dB(demod->power_i + demod->power_q));
     wprintw(sig,"Baseband%10.1f dBFS\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %10.1f dB\n",voltage2dB(demod->gain));
@@ -373,7 +372,7 @@ void *display(void *arg){
     extern int Delayed,Skips;
     wprintw(sdr,"Src   %s:%s\n",source,sport); // Actual sender of mcasts
     wprintw(sdr,"Mcast %s:%s\n",demod->iq_mcast_address_text,Mcast_dest_port);
-    wprintw(sdr,"IQ Pkts%'14lld\n",demod->iq_packets);
+    wprintw(sdr,"IQ Pkts%'14llu\n",demod->iq_packets);
     wprintw(sdr,"Late%17d\n",Delayed);
     wprintw(sdr,"Skips%16d\n",Skips);
     wprintw(sdr,"Samprate%'13d Hz\n",demod->status.samprate); // Nominal
@@ -387,29 +386,13 @@ void *display(void *arg){
     // Audio output dest address (usually multicast)
     wprintw(sdr,"Dest  %s:%s\n",audio->audio_mcast_address_text,Mcast_dest_port);
     if(audio->opus_bitrate > 0){
-      wprintw(sdr,"Opus%3.0fms %s%'8.0f bps\n",
-	      audio->opus_blocktime,
-	      audio->opus_dtx ? "dtx":"   ",
-
-	      (float)audio->opus_bitrate);
-    } else // Actual data rate depends on mono/stereo
-           // 16xDAC_samprate for mono, 32xDAC_samprate for stereo
-      wprintw(sdr,"PCM%'16.0f bps\n",(float)audio->samprate);
-    struct timeval tv;
-    gettimeofday(&tv,0);
-    long dt = 1000000 * (tv.tv_sec - last_time.tv_sec) +
-      tv.tv_usec - last_time.tv_usec;
-    last_time = tv;
-    float decay = expf(-0.5 * dt/1.0e6);
-    assert(!isnan(decay));
-    assert(!isnan(audio->bitrate));
-    audio->bitrate *= decay;
-
-      
-    wprintw(sdr,"traffic%'14.0f bps\n",audio->bitrate);
-    audio->bitrate *= decay;
-
-    wprintw(sdr,"Pkts%'17lld\n",audio->audio_packets);
+      wprintw(sdr,"Opus%4.0fms%4s",audio->opus_blocktime,audio->opus_dtx ? " dtx":"");
+      wprintw(sdr,"%7.1f kb/s\n",audio->opus_bitrate/1000.);
+    } else {
+      wprintw(sdr,"PCM %'17d Hz\n",audio->samprate);
+    }
+    wprintw(sdr,"Bitrate%'14.0f bps\n",audio->bitrate);
+    wprintw(sdr,"Pkts%'17llu\n",audio->audio_packets);
 
     wnoutrefresh(sdr);
     doupdate();

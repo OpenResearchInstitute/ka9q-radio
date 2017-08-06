@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.33 2017/08/04 14:53:06 karn Exp karn $
+// $Id: audio.c,v 1.36 2017/08/05 18:53:42 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -118,6 +118,9 @@ void *stereo_opus_audio(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
+  float blocktime = (float)opus_blocksize / audio->samprate;
+  float decay = exp(-blocktime);
+
   complex float opusbuf[sizeof(complex float) * opus_blocksize];
   while(pipefill(audio->opus_stereo_read_fd,opusbuf,sizeof(*opusbuf) * opus_blocksize) > 0){
     // Encoder accepts stereo, which we represent as complex, but it wants an array of floats
@@ -138,7 +141,10 @@ void *stereo_opus_audio(void *arg){
       }
       audio->audio_packets++;
       assert(!isnan(audio->bitrate));
-      audio->bitrate += dlen * 8;
+
+      assert(!isnan(decay));
+      assert(!isnan(audio->bitrate));
+      audio->bitrate = decay * audio->bitrate + 8 * dlen;
       assert(!isnan(audio->bitrate));
     }
     // always update timestamp so decoder will know how much was dropped
@@ -182,6 +188,8 @@ void *stereo_pcm_audio(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
   
+  float decay = expf((-PCM_BUFSIZE/2.)/ audio->samprate);
+
   complex float buffer[PCM_BUFSIZE/2];
   while(pipefill(audio->pcm_stereo_read_fd,buffer,sizeof(buffer)) > 0){
     int i;
@@ -197,8 +205,9 @@ void *stereo_pcm_audio(void *arg){
       perror("stereo_pcm: sendmsg");
       break;
     }
+    assert(!isnan(decay));
     assert(!isnan(audio->bitrate));
-    audio->bitrate += 8 * sizeof(PCM_buf);
+    audio->bitrate = decay * audio->bitrate + 8 * sizeof(PCM_buf);
     assert(!isnan(audio->bitrate));
     audio->audio_packets++;
   }
@@ -237,7 +246,9 @@ void *mono_pcm_audio(void *arg){
   message.msg_control = NULL;
   message.msg_controllen = 0;
   message.msg_flags = 0;
-  
+    
+  float decay = expf(-1.0 * PCM_BUFSIZE / audio->samprate);
+
   float buffer[PCM_BUFSIZE];
   while(pipefill(audio->pcm_mono_read_fd,buffer,sizeof(buffer)) > 0){
     int i;
@@ -252,8 +263,9 @@ void *mono_pcm_audio(void *arg){
       perror("stereo_pcm: sendmsg");
       break;
     }
+    assert(!isnan(decay));
     assert(!isnan(audio->bitrate));
-    audio->bitrate += 8 * sizeof(PCM_buf);
+    audio->bitrate = decay * audio->bitrate + 8 * sizeof(PCM_buf);
     assert(!isnan(audio->bitrate));
     audio->audio_packets++;
   }
