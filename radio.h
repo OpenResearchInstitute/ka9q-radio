@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.37 2017/08/05 08:07:33 karn Exp karn $
+// $Id: radio.h,v 1.38 2017/08/06 00:08:25 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#define CTLPORT 7300
 
 // Receiver control input packet
 enum cmd {
@@ -94,8 +95,7 @@ struct demod {
   float sinphi;      // smoothed estimate of I/Q phase error
 
   int input_fd;      // Raw incoming I/Q data from multicast socket
-  int ctl_port;      // Port number for incoming control packets
-  int ctl_fd;        // File descriptor for control input socket
+  int ctl_fd;        // File descriptor for controlling sdr
 
   // corr_data is written by the input thread and read by fillbuf in the demod tasks,
   // so it has to be protected by a mutex. The buffer is *NOT* protected from overrun, so ony

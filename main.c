@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.62 2017/08/05 08:07:33 karn Exp karn $
+// $Id: main.c,v 1.63 2017/08/06 00:08:25 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate and multicast audio
 // Take commands from UDP socket
@@ -85,7 +85,6 @@ int main(int argc,char *argv[]){
   demod->start_freq = 147.435e6;
   
   // Don't let set_mode() write an eof to stdin, which it would do with the default value (0) of corr_iq_write_fd
-  demod->ctl_port = -1; // Disable for now
   demod->input_source_address.sa_family = -1; // Set invalid
   demod->L = 4096;      // Number of samples in buffer: FFT length = L + M - 1
   demod->M = 4096+1;    // Length of filter impulse response
@@ -108,7 +107,7 @@ int main(int argc,char *argv[]){
 
   // Find any file argument and load it
   int c;
-  char optstring[] = "B:c:s:f:I:k:l:L:m:M:p:r:R:qo:t:u:vx";
+  char optstring[] = "B:c:s:f:I:k:l:L:m:M:r:R:qo:t:u:vx";
   while((c = getopt(argc,argv,optstring)) != EOF)
     ;
   if(argc > optind)
@@ -158,9 +157,6 @@ int main(int argc,char *argv[]){
     case 'o': // Set Opus compressed bit rate target
       Audio.opus_bitrate = strtol(optarg,NULL,0);
       break;
-    case 'p': // Input control port. Don't use for now, needs work (and security)
-      demod->ctl_port = strtol(optarg,NULL,0);
-      break;
     case 'q':
       Quiet++; // Suppress display
       break;
@@ -195,7 +191,6 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Copyright 2016 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
     fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
     fprintf(stderr,"Nmodes = %d\n",Nmodes);
-    fprintf(stderr,"UDP control port %d\n",demod->ctl_port);
     fprintf(stderr,"D/A sample rate %'d\n",DAC_samprate);
     fprintf(stderr,"block size: %'d complex samples\n",demod->L);
     fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples\n",demod->kaiser_beta,demod->M);
@@ -228,16 +223,6 @@ int main(int argc,char *argv[]){
   if((demod->ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
     perror("can't open control socket");
 
-  if(demod->ctl_port){
-    // Set up input control port
-    // This has been neglected for a while
-    struct sockaddr_in sock;
-    sock.sin_family = AF_INET;
-    sock.sin_port = htons(demod->ctl_port);
-    sock.sin_addr.s_addr = INADDR_ANY;
-    if(bind(demod->ctl_fd,(struct sockaddr *)&sock,sizeof(struct sockaddr_in)) != 0)
-      perror("control bind failed"); // Not fatal
-  } 
   if(setup_audio(demod->audio) != 0){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
@@ -320,10 +305,6 @@ void *input_loop(void *arg){
     fd_set mask,errmask;
     FD_ZERO(&mask);
     FD_ZERO(&errmask);
-    if(demod->ctl_fd != -1){
-      FD_SET(demod->ctl_fd,&mask);
-      FD_SET(demod->ctl_fd,&errmask);
-    }
     FD_SET(demod->input_fd,&mask);
     FD_SET(demod->input_fd,&errmask);
 
@@ -333,20 +314,9 @@ void *input_loop(void *arg){
     timeout.tv_usec = 100000;
     select(FD_SETSIZE,&mask,NULL,&errmask,&timeout);
 
-    if(FD_ISSET(demod->ctl_fd,&errmask) || FD_ISSET(demod->input_fd,&errmask))
+    if(FD_ISSET(demod->input_fd,&errmask))
       break;
 
-    if(FD_ISSET(demod->ctl_fd,&mask)){
-      // Got a command
-      socklen_t addrlen;
-      addrlen = sizeof(demod->ctl_address);
-      char pktbuf[MAXPKT];
-      int rdlen;
-      rdlen = recvfrom(demod->ctl_fd,&pktbuf,sizeof(pktbuf),0,(struct sockaddr *)&demod->ctl_address,&addrlen);
-      // Should probably look at the source address
-      if(rdlen > 0)
-	process_command(demod,pktbuf,rdlen);
-    }
     if(FD_ISSET(demod->input_fd,&mask)){
       // Receive I/Q data from front end
       int cnt;
@@ -398,40 +368,6 @@ void *input_loop(void *arg){
   }
   return NULL;
 }
-// Receiver remote control
-// Needs a lot of work
-int process_command(struct demod *demod,char const *cmdbuf,int len){
-  struct command command;
-
-  if(len >= sizeof(command)){
-    memcpy(&command,cmdbuf,sizeof(command));
-    switch(command.cmd){
-    case SENDSTAT:
-      break; // do this later
-    case SETSTATE: // first LO freq, second LO freq, second_LO freq rate, mode
-#if 0
-      fprintf(stderr,"setstate(%d,%.2lf,%.2lf,%.2lf,%.2lf)\n",
-	      command.mode,
-	      command.first_LO,
-	      command.second_LO,command.second_LO_rate,command.calibrate);
-#endif
-      // Ignore out-of-range values
-      if(command.first_LO > 0 && command.first_LO < 2e9)
-	set_first_LO(demod,command.first_LO,0);
-
-      if(command.second_LO >= -demod->samprate/2 && command.second_LO <= demod->samprate/2)
-	set_second_LO(demod,command.second_LO);
-      if(command.mode < Nmodes)
-	set_mode(demod,command.mode,1);
-      if(fabs(command.calibrate) < 1)
-	set_cal(demod,command.calibrate);
-      break;
-    default:
-      break; // Ignore
-    } // switch
-  }
-  return 0;
-}
  
 // Save receiver state to file
 // Path is Statepath[] = $HOME/.radiostate
@@ -456,7 +392,6 @@ int savestate(struct demod *dp,char const *filename){
     fprintf(fp,"Opus blocktime %.0f\n",dp->audio->opus_blocktime);
     fprintf(fp,"OPUS bitrate %d\n",dp->audio->opus_bitrate);
   }
-  fprintf(fp,"Control port %d\n",dp->ctl_port);
   fprintf(fp,"Blocksize %d\n",dp->L);
   fprintf(fp,"Impulse len %d\n",dp->M);
   fprintf(fp,"Frequency %.3f Hz\n",get_freq(dp));
@@ -510,7 +445,6 @@ int loadstate(struct demod *dp,char const *filename){
     } else if(dp->audio && sscanf(line,"Audio output %256s",dp->audio->audio_mcast_address_text) > 0){
     } else if(dp->audio && sscanf(line,"Opus blocktime %f",&dp->audio->opus_blocktime) > 0){
     } else if(dp->audio && sscanf(line,"OPUS bitrate %d",&dp->audio->opus_bitrate) > 0){
-    } else if(sscanf(line,"Control port %d",&dp->ctl_port) > 0){
     } else if(sscanf(line,"Locale %256s",Locale)){
       setlocale(LC_ALL,Locale);
     } else if(sscanf(line,"Calibrate %lf",&f) > 0){

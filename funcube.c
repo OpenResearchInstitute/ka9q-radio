@@ -65,6 +65,7 @@ int process_fc_command(char *,int);
 double set_fc_LO(double);
 
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
+int Ctl_sock;
 
 int main(int argc,char *argv[]){
   struct rtp_header rtp;
@@ -112,11 +113,22 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Can't create multicast socket\n");
     exit(1);
   }
+    
+  // Set up control socket
+  Ctl_sock = socket(AF_INET,SOCK_DGRAM,0);
+
+  struct sockaddr_in locsock;
+  locsock.sin_family = AF_INET;
+  locsock.sin_port = htons(CTLPORT);
+  locsock.sin_addr.s_addr = INADDR_ANY;
+  bind(Ctl_sock,&locsock,sizeof(locsock));
+
   if(front_end_init(Dongle,ADC_samprate,Blocksize) == -1){
     fprintf(stderr,"front_end_init(%d,%d,%d) failed\n",Dongle,ADC_samprate,Blocksize);
     exit(1);
   }
   usleep(100000); // Let things settle
+  pthread_create(&FCD_control_thread,NULL,fcd_command,&FCD);
   
   signal(SIGPIPE,SIG_IGN);
   signal(SIGINT,closedown);
@@ -287,7 +299,6 @@ int front_end_init(int dongle, int samprate,int L){
 	    (unsigned long)FCD.status.samprate);
 
   snd_pcm_prepare(FCD.sdr_handle); // Start A/D conversion
-  pthread_create(&FCD_control_thread,NULL,fcd_command,&FCD);
   r = 0;
 
  done:; // Also the abort target: close handle before returning
@@ -323,6 +334,7 @@ int get_adc(short *buffer,const int L){
 // Process commands to change FCD state
 // We listen on the same IP address and port we use as a multicasting source
 void *fcd_command(void *arg){
+  pthread_setname("funcube-cmd");
 
   while(1){
     fd_set fdset;
@@ -335,10 +347,11 @@ void *fcd_command(void *arg){
     // we can periocally poll the Funcube Pro's status in case it
     // has been changed by another program, e.g., fcdpp
     FD_ZERO(&fdset);
-    FD_SET(Rtp_sock,&fdset);
+    FD_SET(Ctl_sock,&fdset);
     timeout.tv_sec = 1;
     timeout.tv_usec = 0;
-    if((r = select(Rtp_sock+1,&fdset,NULL,NULL,&timeout)) == -1){
+    r = select(Ctl_sock+1,&fdset,NULL,NULL,&timeout);
+    if(r == -1){
       perror("select");
       sleep(50000); // don't loop tightly
       continue;
@@ -346,7 +359,7 @@ void *fcd_command(void *arg){
       // Timeout: poll the FCD for its current state, in case it
       // has changed independently, e.g., from fcdctl command
       if(FCD.phd == NULL && (FCD.phd = fcdOpen(FCD.sdr_name,sizeof(FCD.sdr_name),Dongle)) == NULL){
-	perror("funcube: can't re-open control port, aborting");
+	perror("funcube: can't re-open control port");
 	sleep(50000);
 	continue;
       }
@@ -363,7 +376,7 @@ void *fcd_command(void *arg){
     // Should probably log these
     struct sockaddr_in6 command_address;
     addrlen = sizeof(command_address);
-    if((r = recvfrom(Rtp_sock,&requested_status,sizeof(requested_status),0,&command_address,&addrlen)) <= 0){
+    if((r = recvfrom(Ctl_sock,&requested_status,sizeof(requested_status),0,&command_address,&addrlen)) <= 0){
       if(r < 0)
 	perror("recv");
       sleep(50000); // don't loop tightly
@@ -419,6 +432,7 @@ void *fcd_command(void *arg){
 
 // Status display thread
 void *display(void *arg){
+  pthread_setname("funcube-disp");
   float powerdB;
 
   fprintf(stderr,"Frequency      LNA  Mix   IF   A/D\n");

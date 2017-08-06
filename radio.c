@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.50 2017/08/05 08:07:33 karn Exp karn $
+// $Id: radio.c,v 1.51 2017/08/05 08:39:17 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -145,11 +145,16 @@ double set_first_LO(struct demod *demod,double first_LO,int force){
       if(demod->requested_status.frequency == demod->status.frequency)
 	break;
 
-      if((demod->input_source_address.sa_family == AF_INET || demod->input_source_address.sa_family == AF_INET6)
-	 && sendto(demod->ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address)) == -1)
-	perror("sendto control socket");
-      if(pthread_cond_timedwait(&demod->status_cond,&demod->status_mutex,&ts) == -1)
-	break;
+      if(demod->input_source_address.sa_family == AF_INET){
+	// If we know the sender, send it a tuning request
+	struct sockaddr_in sdraddr;
+	memcpy(&sdraddr,&demod->input_source_address,sizeof(sdraddr));
+	sdraddr.sin_port = htons(CTLPORT);
+	if(sendto(demod->ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&sdraddr,sizeof(sdraddr)) == -1)
+	  perror("sendto control socket");
+	if(pthread_cond_timedwait(&demod->status_cond,&demod->status_mutex,&ts) == -1)
+	  break;
+      }
     }
     pthread_mutex_unlock(&demod->status_mutex);
     assert(i < 50);
