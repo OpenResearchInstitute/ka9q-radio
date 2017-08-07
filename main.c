@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.63 2017/08/06 00:08:25 karn Exp karn $
+// $Id: main.c,v 1.64 2017/08/06 08:28:53 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate and multicast audio
 // Take commands from UDP socket
@@ -301,7 +301,7 @@ void *input_loop(void *arg){
 
   while(1){
 
-    // Listen either for an I/Q packet or a command packet (if enabled)
+    // Listen for an I/Q packet
     fd_set mask,errmask;
     FD_ZERO(&mask);
     FD_ZERO(&errmask);
