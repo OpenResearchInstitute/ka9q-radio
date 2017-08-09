@@ -26,7 +26,7 @@ static int compar(void const *a,void const *b){
 }
 
 int Bandplan_init;
-extern int init_bandplan(int class);
+extern int init_bandplan(void);
 
 struct bandplan *lookup_frequency(double f){
   double key;
@@ -34,39 +34,33 @@ struct bandplan *lookup_frequency(double f){
   key = round(f) / 1.0e6;
 
   if(!Bandplan_init){
-    init_bandplan(EXTRA_CLASS);
+    init_bandplan();
     Bandplan_init = 1;
   }
   return bsearch(&key,Bandplans,Nbandplans,sizeof(struct bandplan),compar);
 }
 
 
-int init_bandplan(int class){
+int init_bandplan(){
   char fname[PATH_MAX];
 
   snprintf(fname,sizeof(fname),"%s/%s",Libdir,Bandplan_file);
 
-  FILE *bandplan;
-  if((bandplan = fopen(fname,"r")) == NULL)
+  FILE * const fp = fopen(fname,"r");
+  if(fp == NULL)
     return -1;
 
   char line[160];
   memset(line,0,sizeof(line));
   int i=0;
-  while(fgets(line,sizeof(line),bandplan) != NULL){
-
+  while(fgets(line,sizeof(line),fp) != NULL){
     if(line[0] == ';' || line[0] == '#')
       continue;
-    int r;
-    for(r=0;r<strlen(line);r++)
-      line[r] = tolower(line[r]);
-
     char classes[160];
     char modes[160];
     char name[160];
-    double power;
     double lower,upper;
-    r = sscanf(line,"%lf %lf %s %s %s %lf",&lower,&upper,classes,modes,name,&power);
+    int r = sscanf(line,"%lf %lf %160s %160s %160s",&lower,&upper,classes,modes,name);
 	   
     if(r < 5)
       continue;
@@ -75,8 +69,8 @@ int init_bandplan(int class){
     Bandplans[i].lower = lower;
     Bandplans[i].upper = upper;
     char *cp;
-    for(cp = classes;*cp != '\0';cp++)
-      switch(*cp){
+    for(cp = classes;*cp != '\0';cp++){
+      switch(tolower(*cp)){
       case 'e':
 	Bandplans[i].classes |= EXTRA_CLASS;
 	break;
@@ -93,9 +87,9 @@ int init_bandplan(int class){
 	Bandplans[i].classes |= NOVICE_CLASS;
 	break;
       }
-
-    for(cp = modes;*cp != '\0';cp++)
-      switch(*cp){
+    }
+    for(cp = modes;*cp != '\0';cp++){
+      switch(tolower(*cp)){
       case 'c':
 	Bandplans[i].modes |= CW;
 	break;
@@ -109,29 +103,26 @@ int init_bandplan(int class){
 	Bandplans[i].modes |= DATA;
 	break;
       }
-    
+    }    
     strncpy(Bandplans[i].name,name,sizeof(Bandplans[i].name));
-    
-    if(r >= 6)
-      Bandplans[i].power = power;
-
-    if(Bandplans[i].classes & class)
-      i++;
+    i++;
   }
+#if 0
   fprintf(stderr,"%d entries read\n",i);
+#endif
   Nbandplans = i;
   return 0;
 }
 #if 0
 int main(){
   double f;
-  struct bandplan *bp;
+  struct bandplan const *bp;
 
   while(1){
     scanf("%lf",&f);
     bp = lookup_frequency(f);
     if(bp != NULL){
-      printf("%lf: %s",f,bp->name);
+      printf("%ld: %lf",f,bp->wavelength);
       if(bp->modes & CW)
 	printf(" CW");
       if(bp->modes & DATA)
@@ -140,9 +131,6 @@ int main(){
 	printf(" Voice");
       if(bp->modes & IMAGE)
 	printf(" Image");
-      if(bp->power != 0)
-	printf(" %.0lf watts\n",bp->power);
-
       printf("\n");
     }
   }

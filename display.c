@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.65 2017/08/06 00:08:25 karn Exp karn $
+// $Id: display.c,v 1.66 2017/08/06 10:04:56 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -284,7 +284,8 @@ void *display(void *arg){
       intersect.classes = bp_low->classes & bp_high->classes;
       intersect.modes = bp_low->modes & bp_high->modes;
 
-      wprintw(status,"%s\n",bp_low->name); // bp_high->name should be the same
+      wprintw(status,"%s\n",bp_low->name);
+
       if(intersect.modes & CW)
 	wprintw(status,"CW ");
       if(intersect.modes & DATA)
@@ -305,12 +306,6 @@ void *display(void *arg){
       if(intersect.classes & NOVICE_CLASS)
 	wprintw(status,"Novice ");
       wprintw(status,"\n");
-
-      // Any power limits (except for Novices?)
-      if(bp_low->power != 0)
-	wprintw(status,"Limit %.0lf watts\n",bp_low->power);
-      else if(bp_high->power != 0)
-	wprintw(status,"Limit %.0lf watts\n",bp_high->power);
     }
     if(!LO2_in_range(demod,get_second_LO(demod),1)){
       // LO2 is near its edges where signals from the opposite edge

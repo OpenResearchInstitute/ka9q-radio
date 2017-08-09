@@ -14,8 +14,7 @@ struct bandplan {
   double upper;
   int classes;
   int modes;
-  char name[10];
-  double power;
+  char name[160];
 };
 
 struct bandplan *lookup_frequency(double);
