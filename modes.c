@@ -1,20 +1,71 @@
-// $Id: modes.c,v 1.9 2017/07/23 23:29:33 karn Exp karn $
+// $Id: modes.c,v 1.10 2017/08/02 02:28:27 karn Exp karn $
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
 #include "radio.h"
+#include "dsp.h"
 
-struct modetab Modes[] = {
-  {NO_MODE, "NONE",  0,       0,       0,    0, }, // None (initialized state)
-  {AM,  "AM",     0,    1000,   -5000, 5000, }, // Envelope detected AM
-  {CAM, "CAM",    0,    1000,   -5000, 5000, }, // Coherent AM  
-  {IQ,  "IQ",     0,      10,   -5000, 5000, }, // Stereo: I on left, Q on right
-  {ISB, "ISB",    0,     100,   -5000, 5000, }, // Independent sideband: LSB on left, USB on right
-  {USB, "USB",    0,     100,     300, 3000, }, // Upper sideband
-  {CWU, "CWU",  400,      10,     200,  600, }, // Upper sideband, CW filter
-  {LSB, "LSB",    0,     100,   -3000, -300, }, // Lower sideband
-  {CWL, "CWL", -400,      10,    -600, -200, }, // Lower sideband, CW filter
-  {NFM, "NFM",    0,    1000,   -3000, 3000, }, // For D*star
-  {FM,  "FM",     0,    1000,   -8000, 8000, }, // Ordinary standard NBFM
-  {DSB, "DSB",    0,      10,   -5000, 5000, }, // Double sideband AM, suppressed carrier
-  //  {WFM, "WFM",    0,  100000,  -96000,96000, },
 
+struct modetab Modes[256];
+int Nmodes;
+
+extern char Libdir[];
+
+// Linkage table from ascii names to demodulator routines
+struct demodtab {
+  char name[16];
+  void * (*demod)(void *);
+} Demodtab[] = {
+  {"fm",  demod_fm},
+  {"am",  demod_am},
+  {"cam", demod_cam},
+  {"ssb", demod_ssb},
+  {"dsb", demod_dsb},
+  {"iq",  demod_iq}
 };
-const int Nmodes = sizeof(Modes)/sizeof(struct modetab);
+#define NDEMOD (sizeof(Demodtab)/sizeof(struct demodtab))
+
+int readmodes(char *file){
+  char pathname[PATH_MAX];
+  snprintf(pathname,sizeof(pathname),"%s/%s",Libdir,file);
+  FILE * const fp = fopen(pathname,"r");
+  if(fp == NULL){
+    fprintf(stderr,"Can't read mode table %s:%s\n",pathname,strerror(errno));
+    return -1;
+  }
+  char line[PATH_MAX];
+  while(fgets(line,sizeof(line),fp) != NULL){
+    chomp(line);
+    if(line[0] == '#' || line[0] == '*' || line[0] == '/')
+      continue; // comment
+
+    char name[16],demod[16],options[16];
+    float low,high,dial;
+    if(sscanf(line,"%16s %16s %f %f %f %16s",name,demod,&low,&high,&dial,options) < 4)
+      continue; // Too short, or in wrong format
+
+    int i;
+    for(i=0;i<NDEMOD;i++)
+      if(strncasecmp(demod,Demodtab[i].name,strlen(Demodtab[i].name)) == 0)
+	break;
+      
+    if(i == NDEMOD)
+      continue; // Not found
+    
+    strncpy(Modes[Nmodes].name,name,sizeof(Modes[Nmodes].name));
+    Modes[Nmodes].demod = Demodtab[i].demod;
+    Modes[Nmodes].low = low;
+    Modes[Nmodes].high = high;
+    Modes[Nmodes].dial = dial;
+    Modes[Nmodes].flags = 0;
+    if(strcasecmp(options,"conj") == 0){
+      Modes[Nmodes].flags |= CONJ;
+    } else if(strcasecmp(options,"flat") == 0){
+      Modes[Nmodes].flags |= FLAT;
+    }
+    Nmodes++;
+  }
+  return 0;
+}
+

@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.20 2017/08/04 14:54:23 karn Exp karn $
+// $Id: filter.c,v 1.21 2017/08/05 08:07:33 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -16,18 +16,28 @@
 #include "dsp.h"
 #include "filter.h"
 
-// When decimation is used, we assume the filter response drops to negligible
-// well below the decimated (lower) Nyquist rate so we can avoid the extra work of adding in
-// the aliased frequency components needed to produce exactly the same result as
-// decimating the time-domain output by the same ratio
+// Create a fast convolution filter with parameters:
+// L = input data blocksize
+// M = impulse response duration
+// response = complex frequency response; may be NULL here and set later with set_filter()
+//            NB: response is always complex even when input and/or output is real, though it will be shorter
+//            length = N_dec = (L + M - 1)/decimate when output is complex
+//            length = (N_dec/2+1) when output is real
+//            Must be SIMD-aligned (e.g., allocated with fftw_alloc) and will be freed by delete_filter()
 
-// Real output filter is faster type that uses c2r IFFTs to discard imaginary component of output
-// Useful for SSB and VSB
-// NB: Response is always complex,
-// with length N_dec = (L + M - 1)/decimate when output is complex
-// and (N_dec/2+1)/decimate when output is real
+// decimate = input/output sample rate ratio, only tested for powers of 2
 
-// response[] must be SIMD-aligned (e.g., with fftw_alloc) and will be freed by delete_filter()
+// in_type = REAL or COMPLEX
+// out_type = REAL, COMPLEX or CROSS_CONJ (COMPLEX with special processing for ISB)
+
+// All demodulators taking baseband (zero IF) I/Q data require COMPLEX input
+// All but SSB require COMPLEX output, with ISB using the special CROSS_CONJ mode
+// SSB(CW) uses the REAL mode since the imaginary component is unneeded, and the c2r IFFT is faster
+// Baseband FM audio filtering for de-emphasis and PL separation uses REAL input and output
+
+// If you provide your own filter response, ensure that it drops to nil well below the Nyquist rate
+// to prevent aliasing. Remember that decimation reduces the Nyquist rate by the decimation ratio.
+// The set_filter() function uses Kaiser windowing for this purpose
 struct filter *create_filter(int const L,int const M, complex float * const response,int const decimate,enum filtertype const in_type,enum filtertype const out_type){
 
   int const N = L + M - 1;
@@ -92,13 +102,17 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
   case COMPLEX:
   case CROSS_CONJ:
     f->f_fdomain = fftwf_alloc_complex(N_dec);
+    assert(f->f_fdomain != NULL);
     f->output_buffer.c = fftwf_alloc_complex(N_dec);  
+    assert(f->output_buffer.c != NULL);
     f->output.c = f->output_buffer.c + (f->impulse_length - 1)/decimate;
     f->rev_plan = fftwf_plan_dft_1d(N_dec,f->f_fdomain,f->output_buffer.c,FFTW_BACKWARD,FFTW_ESTIMATE);
     break;
   case REAL:
     f->f_fdomain = fftwf_alloc_complex(N_dec/2+1);
+    assert(f->f_fdomain != NULL);
     f->output_buffer.r = fftwf_alloc_real(N_dec);
+    assert(f->output_buffer.r != NULL);
     f->output.r = f->output_buffer.r + (f->impulse_length - 1)/decimate;
     f->rev_plan = fftwf_plan_dft_c2r_1d(N_dec,f->f_fdomain,f->output_buffer.r,FFTW_ESTIMATE);
     break;
@@ -106,15 +120,13 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
   return f;
 }
 // Filter that shares the forward FFT, useful when doing several filters on the same input data
-// Input buffer parameters obviously have to be the same
+// Example: processing FM after demodulation to separate the PL tone and to de-emphasize the audio
+// Input buffer parameters L and M obviously have to be the same as the master
 // Input and output type must be the same
-// Output can be decimated differently from master filter
-// And of course the response can be different
+// Decimation ratio and response can be different
 // Slaves must be deleted before their masters
 // Segfault will occur if master is deleted and slave is executed
-// Time-domain input buffer is NULL, so segfault will occur if written into
-struct filter *create_filter_slave(struct filter * const master,complex float * const response,int const decimate){
-
+struct filter *create_filter_slave(const struct filter * master,complex float * response,int decimate){
   assert(master != NULL);
 
   int const N = master->ilen + master->impulse_length - 1;
@@ -125,6 +137,7 @@ struct filter *create_filter_slave(struct filter * const master,complex float * 
     fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,decimate);
 
   struct filter * const f = calloc(1,sizeof(*f));
+  assert(f != NULL);
   pthread_mutex_init(&f->mutex,NULL);
   f->slave = 1;
   // Share all but decimation ratio, response and output
@@ -135,35 +148,25 @@ struct filter *create_filter_slave(struct filter * const master,complex float * 
   f->fdomain = master->fdomain; // Share master's frequency domain
   f->decimate = decimate;
   f->olen = f->ilen / decimate;
-  f->input_buffer.c = NULL;
-  f->input.c = NULL;
+  f->input_buffer.c = master->input_buffer.c;
+  f->input.c = master->input.c;
   f->response = response;
-  if(response != NULL){
-    // *response is always complex float, but it's shortened when filter input and output are both real
-    if(f->out_type == REAL || f->out_type == CROSS_CONJ){
-      // Originally for complex input; Check these for real input
-      // response[] has length N_dec/2+1 (for real input and output)
-      // and length N_dec (for all others).
-      if(f->in_type == REAL && f->out_type == REAL){
-	assert(malloc_usable_size(response) >= (N_dec/2+1) * sizeof(*response));
-	int n;
-	for(n=0;n<=N_dec/2;n++)
-	  f->response[n] *= M_SQRT1_2;
-      }
-    }
-  }
   switch(f->out_type){
   default:
   case COMPLEX:
   case CROSS_CONJ:
     f->f_fdomain = fftwf_alloc_complex(N_dec);
+    assert(f->f_fdomain != NULL);
     f->output_buffer.c = fftwf_alloc_complex(N_dec);  
+    assert(f->output_buffer.c != NULL);
     f->output.c = f->output_buffer.c + (f->impulse_length - 1)/decimate;
     f->rev_plan = fftwf_plan_dft_1d(N_dec,f->f_fdomain,f->output_buffer.c,FFTW_BACKWARD,FFTW_ESTIMATE);
     break;
   case REAL:
     f->f_fdomain = fftwf_alloc_complex(N_dec/2+1);
+    assert(f->f_fdomain != NULL);    
     f->output_buffer.r = fftwf_alloc_real(N_dec);
+    assert(f->output_buffer.r != NULL);
     f->output.r = f->output_buffer.r + (f->impulse_length - 1)/decimate;
     f->rev_plan = fftwf_plan_dft_c2r_1d(N_dec,f->f_fdomain,f->output_buffer.r,FFTW_ESTIMATE);
     break;
@@ -171,12 +174,15 @@ struct filter *create_filter_slave(struct filter * const master,complex float * 
   return f;
 }
 
+// Execute the filter after the input buffer has been loaded
 int execute_filter(struct filter * const f){
+  if(f == NULL)
+    return -1;
   execute_filter_nocopy(f);
   if(f->slave)
     return 0; // done, no time domain input buffer
 
-  // Save for next block - non-destructive copy
+  // Perform overlap-and-save operation for fast convolution; note memmove is non-destructive
   switch(f->in_type){
   default:
   case COMPLEX:
@@ -190,8 +196,10 @@ int execute_filter(struct filter * const f){
 }
 
 
-int execute_filter_nocopy(struct filter * const f){
-  assert(f != NULL);
+int execute_filter_nocopy(struct filter *f){
+  if(f == NULL)
+    return -1;
+
   assert(f->out_type != NONE);
   assert(f->in_type != NONE);
   assert(f->fdomain != NULL);
@@ -201,6 +209,7 @@ int execute_filter_nocopy(struct filter * const f){
   int const N_dec = N / f->decimate;                     // points in (decimated) output buffer
 
   if(!f->slave){
+#if !defined(NDEBUG)
     if(f->in_type == COMPLEX){
       int i;
       for(i=0;i<N;i++){
@@ -213,6 +222,7 @@ int execute_filter_nocopy(struct filter * const f){
 	assert(!isnan(f->input_buffer.r[i]));
       }
     }
+#endif
     fftwf_execute(f->fwd_plan);  // Forward transform only in master
   }
 
@@ -220,7 +230,7 @@ int execute_filter_nocopy(struct filter * const f){
   assert(malloc_usable_size(f->f_fdomain) >= (N_dec/2+1) * sizeof(*f->f_fdomain));
   assert(malloc_usable_size(f->response) >= (N_dec/2+1) * sizeof(*f->response));
   assert(malloc_usable_size(f->fdomain) >= (N_dec/2+1) * sizeof(*f->fdomain));
-  pthread_mutex_lock(&f->mutex);
+  pthread_mutex_lock(&f->mutex); // Protect access to response[] array
   assert(f->response != NULL);
   int p;
   for(p=0; p <= N_dec/2; p++){
@@ -260,7 +270,7 @@ int execute_filter_nocopy(struct filter * const f){
       }
     }
   }
-  pthread_mutex_unlock(&f->mutex);
+  pthread_mutex_unlock(&f->mutex); // release response[]
 
   if(f->out_type == CROSS_CONJ){
     // hack for ISB; forces negative frequencies onto I, positive onto Q
@@ -278,7 +288,7 @@ int execute_filter_nocopy(struct filter * const f){
   return 0;
 }
 
-int delete_filter(struct filter * const f){
+int delete_filter(struct filter *f){
   if(f == NULL)
     return 0;
   
@@ -358,6 +368,7 @@ const static float kaiser(const int n,const int M, const float beta){
 // Compute an entire Kaiser window
 // More efficient than repeatedly calling kaiser(n,M,beta)
 int make_kaiser(float *window,const int M,const float beta){
+  assert(window != NULL);
   // Precompute unchanging partial values
   float const numc = M_PI * beta;
   float const inv_denom = 1. / i0(numc); // Inverse of denominator
@@ -384,6 +395,7 @@ int make_kaiser(float *window,const int M,const float beta){
 // Phase is adjusted so "time zero" (center of impulse response) is at M/2
 // L and M refer to the decimated output
 int window_filter(int const L,int const M,complex float * const response,float const beta){
+  assert(response != NULL);
   int const N = L + M - 1;
   assert(malloc_usable_size(response) >= N*sizeof(*response));
   // fftw_plan can overwrite its buffers, so we're forced to make a temp. Ugh.
@@ -436,10 +448,13 @@ int window_filter(int const L,int const M,complex float * const response,float c
 // Negative frequencies are inplicitly the conjugate of the positive frequencies
 // L and M refer to the decimated output
 int window_rfilter(const int L,const int M,complex float * const response,const float beta){
+  assert(response != NULL);
   int const N = L + M - 1;
   assert(malloc_usable_size(response) >= (N/2+1)*sizeof(*response));
   complex float * const buffer = fftwf_alloc_complex(N/2 + 1); // plan destroys its input
+  assert(buffer != NULL);
   float * const timebuf = fftwf_alloc_real(N);
+  assert(timebuf != NULL);
   fftwf_plan rev_filter_plan = fftwf_plan_dft_c2r_1d(N,buffer,timebuf,FFTW_ESTIMATE);
   fftwf_plan fwd_filter_plan = fftwf_plan_dft_r2c_1d(N,timebuf,buffer,FFTW_ESTIMATE);
   
@@ -480,10 +495,50 @@ int window_rfilter(const int L,const int M,complex float * const response,const 
   return 0;
 }
 
+int set_filter(struct filter *filter,float dsamprate,float low,float high,float kaiser_beta){
+  assert(filter != NULL);
+  
+  int const L_dec = filter->olen;
+  int const M_dec = (filter->impulse_length - 1) / filter->decimate + 1;
+  int const N_dec = L_dec + M_dec - 1;
+  int const N = filter->ilen + filter->impulse_length - 1;
+
+  float gain = 1./((float)N);
+#if 0
+  if(filter->out_type == REAL || filter->out_type == CROSS_CONJ)
+    gain *= M_SQRT1_2;
+#endif
+
+  complex float * const response = fftwf_alloc_complex(N_dec);
+  int n;
+  for(n=0;n<N_dec;n++){
+    float f;
+    if(n <= N_dec/2)
+      f = (float)n * dsamprate / N_dec;
+    else
+      f = (float)(n-N_dec) * dsamprate / N_dec;
+    if(f >= low && f <= high)
+      response[n] = gain;
+    else
+      response[n] = 0;
+  }
+  window_filter(L_dec,M_dec,response,kaiser_beta);
+  // Hot swap with existing response, if any, using mutual exclusion
+  pthread_mutex_lock(&filter->mutex);
+  complex float *tmp = filter->response;
+  filter->response = response;
+  pthread_mutex_unlock(&filter->mutex);
+  fftwf_free(tmp);
+
+  return 0;
+}
+
+
 // Experimental IIR complex notch filter
 
 struct notchfilter *notch_create(double f,float bw){
   struct notchfilter *nf = calloc(1,sizeof(struct notchfilter));
+  assert(nf != NULL);
   nf->osc_phase = 1;
   nf->osc_step = csincos(2*M_PI*f);
   nf->dcstate = 0;
@@ -492,6 +547,7 @@ struct notchfilter *notch_create(double f,float bw){
 }
 
 complex float notch(struct notchfilter *nf,complex float s){
+  assert(nf != NULL);
   s = s * conj(nf->osc_phase) - nf->dcstate; // Spin down and remove DC
   nf->dcstate += nf->bw * s;   // Update smoothed estimate
   s *= nf->osc_phase;          // Spin back up

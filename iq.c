@@ -28,9 +28,9 @@ void *demod_iq(void *arg){
   int hangcount = 0;
 
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
-			       demod->mode == ISB ? CROSS_CONJ : COMPLEX);
+					       (demod->flags & CONJ) ? CROSS_CONJ : COMPLEX);
   demod->filter = filter;
-  set_filter(demod,demod->low,demod->high);
+  set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
   demod->gain = dB2voltage(70.); // Starting point
 
   while(!demod->terminate){

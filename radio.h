@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.38 2017/08/06 00:08:25 karn Exp karn $
+// $Id: radio.h,v 1.39 2017/08/06 08:28:53 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -13,45 +13,18 @@
 
 #define CTLPORT 7300
 
-// Receiver control input packet
-enum cmd {
-  SENDSTAT=1,
-  SETSTATE,
-};
-// Receiver modes
-enum mode {
-  NO_MODE = 0,
-  AM,
-  CAM,     // coherent AM
-  IQ,
-  ISB,
-  USB,
-  CWU,
-  LSB,
-  CWL,
-  NFM,
-  FM,
-  DSB,
-  WFM,
-};
-
-struct command {
-  enum cmd cmd;
-  enum mode mode;
-  double first_LO;
-  double second_LO;
-  double second_LO_rate;
-  double calibrate;
-};
+// Modetab flags
+#define CONJ 1    // Cross-conjugation of positive and negative frequencies, for ISB
+#define FLAT 2    // No baseband filtering for FM
 
 struct modetab {
-  enum mode mode;
-  char name[10];
+  char name[16];
+  void * (*demod)(void *); // Address of demodulator routine
+  int flags;        // Special purpose flags, e.g., CONJ
   float dial;       // Display frequency offset (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
   float low;        // Lower edge of IF passband
   float high;       // Upper edge of IF passband
-  float gain;       // Gain of filter
 };
 
 // Sent in each RTP packet right after header
@@ -67,96 +40,111 @@ struct status {
 };
 
 // Demodulator state block
-#define DATASIZE 65536 // should be a power of 2 for efficiency
+
 struct demod {
+  // Global parameters
+
+
+
+  // Input thread state
   pthread_t input_thread;
+  int input_fd;      // Raw incoming I/Q data from multicast socket
   char iq_mcast_address_text[256];
   struct sockaddr input_source_address;
   struct sockaddr ctl_address;
-  
-  // Front end state
-  volatile double samprate;  // True A/D sample rate, assuming same TCXO as tuner
-  float min_IF;     // Limits on usable IF due to aliasing, filtering, etc
-  float max_IF;
-  double calibrate; // Tuner TCXO calibration; - -> frequency low, + -> frequency high
-                    // True first LO freq =  (1 + calibrate) * demod.status.frequency
+  unsigned long long iq_packets; // Count of I/Q input packets received
 
-  // status is written by the input thread and read by set_first_LO, etc, so it has to be protected
-  pthread_mutex_t status_mutex;
-  pthread_cond_t status_cond;
-  struct status status; // Last status from FCD
-  struct status requested_status; // The status we want the FCD to be in
-
-  unsigned long long iq_packets;
-
-  float DC_i,DC_q;   // Average DC offsets
+  // I/Q correction parameters
+  float DC_i,DC_q;       // Average DC offsets
   float power_i,power_q; // Average channel powers
-  float igain;       // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
-  float sinphi;      // smoothed estimate of I/Q phase error
+  float igain;           // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
+  float sinphi;          // smoothed estimate of I/Q phase error
 
-  int input_fd;      // Raw incoming I/Q data from multicast socket
-  int ctl_fd;        // File descriptor for controlling sdr
+  struct status requested_status; // The status we want the FCD to be in
+  struct status status;           // Last status from FCD
+  // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
+  pthread_mutex_t status_mutex;
+  pthread_cond_t status_cond;     // Signalled whenever status changes
 
-  // corr_data is written by the input thread and read by fillbuf in the demod tasks,
-  // so it has to be protected by a mutex. The buffer is *NOT* protected from overrun, so ony
-  // the reader ever blocks
-  pthread_mutex_t data_mutex;
-  pthread_cond_t data_cond;
-  complex float *corr_data;
-  int write_ptr;
-  int read_ptr;
+  // True A/D sample rate, assuming same TCXO as tuner
+  // Set from I/Q packet header and calibrate parameter
+  volatile double samprate;
 
+  // corr_data and write_ptr are written by the input thread and read by fillbuf in the demod tasks,
+  // so they're protected by mutexes. The buffer is *NOT* protected from overrun, so the reader must keep up
+#define DATASIZE 65536 // should be a power of 2 for efficiency
+  complex float *corr_data;       // Circular buffer of corrected I/Q data from input thread to demod thread
+  int write_ptr;                  // 0 to DATASIZE-1
+  int read_ptr;                   // 0 to DATASIZE-1
+  pthread_mutex_t data_mutex;     // Protects corr_data and write_ptr
+  pthread_cond_t data_cond;       // Signalled whenever data is written and write_ptr updated
 
-  // Per-thread data
-  int terminate;
+  // Demodulator thread data
   pthread_t demod_thread;
+  void * (*demod)(void *);        // Entry point to demodulator
+  char mode[16];                  // printable mode name
+  int terminate;                  // set to 1 by set_mode() to request graceful termination
+  int flags;                      // Special flags to demodulator
+  double start_freq;              // Initial frequency to set at startup
+
+  // Tuning parameters
+  int ctl_fd;                     // File descriptor for controlling SDR frequency and gaim
+
+  // The tuner and A/D converter are clocked from the same TCXO
+  // Ratio is (1+calibrate)
+  //     calibrate < 0 --> TCXO frequency low; calibrate > 0 --> TCXO frequency high
+  // True first LO = (1 + calibrate) * demod.status.frequency
+  // True A/D sample rate = (1 + calibrate) * demod.status.samprate
+  double calibrate;
+
+  // Limits on usable IF due to aliasing, filtering, etc
+  // Less than or equal to +/- samprate/2
+  float min_IF;
+  float max_IF;
 
   double dial_offset; // displayed dial frequency = carrier freq + dial_offset (useful for CW)
+  complex double second_LO_phasor; // Second LO phasor
+  double second_LO;   // True second LO frequency, including calibration
+                      // Provided because round trip through csincos/carg is less accurate
 
-  // Second (software) local oscillator parameters
-  complex double second_LO_phase;
-  double second_LO; // True second LO frequency, including calibration
-                    // Same as second_LO_phase step except when sweeping
-                    // Provided because round trip through csincos/carg is less accurate
-  complex double second_LO_phase_step;  // exp(2*pi*j*second_LO/samprate)
-
-  int frequency_lock;
+  complex double second_LO_phasor_step;  // LO step phasor = csincos(2*pi*second_LO/samprate)
+  int frequency_lock; // inhibits tuning of RF and LO & IF tuning operate in lockstep
+  int tunestep;       // User interface cursor location, log10(); e.g., 3 -> thousands
 
   // Experimental notch filter
   struct notchfilter *nf;
 
-  // Pre-demod filter parameters
+  // Zero IF pre-demod filter params
   struct filter *filter;
   int L;            // Signal samples in FFT buffer
   int M;            // Samples in filter impulse response
-  int decimate;     // Input/output sample rate decimation ratio
+  int decimate;     // Input/output sample rate decimation ratio, should be power of 2
   float low;        // Edges of filter band
   float high;
+  // Window shape factor for Kaiser window
+  // Transition region is approx sqrt(1+Beta^2)
+  // 0 => rectangular window; increasing values widens main lobe and decreases ripple
   float kaiser_beta;
 
   // Demodulator parameters
-  double start_freq;
-  enum mode start_mode;
-  enum mode mode;   // USB/LSB/FM/etc
-
   float amplitude;  // Amplitude (not power) of signal after filter
-  float noise;      // Minimum amplitude for SNR estimates (experimental)
+  float noise;      // Noise amplitude esimate (experimemtal)
   float snr;        // Estimated signal-to-noise ratio
-  float gain;       // Current audio gain (linear modes only)
+  float gain;       // Audio gain
   float foffset;    // Frequency offset (FM)
   float pdeviation; // Peak frequency deviation (FM)
-  float cphase;     // Carrier phase (DSB/PSK)
+  float cphase;     // Carrier phase change (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
-  float headroom;   // Audio headroom
+  float headroom;   // Audio level headroom
+  float hangtime;   // SSB AGC hang time, seconds
+  float recovery_rate; // SSB AGC recovery rate, db/sec
 
   struct audio *audio; // Link to audio output system
-
-  int tunestep;     // User interface cursor location, log10()
 };
 extern char Libdir[];
 extern int Tunestep;
 extern struct modetab Modes[];
-extern const int Nmodes;
+extern int Nmodes;
 
 int fillbuf(struct demod *,complex float *,const int);
 int setup_input(char const *,char const *);
@@ -169,12 +157,14 @@ const double get_first_LO(struct demod const *);
 double set_second_LO(struct demod *,double);
 const double get_second_LO(struct demod const *);
 double set_second_LO_rate(struct demod *,double,int);
-int set_filter(struct demod *,float,float);
-int set_mode(struct demod *,enum mode,int);
+int set_mode(struct demod *,const char *,int);
 int set_cal(struct demod *,double);
 int spindown(struct demod *,complex float *,int);
 void proc_samples(struct demod *,int16_t const *,int);
-void activate(struct demod *a,struct demod const *new);
+
+
+// Load mode definition table
+int readmodes(char *);
 
 // Save and load (most) receiver state
 int savestate(struct demod *,char const *);

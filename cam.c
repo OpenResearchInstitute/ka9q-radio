@@ -22,7 +22,7 @@ void *demod_cam(void *arg){
   assert(demod->decimate == 4);
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;
-  set_filter(demod,demod->low,demod->high);   
+  set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
   {
     int i;

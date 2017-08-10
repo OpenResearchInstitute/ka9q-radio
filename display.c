@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.66 2017/08/06 10:04:56 karn Exp karn $
+// $Id: display.c,v 1.67 2017/08/09 06:45:18 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -163,16 +163,16 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     break;
   case 5: // Filter low edge
     demod->low += tunestep;
-    set_filter(demod,demod->low,demod->high);
+    set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
   case 6: // Filter high edge
     demod->high += tunestep;
-    set_filter(demod,demod->low,demod->high);
+    set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
   case 7: // Kaiser window beta parameter for filter
     if(demod->kaiser_beta + tunestep >= 0.0){
       demod->kaiser_beta += tunestep;
-      set_filter(demod,demod->low,demod->high); // Recreate filters
+      set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     }
     break;
   case 8: // Spare for experimentation
@@ -323,7 +323,7 @@ void *display(void *arg){
     // Signal data: demod mode, filter block sizes and signal levels
     wmove(sig,0,0);
     wclrtobot(sig);     // clear previous stuff in case we stop showing the last lines
-    wprintw(sig,"Mode    %10s\n",Modes[demod->mode].name);
+    wprintw(sig,"Mode    %10s\n",demod->mode);
     wprintw(sig,"IF      %10.1f dBFS\n",power2dB(demod->power_i + demod->power_q));
     wprintw(sig,"Baseband%10.1f dBFS\n",voltage2dB(demod->amplitude));
     wprintw(sig,"AF Gain %10.1f dB\n",voltage2dB(demod->gain));
@@ -552,14 +552,7 @@ void *display(void *arg){
 	strncat(str,"]: ",sizeof(str) - strlen(str) - 1);
 	getentry(str,str,sizeof(str));
 	if(strlen(str) > 0){
-	  for(i=0;i < Nmodes;i++){
-	    if(strcasecmp(str,Modes[i].name) == 0){
-	      set_mode(demod,Modes[i].mode,1); // With default filters
-	      break;
-	    }
-	  }
-	  if(i == Nmodes)
-	    beep();
+	  set_mode(demod,str,1); // With default filters
 	}
       }
       break;
@@ -610,7 +603,7 @@ void *display(void *arg){
 	double const b = strtod(str,&ptr);
 	if(ptr != str && b >= 0 && b < 100 && b != demod->kaiser_beta){
 	  demod->kaiser_beta = b;
-	  set_filter(demod,demod->low,demod->high);
+	  set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 	} else
 	  beep();
       }

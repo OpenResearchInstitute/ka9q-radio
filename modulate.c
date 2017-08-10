@@ -1,3 +1,5 @@
+// $Id$ AM modulator - will eventually support other modes
+// Copyright 2017, Phil Karn, KA9Q
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -27,23 +29,11 @@ int main(int argc,char *argv[]){
   double frequency = 48000;
   double amplitude = -20;
   double sweep = 0;
-  enum mode mode = AM;
 
-  while((c = getopt(argc,argv,"m:f:a:s:r:v")) != EOF){
+  while((c = getopt(argc,argv,"f:a:s:r:v")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
-      break;
-    case 'm':
-      {      
-	int i;
-	for(i=0;i<Nmodes;i++){
-	  if(strcasecmp(optarg,Modes[i].name) == 0){
-	    mode = Modes[i].mode;
-	    break;
-	  }
-	}
-      }
       break;
     case 'r':
       Samprate = strtol(optarg,NULL,0);
@@ -60,8 +50,8 @@ int main(int argc,char *argv[]){
     }
   }
   if(Verbose){
-    fprintf(stderr,"%s modulation on %.1f Hz IF, swept %.1f Hz/s, amplitude %5.1f dBFS, filter blocksize %'d\n",
-	    Modes[mode].name,frequency,sweep,amplitude,BLOCKSIZE);
+    fprintf(stderr,"AM modulation on %.1f Hz IF, swept %.1f Hz/s, amplitude %5.1f dBFS, filter blocksize %'d\n",
+	    frequency,sweep,amplitude,BLOCKSIZE);
   }
 
   frequency *= 2*M_PI/Samprate;       // radians/sample
@@ -84,7 +74,7 @@ int main(int argc,char *argv[]){
       f = Samprate * ((float)i/N);
       if(f > Samprate/2)
 	f -= Samprate;
-      if(f >= Modes[mode].low && f <= Modes[mode].high)
+      if(f >= -8000 && f <= +8000)
 	response[i] = gain;
     }
   }
@@ -106,12 +96,10 @@ int main(int argc,char *argv[]){
     // Form baseband signal (analytic for SSB, pure real for AM/DSB)
     execute_filter(filter);
     
-    if(mode == AM){
-      // Add AM carrier
-      int i;
-      for(i=0;i<L;i++)
-	filter->output.c[i] += 1;
-    }
+    // Add AM carrier
+    for(i=0;i<L;i++)
+      filter->output.c[i] += 1;
+
     // Spin up to chosen carrier frequency
     for(i=0;i<L;i++){
       filter->output.c[i] *= phase * amplitude;

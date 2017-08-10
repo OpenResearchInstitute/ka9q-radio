@@ -6,7 +6,7 @@ CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 
-all: funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
+all: funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt
 
 install: all
 	install -D --target-directory=$(BINDIR) radio funcube monitor iqrecord iqplay modulate

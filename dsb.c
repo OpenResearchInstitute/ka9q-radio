@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.9 2017/08/04 03:35:55 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.10 2017/08/06 05:32:16 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -37,7 +37,7 @@ void *demod_dsb(void *arg){
 
   struct filter * const filter = create_filter(demod->L,mm1+1,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;
-  set_filter(demod,demod->low,demod->high);
+  set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
   // Kaiser window and FFT used for coarse frequency acquision
   complex float * const fftbuf = fftwf_alloc_complex(filter->olen);
@@ -54,21 +54,21 @@ void *demod_dsb(void *arg){
     // New samples
     fillbuf(demod,if_samples+mm1,filter->ilen);
 
-    complex double LO_phase_step = demod->second_LO_phase_step;
+    complex double LO_phasor_step = demod->second_LO_phasor_step;
     int tries;
-    complex double updated_LO_phase = NAN; // LO phase after M-1 sample, needed for next block if we're successful
+    complex double updated_LO_phasor = NAN; // LO phase after M-1 sample, needed for next block if we're successful
     for(tries=0;tries<10;tries++){
 
       // Apply 2nd LO, filling *entire* filter input buffer
-      complex double LO_phase = demod->second_LO_phase;
+      complex double LO_phasor = demod->second_LO_phasor;
 
       int n;
       for(n=0; n < N; n++){
 	assert(!isnan(crealf(if_samples[n])) && !isnan(cimagf(if_samples[n])));
-	filter->input_buffer.c[n] = if_samples[n] * LO_phase;
-	LO_phase *= LO_phase_step;
+	filter->input_buffer.c[n] = if_samples[n] * LO_phasor;
+	LO_phasor *= LO_phasor_step;
 	if(n == mm1 - 1)
-	  updated_LO_phase = LO_phase; // Starting LO phase for next block if we're successful
+	  updated_LO_phasor = LO_phasor; // Starting LO phase for next block if we're successful
       }
       execute_filter_nocopy(filter); // Stateless execution (no overlap)
       
@@ -94,7 +94,7 @@ void *demod_dsb(void *arg){
 	break;
       // Coarse retune to correct bin and retry. Each bin is one full cycle per input buffer
       double const delta_f = maxbin / (2.0 * filter->ilen); // cycles per input sample, with /2 for squaring
-      LO_phase_step *= csincos(-delta_f * 2 * M_PI); // rad per input sample
+      LO_phasor_step *= csincos(-delta_f * 2 * M_PI); // rad per input sample
       lastblock_angle = NAN; // Don't do fine tuning on next iteration
     }
     float const angle = cargf(fftbuf[0])/2; // DC carrier phase  in current block
@@ -109,13 +109,13 @@ void *demod_dsb(void *arg){
 	pdiff += 2*M_PI;
       
       demod->cphase = pdiff;
-      LO_phase_step *= csincos(-pdiff / filter->ilen); // pdiff radians in one input blk
+      LO_phasor_step *= csincos(-pdiff / filter->ilen); // pdiff radians in one input blk
     }
     lastblock_angle = angle; // Save for comparison with next block
     complex float const phase = csincosf(-angle);
-    demod->second_LO_phase = updated_LO_phase /= cabs(updated_LO_phase); // Save renormalized
-    demod->second_LO_phase_step = LO_phase_step /= cabs(LO_phase_step);
-    demod->second_LO = M_1_2PI * demod->samprate * carg(demod->second_LO_phase_step); // phase step converted to Hz
+    demod->second_LO_phasor = updated_LO_phasor /= cabs(updated_LO_phasor); // Save renormalized
+    demod->second_LO_phasor_step = LO_phasor_step /= cabs(LO_phasor_step);
+    demod->second_LO = M_1_2PI * demod->samprate * carg(demod->second_LO_phasor_step); // phase step converted to Hz
 
     // Rotate signal onto I axis, compute signal (I) and noise (Q) levels
     float amplitude = 0;
