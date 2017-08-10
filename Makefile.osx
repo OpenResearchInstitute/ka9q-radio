@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.11 2017/08/05 08:07:33 karn Exp karn $
+# $Id: Makefile.osx,v 1.12 2017/08/06 00:08:25 karn Exp karn $
 INCLUDES=-I /opt/local/include
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,13 +6,13 @@ CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 
-all: control iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
+all: iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
 
 install: all
 	install -d $(LIBDIR)
 	install -d $(BINDIR)
-	install radio control monitor iqrecord iqplay modulate $(BINDIR)
-	install bandplan.txt help.txt $(LIBDIR)
+	install radio monitor iqrecord iqplay modulate $(BINDIR)
+	install bandplan.txt help.txt modes.txt $(LIBDIR)
 
 clean:
 	rm -f *.o *.a control iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
@@ -27,7 +27,7 @@ iqplay: iqplay.o multicast.o attr.o misc.o
 iqrecord: iqrecord.o multicast.o attr.o
 	$(CC) -g -o $@ $^ -lpthread -lm
 
-modulate: modulate.o misc.o filter.o modes.o
+modulate: modulate.o misc.o filter.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lm
 
 monitor: monitor.o multicast.o

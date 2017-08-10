@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.58 2017/08/05 08:07:33 karn Exp karn $
+# $Id: Makefile,v 1.59 2017/08/06 06:07:01 karn Exp karn $
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,11 +6,11 @@ CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 
-all: control funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
+all: funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
 
 install: all
-	install -D --target-directory=$(BINDIR) radio control funcube monitor iqrecord iqplay modulate
-	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt
+	install -D --target-directory=$(BINDIR) radio funcube monitor iqrecord iqplay modulate
+	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt modes.txt
 
 clean:
 	rm -f *.o *.a control funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
@@ -28,7 +28,7 @@ iqplay: iqplay.o multicast.o attr.o misc.o
 iqrecord: iqrecord.o multicast.o attr.o
 	$(CC) -g -o $@ $^ -lpthread -lm
 
-modulate: modulate.o misc.o filter.o modes.o
+modulate: modulate.o misc.o filter.o 
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lm
 
 monitor: monitor.o multicast.o
