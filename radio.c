@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.52 2017/08/06 08:28:53 karn Exp karn $
+// $Id: radio.c,v 1.53 2017/08/10 10:48:47 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -332,8 +332,12 @@ int set_cal(struct demod *demod,double cal){
 
   double f = get_freq(demod);
   demod->calibrate = cal;
-  demod->samprate = demod->status.samprate * (1 + cal);
-  set_freq(demod,f,0);
+  // Don't get deadlocked if this is before we know the sample rate
+  // e.g., with the -c command line option
+  if(demod->status.samprate != 0){
+    demod->samprate = demod->status.samprate * (1 + cal);
+    set_freq(demod,f,0);
+  }
   return 0;
 }
 int spindown(struct demod *demod,complex float *data,int len){
