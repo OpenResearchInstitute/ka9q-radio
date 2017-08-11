@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.32 2017/08/04 14:54:41 karn Exp karn $
+// $Id: fm.c,v 1.33 2017/08/10 10:48:04 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -40,7 +40,7 @@ void *demod_fm(void *arg){
 
   // Low pass filter to isolate PL tone at low sample rate
   const int PL_decimate = 32; // 48 kHz in, 1500 Hz out
-  const int PL_samprate = dsamprate / PL_decimate;
+  const float PL_samprate = dsamprate / PL_decimate;
   const int PL_L = AL / PL_decimate;
   const int PL_M = (AM - 1) / PL_decimate + 1;
   const int PL_N = PL_L + PL_M - 1;
