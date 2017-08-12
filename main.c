@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.65 2017/08/07 08:33:36 karn Exp karn $
+// $Id: main.c,v 1.66 2017/08/10 10:48:04 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -231,7 +231,7 @@ int main(int argc,char *argv[]){
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
   fprintf(stderr,"Waiting for SDR response...\n");
   set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
-  set_freq(demod,demod->start_freq,1);
+  set_freq(demod,demod->start_freq,0);
   demod->start_freq = 0;
 
   // Graceful signal catch

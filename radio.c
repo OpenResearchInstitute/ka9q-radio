@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.53 2017/08/10 10:48:47 karn Exp karn $
+// $Id: radio.c,v 1.54 2017/08/11 16:21:24 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -318,7 +318,7 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
   double lo2 = get_second_LO(demod);
   // Might now be out of range because of change in filter passband
   if(!LO2_in_range(demod,lo2,1))
-   set_freq(demod,get_freq(demod),1);
+   set_freq(demod,get_freq(demod),0);
 
   pthread_create(&demod->demod_thread,NULL,Modes[mindex].demod,demod);
   return 0;
