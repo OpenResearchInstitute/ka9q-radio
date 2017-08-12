@@ -13,11 +13,11 @@ Down arrow   Decrease by 1
 ctl+L        Redraw screen
 b            Set filter blocksize (samples)
 c            Set calibration offset (ppm)
-n            Set noise ref for am/iq/ssb/cw/isb SNR
-m            Set demod mode (cam/am/usb/lsb/cwu/cwl/iq/isb/fm)
 f            Set frequency (eg: 147m435, 10m0, 760k0, 14313000)
-u            Set display update rate, ms
 k            Set Kaiser window beta parameter
-r            Read statefile
+m            Set demod mode
+n            Set noise ref for am/iq/ssb/cw/isb SNR
+q	     Quit program
+u            Set display update rate, ms
 w            Write statefile
 
