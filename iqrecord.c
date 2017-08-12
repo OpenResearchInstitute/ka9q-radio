@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.6 2017/07/29 23:59:46 karn Exp karn $
+// $Id: iqrecord.c,v 1.7 2017/08/12 08:49:40 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -6,7 +6,9 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#if defined(linux)
 #include <bsd/string.h>
+#endif
 #include <math.h>
 #include <complex.h>
 #undef I

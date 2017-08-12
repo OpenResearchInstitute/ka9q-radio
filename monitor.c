@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.16 2017/07/30 02:10:49 karn Exp karn $
+// $Id: monitor.c,v 1.17 2017/08/12 08:49:40 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -13,7 +13,7 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netdb.h>
-#ifdef __linux__
+#if defined(linux)
 #include <alsa/asoundlib.h>
 #endif
 
@@ -40,7 +40,7 @@ const int Bufsize = 8192;
 const int L=512;
 const int Samprate = 48000; // Too hard to handle other sample rates right now
 int Verbose;
-#ifdef __linux__
+#if defined(linux)
 char *Audioname = "default";
 #else
 char *Audioname = NULL; // No ALSA on OSX!
@@ -62,7 +62,7 @@ void close_audio(struct audio *ap){
 
 
 // Only Linux has ALSA
-#ifdef __linux__
+#if defined(linux)
 
 int Underrun;
 int Overrun;
@@ -239,7 +239,7 @@ int main(int argc,char * const argv[]){
     case 'v':
       Verbose++;
       break;
-#ifdef __linux__
+#if defined(linux)
     case 'S':
       Audioname = optarg;
       if(strcmp(Audioname,"stdout") == 0)
@@ -250,12 +250,12 @@ int main(int argc,char * const argv[]){
       Mcast_address_text = optarg;
       break;
     default:
-#ifdef __linux__
+#if defined(linux)
       fprintf(stderr,"Usage: %s [-v] [-S audioname] [-I mcast_address]\n",argv[0]);
       fprintf(stderr,"Defaults: %s -S %s -I %s\n",argv[0],Audioname,Mcast_address_text);
 #else
       fprintf(stderr,"Usage: %s [-v] [-I mcast_address]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -I %s -P %s\n",argv[0],Mcast_address_text);
+      fprintf(stderr,"Defaults: %s -I %s\n",argv[0],Mcast_address_text);
 #endif      
       exit(1);
     }
@@ -275,7 +275,7 @@ int main(int argc,char * const argv[]){
   }
   fprintf(stderr,"Listening on %s\n",Mcast_address_text);
 
-#ifdef __linux__
+#if defined(linux)
   if(Audioname != NULL)
     Handle = audio_init(Audioname,Samprate,2,L); // sets up audio device, opus encoder
 #endif
@@ -397,7 +397,7 @@ int main(int argc,char * const argv[]){
 	// packet dropped; conceal
 	samples = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
 	if(samples > 0){
-#ifdef __linux__
+#if defined(linux)
 	  if(Handle != NULL)
 	    play_stereo_pcm(Handle,outsamps,samples);
 	  else
@@ -423,7 +423,7 @@ int main(int argc,char * const argv[]){
 	      interval,(unsigned long)sp->ssrc,(int)size,bitrate,(int)samples);
     }
     if(samples > 0){
-#ifdef __linux__
+#if defined(linux)
       if(Handle != NULL)
 	play_stereo_pcm(Handle,outsamps,samples);
       else

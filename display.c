@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.69 2017/08/12 00:56:18 karn Exp karn $
+// $Id: display.c,v 1.70 2017/08/12 08:49:40 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -10,7 +10,9 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#if defined(linux)
 #include <bsd/string.h>
+#endif
 #include <math.h>
 #include <complex.h>
 #undef I

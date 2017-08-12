@@ -1,4 +1,4 @@
-// $Id: hid-libusb.c,v 1.3 2016/10/14 00:35:51 karn Exp karn $
+// $Id: hid-libusb.c,v 1.4 2017/08/12 08:49:40 karn Exp karn $
 // Modified by KA9Q?
 /*******************************************************
  HIDAPI - Multi-Platform library for
@@ -32,7 +32,9 @@
 /* C */
 #include <stdio.h>
 #include <string.h>
+#if defined(linux)
 #include <bsd/string.h>
+#endif
 #include <stdlib.h>
 #include <ctype.h>
 #include <locale.h>

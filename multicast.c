@@ -4,7 +4,9 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <string.h>
+#if defined(linux)
 #include <bsd/string.h>
+#endif
 #include "multicast.h"
 
 static void soptions(int fd){
@@ -21,7 +23,7 @@ static void soptions(int fd){
     perror("so_linger failed");
 }
 
-#ifdef __linux__ // Linux, etc, for both IPv4/IPv6
+#if defined(linux) // Linux, etc, for both IPv4/IPv6
 static int join_group(int fd,struct addrinfo *resp){
   struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
   if(!IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))

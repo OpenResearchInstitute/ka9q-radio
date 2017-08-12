@@ -1,7 +1,9 @@
-// $Id: modes.c,v 1.11 2017/08/10 10:48:35 karn Exp karn $
+// $Id: modes.c,v 1.12 2017/08/12 08:49:40 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
+#if defined(linux)
 #include <bsd/string.h>
+#endif
 #include <string.h>
 #include <errno.h>
 #include "radio.h"

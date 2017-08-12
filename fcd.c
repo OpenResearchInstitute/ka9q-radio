@@ -1,4 +1,4 @@
-// $Id: fcd.c,v 1.2 2017/06/14 23:04:54 karn Exp karn $
+// $Id: fcd.c,v 1.3 2017/08/12 08:49:40 karn Exp karn $
 // KA9Q version of fcd.c
 /***************************************************************************
  *  This file is part of Qthid.
@@ -29,7 +29,9 @@
 
 #define FCD
 #include <string.h>
+#if defined(linux)
 #include <bsd/string.h>
+#endif
 #include <stdlib.h>
 #include <limits.h>
 #include "hidapi.h"
