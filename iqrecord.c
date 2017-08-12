@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.5 2017/07/29 21:42:42 karn Exp karn $
+// $Id: iqrecord.c,v 1.6 2017/07/29 23:59:46 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <bsd/string.h>
 #include <math.h>
 #include <complex.h>
 #undef I
@@ -57,7 +58,6 @@ struct sockaddr Input_mcast_sockaddr;
 
 int Input_fd;
 char IQ_mcast_address_text[256] = "239.1.2.3"; // Default for testing
-char Mcast_dest_port[] = "5004";     // Default for testing; recommended default RTP port
 
 
 
@@ -74,7 +74,7 @@ int main(int argc,char *argv[]){
   while((c = getopt(argc,argv,"I:l:q")) != EOF){
     switch(c){
     case 'I':
-      strncpy(IQ_mcast_address_text,optarg,sizeof(IQ_mcast_address_text));
+      strlcpy(IQ_mcast_address_text,optarg,sizeof(IQ_mcast_address_text));
       break;
     case 'l':
       locale = optarg;
@@ -104,7 +104,7 @@ int main(int argc,char *argv[]){
 
 
   // Set up input socket for multicast data stream from front end
-  Input_fd = setup_mcast(IQ_mcast_address_text,Mcast_dest_port,0);
+  Input_fd = setup_mcast(IQ_mcast_address_text,0);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);

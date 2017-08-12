@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.68 2017/08/10 10:48:04 karn Exp karn $
+// $Id: display.c,v 1.69 2017/08/12 00:56:18 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <bsd/string.h>
 #include <math.h>
 #include <complex.h>
 #undef I
@@ -366,7 +367,7 @@ void *display(void *arg){
     wclrtobot(sdr);
     extern int Delayed,Skips;
     wprintw(sdr,"Src   %s:%s\n",source,sport); // Actual sender of mcasts
-    wprintw(sdr,"Mcast %s:%s\n",demod->iq_mcast_address_text,Mcast_dest_port);
+    wprintw(sdr,"Mcast %s\n",demod->iq_mcast_address_text);
     wprintw(sdr,"IQ Pkts%'14llu\n",demod->iq_packets);
     wprintw(sdr,"Late%17d\n",Delayed);
     wprintw(sdr,"Skips%16d\n",Skips);
@@ -379,7 +380,7 @@ void *display(void *arg){
     wprintw(sdr,"Mix gain%13u\n",demod->status.mixer_gain); // SDR dependent
     wprintw(sdr,"IF gain%14u dB\n",demod->status.if_gain); // SDR dependent
     // Audio output dest address (usually multicast)
-    wprintw(sdr,"Dest  %s:%s\n",audio->audio_mcast_address_text,Mcast_dest_port);
+    wprintw(sdr,"Dest  %s\n",audio->audio_mcast_address_text);
     if(audio->opus_bitrate > 0){
       wprintw(sdr,"Opus%4.0fms%4s",audio->opus_blocktime,audio->opus_dtx ? " dtx":"");
       wprintw(sdr,"%7.1f kb/s\n",audio->opus_bitrate/1000.);
@@ -459,7 +460,7 @@ void *display(void *arg){
 	if(strlen(str) <= 0)
 	  break;
 
-	int const i = setup_mcast(str,Mcast_dest_port,0);
+	int const i = setup_mcast(str,0);
 	if(i == -1){
 	  beep();
 	  break;
@@ -471,7 +472,7 @@ void *display(void *arg){
 	demod->input_fd = i;
 	if(j != -1)
 	  close(j); // This should cause the input thread to see an error
-	strncpy(demod->iq_mcast_address_text,str,sizeof(demod->iq_mcast_address_text));
+	strlcpy(demod->iq_mcast_address_text,str,sizeof(demod->iq_mcast_address_text));
 	// Reset error counts
 	Skips = Delayed = 0;
       }
@@ -543,13 +544,13 @@ void *display(void *arg){
     case 'm':   // Select demod mode from list. Note: overwrites filters
       {
 	char str[160];
-	strncpy(str,"Enter mode [ ",sizeof(str));
+	strlcpy(str,"Enter mode [ ",sizeof(str));
 	int i;
 	for(i=0;i < Nmodes;i++){
-	  strncat(str,Modes[i].name,sizeof(str) - strlen(str) - 1);
-	  strncat(str," ",sizeof(str) - strlen(str) - 1);
+	  strlcat(str,Modes[i].name,sizeof(str) - strlen(str) - 1);
+	  strlcat(str," ",sizeof(str) - strlen(str) - 1);
 	}
-	strncat(str,"]: ",sizeof(str) - strlen(str) - 1);
+	strlcat(str,"]: ",sizeof(str) - strlen(str) - 1);
 	getentry(str,str,sizeof(str));
 	if(strlen(str) > 0){
 	  set_mode(demod,str,1); // With default filters

@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <string.h>
+#include <bsd/string.h>
 #include "multicast.h"
 
 static void soptions(int fd){
@@ -52,8 +53,21 @@ static int join_group(int fd,struct addrinfo *resp){
 }
 #endif
 
+char Default_mcast_port[] = "5004";
+
 // Set up multicast socket for input or output
-int setup_mcast(char const *addr,char const *port,int output){
+// Target is in the form of domain.name.com:5004 or 1.2.3.4:5004
+int setup_mcast(char const *target,int output){
+  int len = strlen(target) + 1;  // Including terminal null
+  char host[len],*port;
+
+  strlcpy(host,target,len);
+  if((port = strrchr(host,':')) != NULL){
+    *port++ = '\0';
+  } else {
+    port = Default_mcast_port; // Default for RTP
+  }
+
   struct addrinfo hints;
   memset(&hints,0,sizeof(hints));
   hints.ai_family = AF_INET; // Only IPv4 for now (grrr....)
@@ -62,8 +76,8 @@ int setup_mcast(char const *addr,char const *port,int output){
 
   struct addrinfo *results = NULL;
   int ecode;
-  if((ecode = getaddrinfo(addr,port,&hints,&results)) != 0){
-    fprintf(stderr,"setup_input getaddrinfo(%s,%s): %s\n",addr,port,gai_strerror(ecode));
+  if((ecode = getaddrinfo(host,port,&hints,&results)) != 0){
+    fprintf(stderr,"setup_input getaddrinfo(%s,%s): %s\n",host,port,gai_strerror(ecode));
     return -1;
   }
   struct addrinfo *resp;
@@ -93,7 +107,7 @@ int setup_mcast(char const *addr,char const *port,int output){
   if(fd != -1)
     join_group(fd,resp);
   else
-    fprintf(stderr,"setup_input: Can't create input multicast socket from %s:%s\n",addr,port);
+    fprintf(stderr,"setup_input: Can't create multicast socket for %s:%s\n",host,port);
 
   freeaddrinfo(results);
   return fd;

@@ -1,4 +1,4 @@
-// $Id: hid-libusb.c,v 1.2 2016/10/14 00:31:43 karn Exp karn $
+// $Id: hid-libusb.c,v 1.3 2016/10/14 00:35:51 karn Exp karn $
 // Modified by KA9Q?
 /*******************************************************
  HIDAPI - Multi-Platform library for
@@ -32,6 +32,7 @@
 /* C */
 #include <stdio.h>
 #include <string.h>
+#include <bsd/string.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <locale.h>
@@ -1376,7 +1377,7 @@ uint16_t get_usb_code_for_current_locale(void)
 		return 0x0;
 
 	/* Make a copy of the current locale string. */
-	strncpy(search_string, locale, sizeof(search_string));
+	strlcpy(search_string, locale, sizeof(search_string));
 	search_string[sizeof(search_string)-1] = '\0';
 
 	/* Chop off the encoding part, and make it lower case. */

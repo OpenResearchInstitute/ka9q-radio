@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <bsd/string.h>
 #include <ctype.h>
 #include <math.h>
 #include <limits.h>
@@ -104,7 +105,7 @@ int init_bandplan(){
 	break;
       }
     }    
-    strncpy(Bandplans[i].name,name,sizeof(Bandplans[i].name));
+    strlcpy(Bandplans[i].name,name,sizeof(Bandplans[i].name));
     i++;
   }
 #if 0

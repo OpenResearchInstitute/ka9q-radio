@@ -1,4 +1,4 @@
-// $Id: fcd.c,v 1.1 2016/10/14 00:22:25 karn Exp karn $
+// $Id: fcd.c,v 1.2 2017/06/14 23:04:54 karn Exp karn $
 // KA9Q version of fcd.c
 /***************************************************************************
  *  This file is part of Qthid.
@@ -29,6 +29,7 @@
 
 #define FCD
 #include <string.h>
+#include <bsd/string.h>
 #include <stdlib.h>
 #include <limits.h>
 #include "hidapi.h"
@@ -36,7 +37,6 @@
 #include "fcdhidcmd.h"
 #include <stdio.h>
 #include <dirent.h>
-
 
 #define FALSE 0
 #define TRUE 1
@@ -191,7 +191,7 @@ FCD_MODE_ENUM fcdGetFwVerStr(hid_device *phd,char *str)
         }
         /* In application mode we have "FCDAPP_18.06" where the number is the FW version */
         else if (strncmp((char *)(aucBufIn+2), "FCDAPP", 6) == 0) {
-            strncpy(str, (char *)(aucBufIn+9), 5);
+            strlcpy(str, (char *)(aucBufIn+9), 5);
             str[5] = 0;
             fcd_mode = FCD_MODE_APP;
         }
@@ -308,7 +308,7 @@ FCD_MODE_ENUM fcdGetCapsStr(hid_device *phd,char *caps_str)
         /* In application mode we have "FCDAPP 18.08 Brd 1.0 No blk" (see API doc) */
         else if (strncmp((char *)(aucBufIn+2), "FCDAPP", 6) == 0) {
 
-            strncpy(caps_str, (char *)(aucBufIn+2), 27);
+            strlcpy(caps_str, (char *)(aucBufIn+2), 27);
             caps_str[27] = 0;
 
             fcd_mode = FCD_MODE_APP;

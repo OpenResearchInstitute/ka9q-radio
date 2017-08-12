@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.19 2017/08/06 08:28:53 karn Exp karn $
+// $Id: funcube.c,v 1.20 2017/08/12 00:31:05 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -70,20 +70,16 @@ int Ctl_sock;
 int main(int argc,char *argv[]){
   struct rtp_header rtp;
   char *dest = "239.1.2.1"; // Default for testing
-  char *dest_port = "5004";     // Recommended default RTP port
 
   Locale = getenv("LANG");
   if(Locale == NULL || strlen(Locale) == 0)
     Locale = "en_US.UTF-8";
 
   int c;
-  while((c = getopt(argc,argv,"d:vp:l:b:oR:P:")) != EOF){
+  while((c = getopt(argc,argv,"d:vp:l:b:oR:")) != EOF){
     switch(c){
     case 'R':
       dest = optarg;
-      break;
-    case 'P':
-      dest_port = optarg;
       break;
     case 'o':
       No_hold_open++; // Close USB control port between commands so fcdpp can be used
@@ -108,7 +104,7 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,Locale);
   
   // Set up RTP output socket
-  Rtp_sock = setup_mcast(dest,dest_port,1);
+  Rtp_sock = setup_mcast(dest,1);
   if(Rtp_sock == -1){
     fprintf(stderr,"Can't create multicast socket\n");
     exit(1);

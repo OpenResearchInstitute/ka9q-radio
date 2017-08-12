@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.15 2017/07/29 23:56:12 karn Exp karn $
+// $Id: monitor.c,v 1.16 2017/07/30 02:10:49 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -33,7 +33,6 @@ struct audio {
 
 // Global variables
 char *Mcast_address_text;
-char *Mcast_dport;
 
 // Maximum samples/words per packet
 // Bigger than Ethernet MTU because of network device fragmentation/reassembly
@@ -234,9 +233,8 @@ void closedown(){
 int main(int argc,char * const argv[]){
   // Note: Audioname defaults to "default" on Linux, "stdout" on OSX (which doesn't have ALSA)
   Mcast_address_text = "239.2.1.1";
-  Mcast_dport = "5004";
   int c;
-  while((c = getopt(argc,argv,"S:I:P:v")) != EOF){
+  while((c = getopt(argc,argv,"S:I:v")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
@@ -251,16 +249,13 @@ int main(int argc,char * const argv[]){
     case 'I':
       Mcast_address_text = optarg;
       break;
-    case 'P':
-      Mcast_dport = optarg;
-      break;
     default:
 #ifdef __linux__
-      fprintf(stderr,"Usage: %s [-v] [-S audioname] [-I mcast_address] [-P Mcast_dport]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -S %s -I %s -P %s\n",argv[0],Audioname,Mcast_address_text,Mcast_dport);
+      fprintf(stderr,"Usage: %s [-v] [-S audioname] [-I mcast_address]\n",argv[0]);
+      fprintf(stderr,"Defaults: %s -S %s -I %s\n",argv[0],Audioname,Mcast_address_text);
 #else
-      fprintf(stderr,"Usage: %s [-v] [-I mcast_address] [-P Mcast_dport]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -I %s -P %s\n",argv[0],Mcast_address_text,Mcast_dport);
+      fprintf(stderr,"Usage: %s [-v] [-I mcast_address]\n",argv[0]);
+      fprintf(stderr,"Defaults: %s -I %s -P %s\n",argv[0],Mcast_address_text);
 #endif      
       exit(1);
     }
@@ -273,12 +268,12 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
   // Set up multicast input
-  Input_fd = setup_mcast(Mcast_address_text,Mcast_dport,0);
+  Input_fd = setup_mcast(Mcast_address_text,0);
   if(Input_fd == -1){
     fprintf(stderr,"Can't set up input\n");
     exit(1);
   }
-  fprintf(stderr,"Listening on %s:%s\n",Mcast_address_text,Mcast_dport);
+  fprintf(stderr,"Listening on %s\n",Mcast_address_text);
 
 #ifdef __linux__
   if(Audioname != NULL)

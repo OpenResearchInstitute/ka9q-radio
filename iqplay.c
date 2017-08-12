@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.12 2017/07/29 23:59:46 karn Exp karn $
+// $Id: iqplay.c,v 1.13 2017/08/04 03:35:55 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -126,16 +126,12 @@ int main(int argc,char *argv[]){
 
 
   char *dest = "239.1.2.10"; // Default for testing
-  char *dest_port = "5004";     // Default for testing; recommended default RTP port
   locale = getenv("LANG");
 
-  while((c = getopt(argc,argv,"vl:b:R:P:f:")) != EOF){
+  while((c = getopt(argc,argv,"vl:b:R:f:")) != EOF){
     switch(c){
     case 'R':
       dest = optarg;
-      break;
-    case 'P':
-      dest_port = optarg;
       break;
     case 'v':
       Verbose++;
@@ -158,7 +154,7 @@ int main(int argc,char *argv[]){
 
   setlocale(LC_ALL,locale);
   // Set up RTP output socket
-  Rtp_sock = setup_mcast(dest,dest_port,1);
+  Rtp_sock = setup_mcast(dest,1);
 
   signal(SIGPIPE,SIG_IGN);
   signal(SIGINT,closedown);

@@ -1,6 +1,7 @@
-// $Id: modes.c,v 1.10 2017/08/02 02:28:27 karn Exp karn $
+// $Id: modes.c,v 1.11 2017/08/10 10:48:35 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
+#include <bsd/string.h>
 #include <string.h>
 #include <errno.h>
 #include "radio.h"
@@ -53,7 +54,7 @@ int readmodes(char *file){
     if(i == NDEMOD)
       continue; // Not found
     
-    strncpy(Modes[Nmodes].name,name,sizeof(Modes[Nmodes].name));
+    strlcpy(Modes[Nmodes].name,name,sizeof(Modes[Nmodes].name));
     Modes[Nmodes].demod = Demodtab[i].demod;
     Modes[Nmodes].low = low;
     Modes[Nmodes].high = high;

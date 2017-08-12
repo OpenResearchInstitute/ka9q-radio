@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.66 2017/08/10 10:48:04 karn Exp karn $
+// $Id: main.c,v 1.67 2017/08/12 00:56:24 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <bsd/string.h>
 #include <math.h>
 #include <complex.h>
 #undef I
@@ -49,7 +50,6 @@ int Nthreads = 1;
 int DAC_samprate = 48000;
 int Quiet = 0;
 int Verbose = 0;
-char Mcast_dest_port[256] = "5004";
 char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
 int Update_interval = 100;  // 100 ms between screen updates
@@ -64,11 +64,13 @@ int main(int argc,char *argv[]){
     // The display thread assumes en_US.UTF-8, or anything with a thousands grouping character
     // Otherwise the cursor movements will be wrong
     char const * const cp = getenv("LANG");
-    if(cp != NULL)
-      strncpy(Locale,cp,sizeof(Locale));
+    if(cp != NULL){
+      strlcpy(Locale,cp,sizeof(Locale));
+    }
   }
   setlocale(LC_ALL,Locale); // Set either the hardwired default or the value of $LANG if it exists
   snprintf(Statepath,sizeof(Statepath),"%s/%s",getenv("HOME"),".radiostate");
+  Statepath[sizeof(Statepath)-1] = '\0';
 
   if(readmodes("modes.txt") != 0){
     fprintf(stderr,"Can't read mode table\n");
@@ -90,11 +92,11 @@ int main(int argc,char *argv[]){
   demod->L = 4096;      // Number of samples in buffer: FFT length = L + M - 1
   demod->M = 4096+1;    // Length of filter impulse response
   demod->kaiser_beta = 3.0; // Reasonable compromise
-  strncpy(demod->iq_mcast_address_text,"239.1.2.1",sizeof(demod->iq_mcast_address_text));
+  strlcpy(demod->iq_mcast_address_text,"239.1.2.1",sizeof(demod->iq_mcast_address_text));
   demod->headroom = pow(10.,-15./20); // -15 dB
   demod->audio->opus_bitrate = 32000;  // 32 kb/s
   demod->audio->opus_blocktime = 20;   // 20 ms
-  strncpy(demod->audio->audio_mcast_address_text,"239.2.1.1",sizeof(demod->audio->audio_mcast_address_text));
+  strlcpy(demod->audio->audio_mcast_address_text,"239.2.1.1",sizeof(demod->audio->audio_mcast_address_text));
   demod->tunestep = 0;  // single digit hertz position
   demod->calibrate = 0;
 
@@ -128,20 +130,20 @@ int main(int argc,char *argv[]){
       demod->start_freq = parse_frequency(optarg);
       break;
     case 'I':   // Multicast address to listen to for I/Q data
-      strncpy(demod->iq_mcast_address_text,optarg,sizeof(demod->iq_mcast_address_text));
+      strlcpy(demod->iq_mcast_address_text,optarg,sizeof(demod->iq_mcast_address_text));
       break;
     case 'k':   // Kaiser window shape parameter; 0 = rectangular
       demod->kaiser_beta = strtod(optarg,NULL);
       break;
     case 'l':   // Locale, mainly for numerical output format
-      strncpy(Locale,optarg,sizeof(Locale));
+      strlcpy(Locale,optarg,sizeof(Locale));
       setlocale(LC_ALL,Locale);
       break;
     case 'L':   // Pre-detection filter block size
       demod->L = strtol(optarg,NULL,0);
       break;
     case 'm':   // receiver mode (AM/FM, etc)
-      strncpy(demod->mode,optarg,sizeof(demod->mode));
+      strlcpy(demod->mode,optarg,sizeof(demod->mode));
       break;
     case 'M':   // Pre-detection filter impulse length
       demod->M = strtol(optarg,NULL,0);
@@ -153,7 +155,7 @@ int main(int argc,char *argv[]){
       Quiet++;  // Suppress display
       break;
     case 'R':   // Set audio multicast address
-      strncpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
+      strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
       break;
     case 't':   // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);
@@ -208,7 +210,7 @@ int main(int argc,char *argv[]){
   pthread_cond_init(&demod->data_cond,NULL);
 
   // Input socket for I/Q data from SDR
-  demod->input_fd = setup_mcast(demod->iq_mcast_address_text,Mcast_dest_port,0);
+  demod->input_fd = setup_mcast(demod->iq_mcast_address_text,0);
   if(demod->input_fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
@@ -373,7 +375,7 @@ int savestate(struct demod *dp,char const *filename){
   FILE *fp;
   char pathname[PATH_MAX];
   if(filename[0] == '/')
-    strncpy(pathname,filename,sizeof(pathname));    // Absolute path
+    strlcpy(pathname,filename,sizeof(pathname));    // Absolute path
   else
     snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,filename);
 
@@ -383,7 +385,7 @@ int savestate(struct demod *dp,char const *filename){
   }
   fprintf(fp,"#KA9Q DSP Receiver State dump\n");
   fprintf(fp,"Locale %s\n",Locale);
-  fprintf(fp,"Source %s %s\n",dp->iq_mcast_address_text,Mcast_dest_port);
+  fprintf(fp,"Source %s\n",dp->iq_mcast_address_text);
   if(dp->audio){
     fprintf(fp,"Audio output %s\n",dp->audio->audio_mcast_address_text);
     fprintf(fp,"Opus blocktime %.0f\n",dp->audio->opus_blocktime);
@@ -410,9 +412,10 @@ int loadstate(struct demod *dp,char const *filename){
   FILE *fp;
   char pathname[PATH_MAX];
   if(filename[0] == '/')
-    strncpy(pathname,filename,sizeof(pathname));
+    strlcpy(pathname,filename,sizeof(pathname));
   else
     snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,filename);
+
   if((fp = fopen(pathname,"r")) == NULL){
     fprintf(stderr,"Can't read state file %s\n",pathname);
     return -1;
@@ -423,7 +426,7 @@ int loadstate(struct demod *dp,char const *filename){
     double f;
     if(sscanf(line,"Frequency %lf",&dp->start_freq) > 0){
     } else if(strncmp(line,"Mode ",5) == 0){
-      strncpy(dp->mode,&line[5],sizeof(dp->mode));
+      strlcpy(dp->mode,&line[5],sizeof(dp->mode));
     } else if(sscanf(line,"Dial offset %lf",&dp->dial_offset) > 0){
     } else if(sscanf(line,"Filter low %f",&dp->low) > 0){
     } else if(sscanf(line,"Filter high %f",&dp->high) > 0){
@@ -431,7 +434,7 @@ int loadstate(struct demod *dp,char const *filename){
     } else if(sscanf(line,"Blocksize %d",&dp->L) > 0){
     } else if(sscanf(line,"Impulse len %d",&dp->M) > 0){
     } else if(sscanf(line,"Tunestep %d",&dp->tunestep) > 0){
-    } else if(sscanf(line,"Source %256s %256s",dp->iq_mcast_address_text,Mcast_dest_port) > 0){
+    } else if(sscanf(line,"Source %256s",dp->iq_mcast_address_text) > 0){
       // Array sizes defined elsewhere!
     } else if(dp->audio && sscanf(line,"Audio output %256s",dp->audio->audio_mcast_address_text) > 0){
     } else if(dp->audio && sscanf(line,"Opus blocktime %f",&dp->audio->opus_blocktime) > 0){

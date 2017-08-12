@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.21 2017/08/05 08:07:33 karn Exp karn $
+// $Id: filter.c,v 1.22 2017/08/10 10:48:04 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -7,12 +7,13 @@
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
 
 #define _GNU_SOURCE 1
+#include <stdlib.h>
+#include <pthread.h>
+#include <memory.h>
+#include <assert.h>
 #include <complex.h>
 #include <math.h>
 #include <fftw3.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <assert.h>
 #include "dsp.h"
 #include "filter.h"
 

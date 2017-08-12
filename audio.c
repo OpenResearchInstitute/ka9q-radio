@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.37 2017/08/06 00:08:25 karn Exp karn $
+// $Id: audio.c,v 1.38 2017/08/06 05:32:16 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -277,7 +277,7 @@ int setup_audio(struct audio *audio){
   // Set up audio output stream(s)
   if(audio->audio_mcast_fd > 0)
     close(audio->audio_mcast_fd);
-  audio->audio_mcast_fd = setup_mcast(audio->audio_mcast_address_text,Mcast_dest_port,1);
+  audio->audio_mcast_fd = setup_mcast(audio->audio_mcast_address_text,1);
   if(audio->audio_mcast_fd == -1){
     fprintf(stderr,"Can't set up multicast audio output\n");
     return -1;

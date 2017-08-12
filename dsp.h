@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.11 2017/07/19 10:06:52 karn Exp karn $
+// $Id: dsp.h,v 1.12 2017/08/04 03:35:55 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -18,8 +18,6 @@ const float camplitude(const complex float *data, const int len);
 // Compute norm = x * conj(x) = Re{x}^2 + Im{x}^2
 const float cnrmf(const complex float x);
 const double cnrm(const complex double x);
-
-#include "radio.h"
 
 int pipefill(int,void *,const int);
 const double parse_frequency(const char *);

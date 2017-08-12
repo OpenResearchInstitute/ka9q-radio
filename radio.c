@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.54 2017/08/11 16:21:24 karn Exp karn $
+// $Id: radio.c,v 1.55 2017/08/12 00:56:31 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <bsd/string.h>
 #include <math.h>
 #include <complex.h>
 #include <fftw3.h>
@@ -287,7 +288,7 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
 
   // if the mode argument points to demod->mode, avoid the copy; can cause an abort
   if(demod->mode != mode)
-    strncpy(demod->mode,mode,sizeof(demod->mode));
+    strlcpy(demod->mode,mode,sizeof(demod->mode));
 
   if(defaults || isnan(demod->dial_offset))
     demod->dial_offset = Modes[mindex].dial;
