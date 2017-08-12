@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.17 2017/07/23 23:30:30 karn Exp karn $
+// $Id: funcube.c,v 1.19 2017/08/06 08:28:53 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -187,8 +187,12 @@ int main(int argc,char *argv[]){
     rtp.timestamp = htonl(timestamp);
     timestamp += Blocksize;
 
-    if(sendmsg(Rtp_sock,&message,0) == -1)
+    if(sendmsg(Rtp_sock,&message,0) == -1){
       perror("sendmsg");
+      // If we're sending to a unicast address without a listener, we'll get ECONNREFUSED
+      // Sleep 1 sec to slow down the rate of these messages
+      usleep(1000000);
+    }
   }
   // Can't really get here
   close(Rtp_sock);
