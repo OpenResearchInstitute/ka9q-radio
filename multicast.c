@@ -22,6 +22,10 @@ static void soptions(int fd){
 
 #ifdef __linux__ // Linux, etc, for both IPv4/IPv6
 static int join_group(int fd,struct addrinfo *resp){
+  struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
+  if(!IN_MULTICAST(sin->sin_addr.s_addr))
+    return -1;
+
   struct group_req group_req;
   group_req.gr_interface = 0;
   memcpy(&group_req.gr_group,resp->ai_addr,resp->ai_addrlen);
@@ -34,6 +38,9 @@ static int join_group(int fd,struct addrinfo *resp){
 #else // old version, seems required on Apple    
 static int join_group(int fd,struct addrinfo *resp){
   struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
+  if(!IN_MULTICAST(sin->sin_addr.s_addr))
+    return -1;
+
   struct ip_mreq mreq;
   //  mreq.imr_multiaddr.s_addr = sin->sin_addr.s_addr;
   mreq.imr_multiaddr = sin->sin_addr;
