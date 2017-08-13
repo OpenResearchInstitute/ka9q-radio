@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.68 2017/08/12 08:49:40 karn Exp karn $
+// $Id: main.c,v 1.69 2017/08/12 09:07:37 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -225,8 +225,6 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
   }
-  if(!Quiet)
-    pthread_create(&Display_thread,NULL,display,demod);
 
   // The input thread must run before calling these next functions, otherwise they'll deadlock
   pthread_create(&demod->input_thread,NULL,input_loop,demod);
@@ -245,6 +243,9 @@ int main(int argc,char *argv[]){
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
+
+  if(!Quiet)
+    pthread_create(&Display_thread,NULL,display,demod);
 
   while(1)
     usleep(1000000); // probably get rid of this

@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.12 2017/08/06 00:08:25 karn Exp karn $
+# $Id: Makefile.osx,v 1.14 2017/08/10 10:52:02 karn Exp karn $
 INCLUDES=-I /opt/local/include
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -15,7 +15,7 @@ install: all
 	install bandplan.txt help.txt modes.txt $(LIBDIR)
 
 clean:
-	rm -f *.o *.a control iqplay iqrecord modulate monitor radio bandplan.txt help.txt 
+	rm -f *.o *.a control iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt
 	rcsclean
 
 control: control.o modes.o
