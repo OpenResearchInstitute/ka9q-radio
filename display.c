@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.70 2017/08/12 08:49:40 karn Exp karn $
+// $Id: display.c,v 1.72 2017/08/25 19:48:29 karn Exp $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -219,8 +219,8 @@ void *display(void *arg){
   int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);  // Powermate knob?
 
   struct sockaddr old_input_source_address;
-  char source[INET6_ADDRSTRLEN];
-  char sport[256];
+  char source[NI_MAXHOST];
+  char sport[NI_MAXSERV];
   memset(source,0,sizeof(source));
   memset(sport,0,sizeof(sport));
 
@@ -362,7 +362,7 @@ void *display(void *arg){
       memcpy(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address));
       getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
 		  source,sizeof(source),
-		  sport,sizeof(sport),NI_NOFQDN|NI_DGRAM);
+		  sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
     }
 
     wmove(sdr,0,0);

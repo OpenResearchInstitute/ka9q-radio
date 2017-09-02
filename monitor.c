@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.17 2017/08/12 08:49:40 karn Exp karn $
+// $Id: monitor.c,v 1.19 2017/08/25 19:48:37 karn Exp $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -347,11 +347,11 @@ int main(int argc,char * const argv[]){
 
     if(sp == NULL){
       // Not found; create new entry
-      char addr[256];
-      char port[256];
+      char addr[NI_MAXHOST];
+      char port[NI_MAXSERV];
       
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),addr,sizeof(addr),
-		    port,sizeof(port),NI_NOFQDN|NI_DGRAM);
+		    port,sizeof(port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 
       fprintf(stderr,"New stream from %s:%s ssrc %x type %d\n",addr,port,rtp.ssrc,rtp.mpt);
 

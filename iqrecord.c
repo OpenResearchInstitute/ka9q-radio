@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.7 2017/08/12 08:49:40 karn Exp karn $
+// $Id: iqrecord.c,v 1.9 2017/08/25 19:48:34 karn Exp $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -220,8 +220,8 @@ void input_loop(){
       attrprintf(fd,"frequency","%.1f",status.frequency);
       attrprintf(fd,"ssrc","%lx",(long unsigned)rtp.ssrc);
 
-      char sender_text[256];
-      getnameinfo((struct sockaddr *)&Sender,sizeof(Sender),sender_text,sizeof(sender_text),NULL,0,NI_NOFQDN|NI_DGRAM);
+      char sender_text[NI_MAXHOST];
+      getnameinfo((struct sockaddr *)&Sender,sizeof(Sender),sender_text,sizeof(sender_text),NULL,0,NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
       attrprintf(fd,"source","%s",sender_text);
       attrprintf(fd,"multicast","%s",IQ_mcast_address_text);
       
