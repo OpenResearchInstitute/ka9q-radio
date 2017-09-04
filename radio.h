@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.39 2017/08/06 08:28:53 karn Exp karn $
+// $Id: radio.h,v 1.40 2017/08/10 10:48:56 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -16,6 +16,7 @@
 // Modetab flags
 #define CONJ 1    // Cross-conjugation of positive and negative frequencies, for ISB
 #define FLAT 2    // No baseband filtering for FM
+#define CAL 4     // Calibrate mode in CAM; adjust calibrate rather than frequency
 
 struct modetab {
   char name[16];
@@ -56,9 +57,8 @@ struct demod {
 
   // I/Q correction parameters
   float DC_i,DC_q;       // Average DC offsets
-  float power_i,power_q; // Average channel powers
-  float igain;           // Amplitude gain to be applied to I channel to equalize I & Q, ideally 1
   float sinphi;          // smoothed estimate of I/Q phase error
+  float imbalance;       // Ratio of I power to Q power
 
   struct status requested_status; // The status we want the FCD to be in
   struct status status;           // Last status from FCD
@@ -102,10 +102,14 @@ struct demod {
   float min_IF;
   float max_IF;
 
-  double dial_offset; // displayed dial frequency = carrier freq + dial_offset (useful for CW)
+  double frequency;     // Nominal (dial) frequency
+  double doppler;       // Open-loop doppler correction from satellite tracking program
+                        // To be handled by a separate spindown, not in radio.c
+  double demod_offset;  // Offset applied by auto tracking demodulators (CAM, DSB, etc)
+  double dial_offset;   // displayed dial frequency = carrier freq + dial_offset (useful for CW)
   complex double second_LO_phasor; // Second LO phasor
-  double second_LO;   // True second LO frequency, including calibration
-                      // Provided because round trip through csincos/carg is less accurate
+  double second_LO;     // True second LO frequency, including calibration
+                        // Provided because round trip through csincos/carg is less accurate
 
   complex double second_LO_phasor_step;  // LO step phasor = csincos(2*pi*second_LO/samprate)
   int frequency_lock; // inhibits tuning of RF and LO & IF tuning operate in lockstep
@@ -127,6 +131,7 @@ struct demod {
   float kaiser_beta;
 
   // Demodulator parameters
+  float power;      // Average power of signal before filter
   float amplitude;  // Amplitude (not power) of signal after filter
   float noise;      // Noise amplitude esimate (experimemtal)
   float snr;        // Estimated signal-to-noise ratio
@@ -150,12 +155,10 @@ int fillbuf(struct demod *,complex float *,const int);
 int setup_input(char const *,char const *);
 int setup_output(char const *,char const *);
 int LO2_in_range(struct demod *,double f,int);
-const double get_freq(struct demod const *);
-double set_freq(struct demod *,double,int);
-double set_first_LO(struct demod *,double,int);
+double set_freq(struct demod *,double,double);
+double set_first_LO(struct demod *,double);
 const double get_first_LO(struct demod const *);
 double set_second_LO(struct demod *,double);
-const double get_second_LO(struct demod const *);
 double set_second_LO_rate(struct demod *,double,int);
 int set_mode(struct demod *,const char *,int);
 int set_cal(struct demod *,double);

@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.57 2017/08/12 09:07:37 karn Exp karn $
+// $Id: radio.c,v 1.58 2017/09/02 06:48:07 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -35,14 +35,12 @@ float const SCALE = 1./SHRT_MAX;   // Scale signed 16-bit int to float in range 
 
 void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
   // gain and phase balance coefficients
-  float gain_i=1, gain_q=1, secphi=1, tanphi=0;
-  if(demod->power_i != 0 && demod->power_q != 0){ // Avoid floating point exceptions at startup
-    float const totpower = demod->power_i + demod->power_q;
-    gain_q = sqrtf(totpower/(2*demod->power_q));         // Power ratio to amplitude ratio requires sqrt()
-    gain_i = sqrtf(totpower/(2*demod->power_i));
-    secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
-    tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
-  }
+  float gain_i, gain_q, secphi, tanphi;
+  gain_q = sqrtf(0.5 * (1 + demod->imbalance));
+  gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
+  secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
+  tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
+
   int i;
   float samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
   float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
@@ -78,8 +76,7 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
   // Update estimates of DC offset, signal powers and phase error
   demod->DC_i += DC_alpha * (samp_i_sum - cnt * demod->DC_i);
   demod->DC_q += DC_alpha * (samp_q_sum - cnt * demod->DC_q);
-  demod->power_i += Power_alpha * (samp_i_sq_sum - cnt * demod->power_i);
-  demod->power_q += Power_alpha * (samp_q_sq_sum - cnt * demod->power_q);
+  demod->imbalance += Power_alpha * cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
 
   float dpn = 2 * dotprod / (samp_i_sq_sum + samp_q_sq_sum);
   demod->sinphi += Power_alpha * cnt * (dpn - demod->sinphi);
@@ -126,56 +123,54 @@ const double get_first_LO(const struct demod *demod){
 }
 
 
-// Return current frequency of carrier frequency at current first IF
-const double get_second_LO(const struct demod *demod){
-  assert(demod != NULL);
-  assert(!isnan(demod->second_LO));
-
-  return demod->second_LO;
-
-}
-
-// Set frequency with optional front end tuning
-double set_freq(struct demod *demod,double f,int force){
+// Set radio frequency with optional IF selection
+// If new_lo2 is NAN or out of range, that's a "don't care";
+// we'll try to pick a new LO2 that avoids retuning LO1,
+// and if that isn't possible we'll pick a default:
+// (usually +/- 48 kHz, samprate/4)
+double set_freq(struct demod *demod,double f,double new_lo2){
   assert(demod != NULL);
   assert(!isnan(f));
-
 
   // Wait for sample rate to be known
   pthread_mutex_lock(&demod->status_mutex);
   while(demod->status.samprate == 0)
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
-  double lo1 = get_first_LO(demod);
   pthread_mutex_unlock(&demod->status_mutex);
-  
-  double new_lo2 = -(f - lo1 - demod->dial_offset);
-  double new_lo1;
-  // If the new LO2 is out of range, or if we're forced, recenter LO2
-  // and retune LO1
-  if(force || !LO2_in_range(demod,new_lo2,1)){
-    // Assume we'll keep tuning in the same direction
-    if(new_lo2 < 0)
-      new_lo2 = demod->status.samprate/4.;
-    else 
-      new_lo2 = -(demod->status.samprate/4.);
-    new_lo1 = f + new_lo2 - demod->dial_offset;
-    
-    // returns actual frequency, which may be a fraction of a Hz
-    // different from requested because of calibration offset and
-    // the fact that the tuner can only tune in 1 Hz steps
-    lo1 = set_first_LO(demod,new_lo1,force);
-    new_lo2 -= (lo1 - new_lo1);
-  }
-  // If front end doesn't retune don't retune LO2 either (e.g., recording)
-  if(LO2_in_range(demod,new_lo2,1))
-     set_second_LO(demod,new_lo2);
-  return f;
-}
 
-// Return current frequency, including dial offset
-const double get_freq(const struct demod *demod){
-  assert(demod != NULL);
-  return get_first_LO(demod) - get_second_LO(demod) + demod->dial_offset;
+  if(isnan(new_lo2) || !LO2_in_range(demod,new_lo2,0)){
+    new_lo2 = -(f - get_first_LO(demod) + demod->demod_offset);
+
+    // If the required new LO2 is out of range, recenter LO2 and retune LO1
+    if(!LO2_in_range(demod,new_lo2,1)){
+      // Assume we'll keep tuning in the same direction
+#if 0
+      if(new_lo2 < 0)
+	new_lo2 = demod->status.samprate/4.;
+      else 
+	new_lo2 = -(demod->status.samprate/4.);
+#else
+      // Experimentally fix IF to -48 kHz to check calibration offsets
+      new_lo2 = demod->status.samprate/4.;
+#endif    
+    }
+  }
+  double new_lo1 = f + new_lo2 + demod->demod_offset;
+    
+  // returns actual frequency, which may be a fraction of a Hz
+  // different from requested because of calibration offset and
+  // the fact that the tuner can only tune in 1 Hz steps
+  double actual_lo1 = set_first_LO(demod,new_lo1);
+  new_lo2 += (actual_lo1 - new_lo1);
+
+  // If front end doesn't retune don't retune LO2 either (e.g., recording)
+  if(LO2_in_range(demod,new_lo2,0))
+     set_second_LO(demod,new_lo2);
+
+  // Set to new actual frequency, rather than one requested
+  demod->frequency = get_first_LO(demod) - demod->second_LO - demod->demod_offset;
+
+  return demod->frequency;
 }
 
 // Preferred A/D sample rate; ignored by funcube but may be used by others someday
@@ -185,10 +180,10 @@ const int ADC_samprate = 192000;
 // Note: single precision floating point is not accurate enough at VHF and above
 // demod->first_LO isn't updated here, but by the
 // incoming status frames so it don't change right away
-double set_first_LO(struct demod *demod,double first_LO,int force){
+double set_first_LO(struct demod *demod,double first_LO){
   assert(demod != NULL);
   assert(!isnan(first_LO));
-  if(!force && first_LO == get_first_LO(demod))
+  if(first_LO == get_first_LO(demod))
     return first_LO;
 
   if(first_LO > 0){
@@ -270,7 +265,8 @@ double set_second_LO(struct demod *demod,double second_LO){
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
   // In case sample rate isn't set yet, just remember the frequency but don't divide by zero
   demod->second_LO_phasor_step = csincos(2*M_PI*second_LO/demod->samprate);
-  return demod->second_LO = second_LO;
+  demod->second_LO = second_LO;
+  return second_LO;
 }
 
 int set_mode(struct demod *demod,const char *mode,int defaults){
@@ -305,6 +301,10 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
     demod->high = tmp;
   }
   demod->flags = Modes[mindex].flags;
+  // Start these at zero, let the demod change them
+  demod->doppler = 0;
+  demod->demod_offset = 0;
+
   // Suppress these in display unless they're used
   demod->snr = NAN;
   demod->foffset = NAN;
@@ -318,10 +318,10 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
   pthread_mutex_unlock(&demod->status_mutex);
 
-  double lo2 = get_second_LO(demod);
+  double lo2 = demod->second_LO;
   // Might now be out of range because of change in filter passband
   if(!LO2_in_range(demod,lo2,1))
-   set_freq(demod,get_freq(demod),0);
+   set_freq(demod,demod->frequency,NAN);
 
   pthread_create(&demod->demod_thread,NULL,Modes[mindex].demod,demod);
   return 0;
@@ -332,14 +332,15 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
 // + means clock is fast, - means clock is slow
 int set_cal(struct demod *demod,double cal){
   assert(demod != NULL);
+  assert(!isnan(cal));
 
-  double f = get_freq(demod);
+  double f = demod->frequency;
   demod->calibrate = cal;
   // Don't get deadlocked if this is before we know the sample rate
   // e.g., with the -c command line option
   if(demod->status.samprate != 0){
     demod->samprate = demod->status.samprate * (1 + cal);
-    set_freq(demod,f,0);
+    set_freq(demod,f,NAN); // Keep original dial frequency
   }
   return 0;
 }
@@ -353,13 +354,16 @@ int spindown(struct demod *demod,complex float *data,int len){
   assert(!isnan(creal(demod->second_LO_phasor_step)) && !isnan(cimag(demod->second_LO_phasor_step)));
   assert(cnrm(demod->second_LO_phasor) != 0);
 
-  // Apply 2nd LO
+  // Apply 2nd LO, compute average pre-filter signal power
   int n;
+  float power = 0;
   for(n=0; n < len; n++){
     assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
     data[n] *= demod->second_LO_phasor;
+    power += crealf(data[n]) * crealf(data[n]) + cimagf(data[n])*cimagf(data[n]);
     demod->second_LO_phasor *= demod->second_LO_phasor_step;
   }
+  demod->power = power / len;
   // Renormalize to guard against accumulated roundoff error
   demod->second_LO_phasor /= cabs(demod->second_LO_phasor);
   return 0;
