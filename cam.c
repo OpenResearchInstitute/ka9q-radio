@@ -84,7 +84,15 @@ void *demod_cam(void *arg){
     double const freqerror = -0.01 * carg(phase * conj(lastphase)) * M_1_2PI * demod->samprate/filter->ilen;
     assert(!isnan(freqerror));
     lastphase = phase;
-    set_second_LO(demod,-freqerror + demod->second_LO);
+    if(demod->flags & CAL){
+      // Keep same dial frequency, adjust calibration with stiffer response
+      if(demod->frequency != 0)
+	set_cal(demod,demod->calibrate - freqerror/(10. * demod->frequency));
+    } else {
+      // Retune second LO (and RF frequency)
+      demod->demod_offset += freqerror;
+      set_freq(demod,demod->frequency,NAN);
+    }
 
     // Remove carrier DC
     // AM AGC is carrier-driven
