@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.69 2017/08/12 09:07:37 karn Exp karn $
+// $Id: main.c,v 1.70 2017/08/13 06:06:59 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -101,6 +101,7 @@ int main(int argc,char *argv[]){
   strlcpy(demod->audio->audio_mcast_address_text,"239.2.1.1",sizeof(demod->audio->audio_mcast_address_text));
   demod->tunestep = 0;  // single digit hertz position
   demod->calibrate = 0;
+  demod->imbalance = 1; // 0 dB
 
   // set invalid to start
   demod->input_source_address.sa_family = -1; // Set invalid
@@ -232,9 +233,10 @@ int main(int argc,char *argv[]){
   // Actually set the mode and frequency already specified
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
   fprintf(stderr,"Waiting for SDR response...\n");
-  set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
-  set_freq(demod,demod->start_freq,0);
+  set_freq(demod,demod->start_freq,NAN);
   demod->start_freq = 0;
+  set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
+
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -396,7 +398,7 @@ int savestate(struct demod *dp,char const *filename){
   }
   fprintf(fp,"Blocksize %d\n",dp->L);
   fprintf(fp,"Impulse len %d\n",dp->M);
-  fprintf(fp,"Frequency %.3f Hz\n",get_freq(dp));
+  fprintf(fp,"Frequency %.3f Hz\n",dp->frequency);
   fprintf(fp,"Mode %s\n",dp->mode);
   fprintf(fp,"Dial offset %.3f Hz\n",dp->dial_offset);
   fprintf(fp,"Filter low %.3f Hz\n",dp->low);
