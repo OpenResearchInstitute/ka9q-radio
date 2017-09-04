@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.22 2017/08/10 10:48:04 karn Exp karn $
+// $Id: filter.c,v 1.23 2017/08/12 08:49:40 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -97,7 +97,10 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
 #endif
       }
     }
-  }
+    f->noise_gain = noise_gain(f);
+  } else
+    f->noise_gain = NAN;
+
   switch(out_type){
   default:
   case COMPLEX:
@@ -152,6 +155,11 @@ struct filter *create_filter_slave(const struct filter * master,complex float * 
   f->input_buffer.c = master->input_buffer.c;
   f->input.c = master->input.c;
   f->response = response;
+  if(response != NULL)
+    f->noise_gain = noise_gain(f);
+  else
+    f->noise_gain = NAN;
+  
   switch(f->out_type){
   default:
   case COMPLEX:
@@ -496,6 +504,35 @@ int window_rfilter(const int L,const int M,complex float * const response,const 
   return 0;
 }
 
+// Gain of filter (output / input) on uniform gaussian noise
+float const noise_gain(struct filter const *filter){
+  if(filter == NULL)
+    return 0;
+  const int N = filter->ilen + filter->impulse_length - 1;
+  const int N_dec = N / filter->decimate;
+
+  float sum = 0;
+  if(filter->out_type != REAL){
+    int i;
+    for(i=0;i<N_dec;i++)
+      sum += cnrmf(filter->response[i]);
+  } else {
+    int i;
+    for(i=0;i<N_dec/2+1;i++)
+      sum += cnrmf(filter->response[i]);
+  }
+  // the factor N compensates for the unity gain scaling
+  // Amplitude is pre-scaled 1/N for the concatenated (FFT/IFFT) round trip, so the overall power
+  // is scaled 1/N^2. Multiplying by N gives us correct power in the frequency domain (just the FFT)
+
+  // The factor of 2 undoes the 1/sqrt(2) amplitude scaling required for unity signal gain in these two modes
+  if(filter->out_type == REAL || filter->out_type == CROSS_CONJ)
+    return 2*N*sum;
+  else
+    return N*sum;
+}
+
+
 int set_filter(struct filter *filter,float dsamprate,float low,float high,float kaiser_beta){
   assert(filter != NULL);
   
@@ -505,7 +542,7 @@ int set_filter(struct filter *filter,float dsamprate,float low,float high,float 
   int const N = filter->ilen + filter->impulse_length - 1;
 
   float gain = 1./((float)N);
-#if 0
+#if 1
   if(filter->out_type == REAL || filter->out_type == CROSS_CONJ)
     gain *= M_SQRT1_2;
 #endif
@@ -528,6 +565,7 @@ int set_filter(struct filter *filter,float dsamprate,float low,float high,float 
   pthread_mutex_lock(&filter->mutex);
   complex float *tmp = filter->response;
   filter->response = response;
+  filter->noise_gain = noise_gain(filter);
   pthread_mutex_unlock(&filter->mutex);
   fftwf_free(tmp);
 
