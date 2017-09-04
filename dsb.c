@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.10 2017/08/06 05:32:16 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.11 2017/08/10 10:48:04 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -116,6 +116,7 @@ void *demod_dsb(void *arg){
     demod->second_LO_phasor = updated_LO_phasor /= cabs(updated_LO_phasor); // Save renormalized
     demod->second_LO_phasor_step = LO_phasor_step /= cabs(LO_phasor_step);
     demod->second_LO = M_1_2PI * demod->samprate * carg(demod->second_LO_phasor_step); // phase step converted to Hz
+    demod->demod_offset = get_first_LO(demod) - demod->second_LO - demod->doppler - demod->frequency;
 
     // Rotate signal onto I axis, compute signal (I) and noise (Q) levels
     float amplitude = 0;
