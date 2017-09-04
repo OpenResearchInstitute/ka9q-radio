@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.72 2017/08/25 19:48:29 karn Exp $
+// $Id: display.c,v 1.72 2017/09/02 05:48:30 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -120,65 +120,63 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
   switch(tuneitem){
   case 0: // Dial frequency
     if(!demod->frequency_lock) // Ignore if locked
-      set_freq(demod,get_freq(demod) + tunestep,0);
+      set_freq(demod,demod->frequency + tunestep,NAN);
     break;
-  case 1: // First LO
+  case 1: // Open loop doppler
+    demod->doppler += tunestep;
+    set_freq(demod,demod->frequency,NAN);
+    break;
+  case 2: // Demodulator auto-track offset (CAM, DSB, etc)
+    demod->demod_offset += tunestep;
+    set_freq(demod,demod->frequency,NAN);
+    break;
+  case 3: // First LO
     if(fabs(tunestep) < 1)
       break; // First LO can't make steps < 1  Hz
     
     if(demod->frequency_lock){
-      // See how much we'll have to retune LO2 to stay on frequency
-      double new_lo2 = get_second_LO(demod) + tunestep * (1 + demod->calibrate);
-      if(LO2_in_range(demod,new_lo2,0)){
-	// This waits for it to actually change, minimizing the glitch that would
-	// otherwise happen if we changed LO2 first
-	set_first_LO(demod, get_first_LO(demod) + tunestep * (1 + demod->calibrate),0);
-	// Change LO2 by actual amount of LO1 change
-	set_second_LO(demod,new_lo2);
-      } // else ignore; LO2 would be out-of-range
-    } else
-      set_first_LO(demod, get_first_LO(demod) + tunestep * (1 + demod->calibrate),0);
-
-    break;
-  case 2: // IF
-    ; // needed because next line is declaration
-    double new_lo2 = get_second_LO(demod);
-
-    if(demod->frequency_lock){
-      if(fabs(tunestep) < 1)
-	break;	  // First LO can't maintain locked dial frequency with steps < 1  Hz
-      
-      new_lo2 -= tunestep * (1 + demod->calibrate); // Accomodate actual change in LO1
-      if(!LO2_in_range(demod,new_lo2,0))
-	break; // Ignore command to tune IF out of range
-      set_first_LO(demod, get_first_LO(demod) - tunestep * (1 + demod->calibrate),0);
+      // Keep frequency but lower LO2, which will increase LO1
+      double new_lo2 = demod->second_LO - tunestep;
+      if(LO2_in_range(demod,new_lo2,0))
+	set_freq(demod,demod->frequency,new_lo2);
     } else {
-      new_lo2 -= tunestep;
+      // Retune radio but keep IF the same
+      set_freq(demod,demod->frequency + tunestep,demod->second_LO);
     }
-    if(LO2_in_range(demod,new_lo2,0))
-      set_second_LO(demod,new_lo2); // Ignore if out of range
     break;
-  case 3: // Dial offset
+  case 4: // IF
+    ; // needed because next line is declaration
+    double new_lo2 = demod->second_LO - tunestep;
+    if(LO2_in_range(demod,new_lo2,0)){ // Ignore if out of range
+      if(demod->frequency_lock){
+	set_freq(demod,demod->frequency,new_lo2);
+      } else {
+	// Vary RF and IF together to keep LO1 the same
+	set_freq(demod,demod->frequency + tunestep,new_lo2);
+      }
+    }
+    break;
+  case 5: // Dial offset
     demod->dial_offset += tunestep;
     break;
-  case 4: // Calibrate offset
+  case 6: // Calibrate offset
     set_cal(demod,demod->calibrate + tunestep * 1e-6); // ppm
     break;
-  case 5: // Filter low edge
+  case 7: // Filter low edge
     demod->low += tunestep;
     set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
-  case 6: // Filter high edge
+  case 8: // Filter high edge
     demod->high += tunestep;
     set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
-  case 7: // Kaiser window beta parameter for filter
+  case 9: // Kaiser window beta parameter for filter
     if(demod->kaiser_beta + tunestep >= 0.0){
       demod->kaiser_beta += tunestep;
       set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     }
     break;
-  case 8: // Spare for experimentation
+  case 10: // Spare for experimentation
     if(Spare + tunestep > -demod->samprate/2 && Spare + tunestep < demod->samprate/2){
       Spare += tunestep;
       // Experimental notch filter
@@ -211,8 +209,8 @@ void *display(void *arg){
   cbreak();
   noecho();
 
-  WINDOW * const fw = newwin(11,70,0,0);    // Frequency information
-  WINDOW * const sig = newwin(11,40,12,0); // Signal information
+  WINDOW * const fw = newwin(13,70,0,0);    // Frequency information
+  WINDOW * const sig = newwin(11,40,14,0); // Signal information
   WINDOW * const sdr = newwin(17,40,6,40); // SDR information
   WINDOW * const status = newwin(5,40,0,40); // Misc status information
   
@@ -231,16 +229,18 @@ void *display(void *arg){
     // using the keyboard or tuning knob, so be careful with formatting
     wmove(fw,0,0);
     wclrtobot(fw);
-    wprintw(fw,"Frequency   %'17.3f Hz",get_freq(demod));
+    wprintw(fw,"Frequency   %'17.3f Hz",demod->frequency+ demod->dial_offset);
     if(demod->frequency_lock)
       wprintw(fw," LOCK");
 
     wprintw(fw,"\n");
       
+    wprintw(fw,"Doppler     %'17.3f Hz\n",demod->doppler);
+    wprintw(fw,"Demod offs  %'17.3f Hz\n",demod->demod_offset);
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
     wprintw(fw,"First LO    %'17.3f Hz\n",get_first_LO(demod));
-    wprintw(fw,"IF          %'17.3f Hz\n",-get_second_LO(demod));
+    wprintw(fw,"IF          %'17.3f Hz\n",-demod->second_LO);
     wprintw(fw,"Dial offset %'17.3f Hz\n",demod->dial_offset);
     wprintw(fw,"Calibrate   %'17.3f ppm\n",demod->calibrate *1e6);
     wprintw(fw,"Filter low  %'17.3f Hz\n",demod->low);
@@ -276,8 +276,8 @@ void *display(void *arg){
     wclrtobot(status);     // clear previous stuff in case we stop showing the last lines
     // Display ham band emission data, if available
     struct bandplan const *bp_low,*bp_high;
-    bp_low = lookup_frequency(get_freq(demod)+demod->low);
-    bp_high = lookup_frequency(get_freq(demod)+demod->high);
+    bp_low = lookup_frequency(demod->frequency+demod->low);
+    bp_high = lookup_frequency(demod->frequency+demod->high);
     // Make sure entire receiver passband is in the band
     if(bp_low != NULL && bp_high != NULL){
       struct bandplan intersect;
@@ -310,14 +310,14 @@ void *display(void *arg){
 	wprintw(status,"Novice ");
       wprintw(status,"\n");
     }
-    if(!LO2_in_range(demod,get_second_LO(demod),1)){
+    if(!LO2_in_range(demod,demod->second_LO,1)){
       // LO2 is near its edges where signals from the opposite edge
       // get aliased; warn about this
       double alias;
-      if(get_second_LO(demod) > 0)
-	alias = get_first_LO(demod) - get_second_LO(demod) + demod->samprate;
+      if(demod->second_LO > 0)
+	alias = get_first_LO(demod) - demod->second_LO + demod->samprate;
       else
-	alias = get_first_LO(demod) - get_second_LO(demod) - demod->samprate;	
+	alias = get_first_LO(demod) - demod->second_LO - demod->samprate;	
       wprintw(status,"alias %'.3f Hz\n",alias);
     }
     wnoutrefresh(status);
@@ -327,20 +327,27 @@ void *display(void *arg){
     wmove(sig,0,0);
     wclrtobot(sig);     // clear previous stuff in case we stop showing the last lines
     wprintw(sig,"Mode    %10s\n",demod->mode);
-    wprintw(sig,"IF      %10.1f dBFS\n",power2dB(demod->power_i + demod->power_q));
-    wprintw(sig,"Baseband%10.1f dBFS\n",voltage2dB(demod->amplitude));
+    // Do this math in double precision to minimize loss of resolution
+    // when we subtract two nearly equal quantities, e.g., IF and baseband powers
+    double sigpower = demod->amplitude * demod->amplitude;
+    wprintw(sig,"IF      %10.1f dBFS\n",power2dB(demod->power));
+    wprintw(sig,"Baseband%10.1f dBFS\n",power2dB(sigpower));
+    if(demod->filter != NULL){
+      double bw = demod->samprate * demod->filter->noise_gain;
+      wprintw(sig,"NBW     %10.1lf Hz\n",bw);
+
+      // Noise density assuming only noise outside passband
+      // Will probably work well on UHF and microwave, not so well on HF
+      double n0 = (demod->power - sigpower) / (demod->samprate - bw);
+      wprintw(sig,"N0      %10.1f dB/Hz\n",power2dB(n0));
+      double sn0 = sigpower / n0 - bw;
+      wprintw(sig,"S/N0    %10.1f dB\n",power2dB(sn0));
+    }
     wprintw(sig,"AF Gain %10.1f dB\n",voltage2dB(demod->gain));
-#if 0
-    // Ratio of baseband to IF power, adjusted for bandwidth ratios
-    // Gives good SNR estimate **only** when there are no out-of-band signals
-    // and the noise bandwidth of the filter is close to fabs(high-low), which is
-    // probably not true for small bandwidths (should probably adjust for Kaiser beta)
-    float n0 = ((demod->power_i + demod->power_q) - (demod->amplitude * demod->amplitude))
-      / (demod->samprate - fabs(demod->high-demod->low));
-#endif
+
     // Display these only if they're in use by the current mode
     if(!isnan(demod->snr))
-      wprintw(sig,"SNR     %10.1f dB\n",power2dB(demod->snr));
+      wprintw(sig,"SNRd    %10.1f dB\n",power2dB(demod->snr));
 
     if(!isnan(demod->foffset))
       wprintw(sig,"offset  %+10.1f Hz\n",demod->foffset);
@@ -376,7 +383,7 @@ void *display(void *arg){
     wprintw(sdr,"Samprate%'13d Hz\n",demod->status.samprate); // Nominal
     wprintw(sdr,"I offset%13.6f\n",demod->DC_i);  // Scaled to +/-1
     wprintw(sdr,"Q offset%13.6f\n",demod->DC_q);
-    wprintw(sdr,"I/Q imbal%12.3f dB\n",power2dB(demod->power_i/demod->power_q));
+    wprintw(sdr,"I/Q imbal%12.3f dB\n",power2dB(demod->imbalance));
     wprintw(sdr,"I/Q phi%14.5f rad\n",demod->sinphi);
     wprintw(sdr,"LNA%18u\n",demod->status.lna_gain);   // SDR dependent
     wprintw(sdr,"Mix gain%13u\n",demod->status.mixer_gain); // SDR dependent
@@ -484,11 +491,11 @@ void *display(void *arg){
       break;
     case KEY_NPAGE: // Page Down/tab key
     case '\t':      // go to next tuning item
-      tuneitem = (tuneitem + 1) % 9;
+      tuneitem = (tuneitem + 1) % 11;
       break;
     case KEY_BTAB:  // Page Up/Backtab, i.e., shifted tab:
     case KEY_PPAGE: // go to previous tuning item
-      tuneitem = (9 + tuneitem - 1) % 9;
+      tuneitem = (11 + tuneitem - 1) % 11;
       break;
     case KEY_HOME: // Go back to item 0
       tuneitem = 0;
@@ -567,20 +574,20 @@ void *display(void *arg){
 	if(f > 0){
 	  // If frequency would be out of range, guess kHz or MHz
 	  if(f >= 0.1 && f < 100)
-	    set_freq(demod,f*1e6,0); // 0.1 - 99.999 Only MHz can be valid
+	    set_freq(demod,f*1e6,NAN); // 0.1 - 99.999 Only MHz can be valid
 	  else if(f < 500)         // 100-499.999 could be kHz or MHz, assume MHz
-	    set_freq(demod,f*1e6,0);
+	    set_freq(demod,f*1e6,NAN);
 	  else if(f < 2000)        // 500-1999.999 could be kHz or MHz, assume kHz
-	    set_freq(demod,f*1e3,0);
+	    set_freq(demod,f*1e3,NAN);
 	  else if(f < 100000)      // 2000-99999.999 can only be kHz
-	    set_freq(demod,f*1e3,0);
+	    set_freq(demod,f*1e3,NAN);
 	  else                     // accept directly
-	    set_freq(demod,f,0); 
+	    set_freq(demod,f,NAN);
 	}
       }
       break;
     case 'i':    // Recenter IF to +/- samprate/4
-      set_freq(demod,get_freq(demod),1);
+      set_freq(demod,demod->frequency,demod->samprate/4);
       break;
     case 'u': // Display update rate
       {
