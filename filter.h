@@ -1,4 +1,4 @@
-// $Id$
+// $Id: filter.h,v 1.13 2017/08/10 10:48:04 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -35,6 +35,7 @@ struct filter {
   complex float *response;           // Filter response in frequency domain
   complex float *fdomain;            // Signal in frequency domain
   complex float *f_fdomain;          // Filtered signal in frequency domain
+  float noise_gain;                  // Filter gain on uniform noise (ratio < 1)
   union rc input_buffer;             // Actual time-domain input buffer, length N = L + M - 1
   union rc input;                    // Beginning of user input area, length L
   union rc output_buffer;            // Actual time-domain output buffer, length N/decimate
@@ -56,6 +57,7 @@ int execute_filter_nocopy(struct filter *);
 int delete_filter(struct filter *);
 int make_kaiser(float *window,int M,float beta);
 int set_filter(struct filter *,float,float,float,float);
+float const noise_gain(struct filter const *);
 
 
 // Experimental complex notch filter
