@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.33 2017/08/10 10:48:04 karn Exp karn $
+// $Id: fm.c,v 1.34 2017/08/11 16:21:24 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -85,34 +85,33 @@ void *demod_fm(void *arg){
 
   while(!demod->terminate){
     fillbuf(demod,filter->input.c,filter->ilen);
-    spindown(demod,filter->input.c,filter->ilen); // 2nd LO
+    demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
+    demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
+    demod->bb_power = cpower(filter->output.c,filter->olen);
+    float const n0 = compute_n0(demod);
+    demod->n0 += .01 * (n0 - demod->n0);
 
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
 
     demod->gain = (demod->headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
-    // Find average magnitude and magnitude^2
+    // Find average magnitude
+    // We also need average magnitude^2, but we have that from demod->bb_power
     // Approximate for SNR because magnitude has a chi-squared distribution with 2 degrees of freedom
-    float avg_squares = 0;
     float avg = 0;
     int n;
-    for(n=0;n<filter->olen;n++){
-      float const magsq = cnrmf(filter->output.c[n]); // I^2 + Q^2
-      avg_squares += magsq;
-      avg += sqrtf(magsq);            // magnitude
-    }
-    avg_squares /= filter->olen; // Average square magnitude
+    for(n=0;n<filter->olen;n++)
+      avg += cabs(filter->output.c[n]);        // magnitude
+    
     avg /= filter->olen;         // Average magnitude
-    demod->amplitude = avg;
-    float const fm_variance = avg_squares - avg*avg;
-    demod->noise = sqrtf(fm_variance);
+    float const fm_variance = demod->bb_power - avg*avg;
     demod->snr = avg*avg/(2*fm_variance) - 1;
     if(demod->snr > 2){
       float avg = 0;
       // 0.55 is empirical constant, 0.5 to 0.6 seems to sound good
       // Square amplitudes are compared to avoid sqrt inside loop
-      float const ampl = (0.55 * demod->amplitude)*(0.55 * demod->amplitude);
+      float const ampl = 0.55 * 0.55 * avg * avg;
       assert(filter->olen == plfilter->ilen);
       // Actual FM demodulation, with impulse noise blanking
       float pdev_pos = 0;
