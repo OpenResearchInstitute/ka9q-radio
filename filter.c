@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.23 2017/08/12 08:49:40 karn Exp karn $
+// $Id: filter.c,v 1.24 2017/09/04 00:35:58 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -183,15 +183,10 @@ struct filter *create_filter_slave(const struct filter * master,complex float * 
   return f;
 }
 
-// Execute the filter after the input buffer has been loaded
-int execute_filter(struct filter * const f){
-  if(f == NULL)
-    return -1;
-  execute_filter_nocopy(f);
-  if(f->slave)
-    return 0; // done, no time domain input buffer
 
-  // Perform overlap-and-save operation for fast convolution; note memmove is non-destructive
+// Perform overlap-and-save operation for fast convolution; note memmove is non-destructive
+// This "commits" the filter by updating hidden state
+int commit_filter(struct filter *f){
   switch(f->in_type){
   default:
   case COMPLEX:
@@ -201,6 +196,17 @@ int execute_filter(struct filter * const f){
     memmove(f->input_buffer.r,f->input_buffer.r + f->ilen,(f->impulse_length - 1)*sizeof(*f->input_buffer.r));
     break;
   }
+  return 0;
+}
+
+
+// Execute the filter after the input buffer has been loaded
+int execute_filter(struct filter *f){
+  if(f == NULL)
+    return -1;
+  execute_filter_nocopy(f);
+  if(!f->slave)
+    commit_filter(f);
   return 0;
 }
 

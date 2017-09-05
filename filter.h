@@ -1,4 +1,4 @@
-// $Id: filter.h,v 1.13 2017/08/10 10:48:04 karn Exp karn $
+// $Id: filter.h,v 1.14 2017/09/04 00:34:29 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -52,6 +52,7 @@ int window_rfilter(int L,int M,complex float *response,float beta);
 
 struct filter *create_filter(int,int,complex float *,int,enum filtertype,enum filtertype);
 struct filter *create_filter_slave(const struct filter *,complex float *,int);
+int commit_filter(struct filter *);
 int execute_filter(struct filter *);
 int execute_filter_nocopy(struct filter *);
 int delete_filter(struct filter *);
