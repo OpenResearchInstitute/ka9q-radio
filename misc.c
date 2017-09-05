@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.14 2017/08/02 07:44:19 karn Exp karn $
+// $Id: misc.c,v 1.15 2017/08/04 03:35:55 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -17,6 +17,15 @@
 #endif
 
 #include "radio.h"
+
+double const angle_mod(double x){
+  if(x > M_PI)
+    x -= 2*M_PI;
+  else if(x < -M_PI)
+    x += 2*M_PI;
+  return x;
+}
+
 
 // return unit magnitude complex number with phase x radians
 const complex float csincosf(const float x){
@@ -51,8 +60,8 @@ const double cnrm(const complex double x){
   return creal(x)*creal(x) + cimag(x) * cimag(x);
 }
 
-// Root-mean-square of an array of floats
-const float amplitude(const float *data,const int len){
+// Average power in an array of real floats
+const float rpower(const float *data,const int len){
   float sum = 0;  
   int n;
   
@@ -60,11 +69,11 @@ const float amplitude(const float *data,const int len){
     return 0;
   for(n=0; n < len; n++)
     sum += data[n] * data[n];
-  return sqrtf(sum/len);
+  return sum/len;
 }
 
-// Root-mean-square of the magnitudes of an array of complex floats
-const float camplitude(const complex float *data, const int len){
+// Average power in an array of complex floats
+const float cpower(const complex float *data, const int len){
   float amplitude = 0;
   int n;
 
@@ -73,7 +82,7 @@ const float camplitude(const complex float *data, const int len){
   for(n=0; n < len; n++)
     amplitude += cnrmf(data[n]);
 
-  return sqrtf(amplitude/len);
+  return amplitude/len;
 }
 
 // Fill buffer from pipe
