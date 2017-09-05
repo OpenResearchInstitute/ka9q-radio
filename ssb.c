@@ -48,15 +48,18 @@ void *demod_ssb(void *arg){
 	filter->input.c[i] = notch(nf,filter->input.c[i]);
     }
 #endif
-    spindown(demod,filter->input.c,filter->ilen); // 2nd LO
+    demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
+    demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
+    demod->bb_power = rpower(filter->output.r,filter->olen);
+    float n0 = compute_n0(demod);
+    demod->n0 += .01 * (n0 - demod->n0);
+
     // Automatic gain control
-    demod->amplitude = amplitude(filter->output.r,filter->olen);
-    float const snn = demod->amplitude / demod->noise; // (S+N)/N amplitude ratio
-    demod->snr = (snn*snn) -1; // S/N as power ratio
-    if(demod->gain * demod->amplitude > demod->headroom){ // Target to about -10 dBFS
+    float amplitude = sqrtf(demod->bb_power);
+    if(demod->gain * amplitude > demod->headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
-      demod->gain = demod->headroom / demod->amplitude;
+      demod->gain = demod->headroom / amplitude;
       hangcount = hangmax;
     } else {
       // Not a new peak, but the AGC is still hanging at the last peak
