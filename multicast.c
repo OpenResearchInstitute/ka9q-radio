@@ -79,7 +79,7 @@ int setup_mcast(char const *target,int output){
   struct addrinfo *results = NULL;
   int ecode;
   if((ecode = getaddrinfo(host,port,&hints,&results)) != 0){
-    fprintf(stderr,"setup_input getaddrinfo(%s,%s): %s\n",host,port,gai_strerror(ecode));
+    fprintf(stderr,"setup_mcast getaddrinfo(%s,%s): %s\n",host,port,gai_strerror(ecode));
     return -1;
   }
   struct addrinfo *resp;
