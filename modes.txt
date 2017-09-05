@@ -19,3 +19,4 @@ USB          SSB         +300          +3000          0
 CWU          SSB         +200           +600       +400
 LSB          SSB        -3000           -300          0
 CWL          SSB         -600           -200       -400
+CAL	     CAM	 -3000		+3000	      0       CAL
