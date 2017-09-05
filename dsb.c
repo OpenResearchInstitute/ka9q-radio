@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.11 2017/08/10 10:48:04 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.12 2017/09/04 00:37:15 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -29,13 +29,11 @@ void *demod_dsb(void *arg){
   int hangcount = 0;
   float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
   int const hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
-  int const mm1 = demod->M - 1;
   float lastblock_angle = NAN;
-  int const N = demod->L + mm1;
 
   demod->gain = dB2voltage(70.);
 
-  struct filter * const filter = create_filter(demod->L,mm1+1,NULL,demod->decimate,COMPLEX,COMPLEX);
+  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
@@ -45,34 +43,21 @@ void *demod_dsb(void *arg){
   float kaiser_window[filter->olen];
   make_kaiser(kaiser_window,filter->olen,demod->kaiser_beta);
 
-  // This filter is unconventional because we iterate on the second LO, which means we
-  // have to recompute the *entire* filter input buffer every time
-  complex float if_samples[N];
-  fillbuf(demod,if_samples+filter->ilen,mm1); // Prime the pump
   while(!demod->terminate){
-    memmove(if_samples,if_samples+filter->ilen,mm1*sizeof(*if_samples)); // Re-copy the overlap so we can downconvert it again
     // New samples
-    fillbuf(demod,if_samples+mm1,filter->ilen);
+    complex float if_samples[filter->ilen];
+    fillbuf(demod,if_samples,filter->ilen);
 
-    complex double LO_phasor_step = demod->second_LO_phasor_step;
     int tries;
-    complex double updated_LO_phasor = NAN; // LO phase after M-1 sample, needed for next block if we're successful
+    complex double LO_phasor;
     for(tries=0;tries<10;tries++){
 
-      // Apply 2nd LO, filling *entire* filter input buffer
-      complex double LO_phasor = demod->second_LO_phasor;
-
-      int n;
-      for(n=0; n < N; n++){
-	assert(!isnan(crealf(if_samples[n])) && !isnan(cimagf(if_samples[n])));
-	filter->input_buffer.c[n] = if_samples[n] * LO_phasor;
-	LO_phasor *= LO_phasor_step;
-	if(n == mm1 - 1)
-	  updated_LO_phasor = LO_phasor; // Starting LO phase for next block if we're successful
-      }
-      execute_filter_nocopy(filter); // Stateless execution (no overlap)
+      // Tentatively apply 2nd LO
+      LO_phasor = spindown(demod,if_samples);
+      execute_filter_nocopy(filter); // Stateless execution (don't commit state)
       
       // Perform FFT on squares to ensure peak is in DC bin; extract phase
+      int n;
       for(n=0; n < filter->olen; n++){
 	complex float const s = filter->output.c[n];
 	fftbuf[n] = s * s * kaiser_window[n];
@@ -94,29 +79,29 @@ void *demod_dsb(void *arg){
 	break;
       // Coarse retune to correct bin and retry. Each bin is one full cycle per input buffer
       double const delta_f = maxbin / (2.0 * filter->ilen); // cycles per input sample, with /2 for squaring
-      LO_phasor_step *= csincos(-delta_f * 2 * M_PI); // rad per input sample
+      set_offset(demod,demod->demod_offset + delta_f); // Adjusts second LO for new offset
       lastblock_angle = NAN; // Don't do fine tuning on next iteration
     }
+    // Do this only when we're done iterating
+    demod->second_LO_phasor = LO_phasor; // Commit LO
+    commit_filter(filter);
+    demod->bb_power = cpower(filter->output.c,filter->olen);
+    float n0 = compute_n0(demod);
+    demod->n0 += .01 * (n0 - demod->n0);
+
     float const angle = cargf(fftbuf[0])/2; // DC carrier phase  in current block
     if(!isnan(lastblock_angle)){ // Only if last block wasn't a coarse retune
       // Perform fine frequency adjustment
       // How much the phase changed from the last block gives us
       // the frequency offset
-      double pdiff = angle - lastblock_angle;
-      if(pdiff > M_PI)
-	pdiff -= 2*M_PI;
-      else if(pdiff < -M_PI)
-	pdiff += 2*M_PI;
+      double pdiff = angle_mod(angle - lastblock_angle);
       
-      demod->cphase = pdiff;
-      LO_phasor_step *= csincos(-pdiff / filter->ilen); // pdiff radians in one input blk
+      demod->cphase = pdiff; // Radians per block
+      pdiff *= demod->samprate / (2 * M_PI * filter->ilen); // cycles per second
+      set_offset(demod,demod->demod_offset + 0.25 * pdiff); // Ad hoc constant!!
     }
     lastblock_angle = angle; // Save for comparison with next block
     complex float const phase = csincosf(-angle);
-    demod->second_LO_phasor = updated_LO_phasor /= cabs(updated_LO_phasor); // Save renormalized
-    demod->second_LO_phasor_step = LO_phasor_step /= cabs(LO_phasor_step);
-    demod->second_LO = M_1_2PI * demod->samprate * carg(demod->second_LO_phasor_step); // phase step converted to Hz
-    demod->demod_offset = get_first_LO(demod) - demod->second_LO - demod->doppler - demod->frequency;
 
     // Rotate signal onto I axis, compute signal (I) and noise (Q) levels
     float amplitude = 0;
@@ -127,18 +112,17 @@ void *demod_dsb(void *arg){
       amplitude += crealf(rsamp) * crealf(rsamp);
       noise += cimagf(rsamp) * cimagf(rsamp);
     }
-    // RMS signal+noise and noise amplitudes
+    // signal+noise and noise powers
     amplitude /= filter->olen;
     noise /= filter->olen;
-    demod->amplitude = sqrtf(amplitude); // RMS amplitude of I channel
-    demod->noise = sqrtf(noise);         // RMS amplitude of Q channel
     demod->snr = (amplitude / noise) - 1; // S/N as power ratio
 
+    float totampl = sqrtf(amplitude + noise);
+
     // Q is on the right channel, so use both I and Q for gain setting so we don't blast our ears when the phase is wrong
-    if(demod->gain * sqrtf(amplitude+noise) > demod->headroom){ // Target to about -10 dBFS
+    if(demod->gain * totampl > demod->headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
-      //      demod->gain = demod->headroom / demod->amplitude;
-      demod->gain = demod->headroom / sqrtf(amplitude + noise);
+      demod->gain = demod->headroom / totampl;
       hangcount = hangmax;
     } else {
       // Not a new peak, but the AGC is still hanging at the last peak
