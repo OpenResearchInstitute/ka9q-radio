@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.72 2017/09/02 05:48:30 karn Exp karn $
+// $Id: display.c,v 1.73 2017/09/04 00:43:34 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -127,8 +127,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     set_freq(demod,demod->frequency,NAN);
     break;
   case 2: // Demodulator auto-track offset (CAM, DSB, etc)
-    demod->demod_offset += tunestep;
-    set_freq(demod,demod->frequency,NAN);
+    set_offset(demod,demod->demod_offset + tunestep);
     break;
   case 3: // First LO
     if(fabs(tunestep) < 1)
@@ -210,7 +209,7 @@ void *display(void *arg){
   noecho();
 
   WINDOW * const fw = newwin(13,70,0,0);    // Frequency information
-  WINDOW * const sig = newwin(11,40,14,0); // Signal information
+  WINDOW * const sig = newwin(13,40,14,0); // Signal information
   WINDOW * const sdr = newwin(17,40,6,40); // SDR information
   WINDOW * const status = newwin(5,40,0,40); // Misc status information
   
@@ -327,28 +326,26 @@ void *display(void *arg){
     wmove(sig,0,0);
     wclrtobot(sig);     // clear previous stuff in case we stop showing the last lines
     wprintw(sig,"Mode    %10s\n",demod->mode);
-    // Do this math in double precision to minimize loss of resolution
-    // when we subtract two nearly equal quantities, e.g., IF and baseband powers
-    double sigpower = demod->amplitude * demod->amplitude;
-    wprintw(sig,"IF      %10.1f dBFS\n",power2dB(demod->power));
-    wprintw(sig,"Baseband%10.1f dBFS\n",power2dB(sigpower));
+    wprintw(sig,"IF      %10.1f dBFS\n",power2dB(demod->if_power));
+    wprintw(sig,"Baseband%10.1f dBFS\n",power2dB(demod->bb_power));
     if(demod->filter != NULL){
-      double bw = demod->samprate * demod->filter->noise_gain;
-      wprintw(sig,"NBW     %10.1lf Hz\n",bw);
+      float bw = demod->samprate * demod->filter->noise_gain;
 
       // Noise density assuming only noise outside passband
       // Will probably work well on UHF and microwave, not so well on HF
-      double n0 = (demod->power - sigpower) / (demod->samprate - bw);
-      wprintw(sig,"N0      %10.1f dB/Hz\n",power2dB(n0));
-      double sn0 = sigpower / n0 - bw;
-      wprintw(sig,"S/N0    %10.1f dB\n",power2dB(sn0));
+      wprintw(sig,"N0      %10.1f dBFS/Hz\n",power2dB(demod->n0));
+      float sn0 = demod->bb_power / demod->n0 - bw;
+      wprintw(sig,"S/N0    %10.1f dB-Hz\n",10*log10f(sn0));
+      wprintw(sig,"NBW     %10.1f dB-Hz\n",10*log10f(bw));
+      wprintw(sig,"SNRbb   %10.1f dB\n",10*log10f(sn0/bw));
     }
-    wprintw(sig,"AF Gain %10.1f dB\n",voltage2dB(demod->gain));
 
     // Display these only if they're in use by the current mode
     if(!isnan(demod->snr))
-      wprintw(sig,"SNRd    %10.1f dB\n",power2dB(demod->snr));
+      wprintw(sig,"SNRdem  %10.1f dB\n",power2dB(demod->snr));
 
+    wprintw(sig,"AF Gain %10.1f dB\n",voltage2dB(demod->gain));
+    
     if(!isnan(demod->foffset))
       wprintw(sig,"offset  %+10.1f Hz\n",demod->foffset);
 
@@ -546,9 +543,6 @@ void *display(void *arg){
 	if(ptr != str)
 	  set_cal(demod,f * 1e-6);
       }
-      break;
-    case 'n':   // Set noise reference to current amplitude; hit with no sig
-      demod->noise = demod->amplitude;
       break;
     case 'm':   // Select demod mode from list. Note: overwrites filters
       {
