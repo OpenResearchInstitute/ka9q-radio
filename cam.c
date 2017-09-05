@@ -40,13 +40,19 @@ void *demod_cam(void *arg){
 	assert(!isnan(crealf(filter->input.c[i])) && !isnan(cimagf(filter->input.c[i])));
     }
 
-    spindown(demod,filter->input.c,filter->ilen); // 2nd LO
+    demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
+    demod->if_power = cpower(filter->input.c,filter->ilen);
     {
       int i;
       for(i=0;i<filter->ilen;i++)
 	assert(!isnan(crealf(filter->input.c[i])) && !isnan(cimagf(filter->input.c[i])));
     }
     execute_filter(filter);
+    demod->bb_power = cpower(filter->output.c,filter->olen);
+    float n0 = compute_n0(demod);
+    demod->n0 += .01 * (n0 - demod->n0);
+
+
     {
       int i;
       for(i=0;i<filter->olen;i++)
@@ -74,9 +80,8 @@ void *demod_cam(void *arg){
     // RMS signal+noise and noise amplitudes
     amplitude /= filter->olen;
     noise /= filter->olen;
-    demod->amplitude = sqrtf(amplitude); // RMS amplitude of I channel
-    demod->noise = sqrtf(noise);         // RMS amplitude of Q channel
     demod->snr = (amplitude / noise) - 1; // S/N as power ratio
+    amplitude = sqrtf(amplitude); // Convert to magnitude
 
     // Frequency error is the phase of this block minus the last, times blocks/sec
     // Phase was already flipped, hence the minus
@@ -90,17 +95,16 @@ void *demod_cam(void *arg){
 	set_cal(demod,demod->calibrate - freqerror/(10. * demod->frequency));
     } else {
       // Retune second LO (and RF frequency)
-      demod->demod_offset += freqerror;
-      set_freq(demod,demod->frequency,NAN);
+      set_offset(demod,demod->demod_offset + freqerror);
     }
 
     // Remove carrier DC
     // AM AGC is carrier-driven
-    demod->gain = demod->headroom / demod->amplitude;
+    demod->gain = demod->headroom / amplitude;
 
     float audio[filter->olen];
     for(n=0; n < filter->olen; n++)
-      audio[n] = demod->gain * (creal(filter->output.c[n]) - demod->amplitude);
+      audio[n] = demod->gain * (creal(filter->output.c[n]) - amplitude);
     send_mono_audio(demod->audio,audio,n);
   }
   delete_filter(filter);
