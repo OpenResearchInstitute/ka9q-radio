@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.40 2017/08/10 10:48:56 karn Exp karn $
+// $Id: radio.h,v 1.41 2017/09/04 00:38:35 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -72,7 +72,7 @@ struct demod {
 
   // corr_data and write_ptr are written by the input thread and read by fillbuf in the demod tasks,
   // so they're protected by mutexes. The buffer is *NOT* protected from overrun, so the reader must keep up
-#define DATASIZE 65536 // should be a power of 2 for efficiency
+#define DATASIZE 65536 // Strongly recommend a power of 2 for efficiency
   complex float *corr_data;       // Circular buffer of corrected I/Q data from input thread to demod thread
   int write_ptr;                  // 0 to DATASIZE-1
   int read_ptr;                   // 0 to DATASIZE-1
@@ -107,11 +107,13 @@ struct demod {
                         // To be handled by a separate spindown, not in radio.c
   double demod_offset;  // Offset applied by auto tracking demodulators (CAM, DSB, etc)
   double dial_offset;   // displayed dial frequency = carrier freq + dial_offset (useful for CW)
+                        // Ignored by routines in radio.c
+  // Second LO parameters
   complex double second_LO_phasor; // Second LO phasor
   double second_LO;     // True second LO frequency, including calibration
                         // Provided because round trip through csincos/carg is less accurate
-
   complex double second_LO_phasor_step;  // LO step phasor = csincos(2*pi*second_LO/samprate)
+
   int frequency_lock; // inhibits tuning of RF and LO & IF tuning operate in lockstep
   int tunestep;       // User interface cursor location, log10(); e.g., 3 -> thousands
 
@@ -131,10 +133,10 @@ struct demod {
   float kaiser_beta;
 
   // Demodulator parameters
-  float power;      // Average power of signal before filter
-  float amplitude;  // Amplitude (not power) of signal after filter
-  float noise;      // Noise amplitude esimate (experimemtal)
-  float snr;        // Estimated signal-to-noise ratio
+  float if_power;   // Average power of signal before filter
+  float bb_power;   // Average power of signal after filter
+  float n0;         // Noise spectral density esimate (experimemtal)
+  float snr;        // Estimated signal-to-noise ratio (only some demodulators)
   float gain;       // Audio gain
   float foffset;    // Frequency offset (FM)
   float pdeviation; // Peak frequency deviation (FM)
@@ -152,18 +154,18 @@ extern struct modetab Modes[];
 extern int Nmodes;
 
 int fillbuf(struct demod *,complex float *,const int);
-int setup_input(char const *,char const *);
-int setup_output(char const *,char const *);
 int LO2_in_range(struct demod *,double f,int);
 double set_freq(struct demod *,double,double);
+double set_offset(struct demod *,double);
 double set_first_LO(struct demod *,double);
 const double get_first_LO(struct demod const *);
 double set_second_LO(struct demod *,double);
 double set_second_LO_rate(struct demod *,double,int);
 int set_mode(struct demod *,const char *,int);
 int set_cal(struct demod *,double);
-int spindown(struct demod *,complex float *,int);
+complex float spindown(struct demod *,complex float const *);
 void proc_samples(struct demod *,int16_t const *,int);
+const float compute_n0(struct demod const *);
 
 
 // Load mode definition table

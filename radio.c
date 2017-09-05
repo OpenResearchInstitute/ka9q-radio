@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.58 2017/09/02 06:48:07 karn Exp karn $
+// $Id: radio.c,v 1.59 2017/09/04 00:38:35 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -83,7 +83,7 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
 
   pthread_mutex_lock(&demod->data_mutex);
   demod->write_ptr += cnt;
-  demod->write_ptr %= 65536;
+  demod->write_ptr %= DATASIZE;
   pthread_cond_broadcast(&demod->data_cond);
   pthread_mutex_unlock(&demod->data_mutex);
 }
@@ -92,18 +92,18 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
 // Completely fill buffer from corrected I/O input queue
 // Block until enough data is available
 int fillbuf(struct demod *demod,complex float *buffer,int cnt){
-  // This assumes cnt <= DATASIZE, otherwise it will deadlock!
-  // The mutex protects demod->write_ptr
-  pthread_mutex_lock(&demod->data_mutex);
-  while((DATASIZE + demod->write_ptr - demod->read_ptr) % DATASIZE < cnt)
-    pthread_cond_wait(&demod->data_cond,&demod->data_mutex);
-  pthread_mutex_unlock(&demod->data_mutex);  
-
-  // Copy in contiguous chunks from circular buffer
   int i = cnt;
-  while(i > 0){
-    int chunk = DATASIZE - demod->read_ptr;
-    chunk = min(chunk,i);    // Largest contiguous segment of buffer before wraparound
+  while(i > 0){ // data remaining to be read
+    // The mutex protects demod->write_ptr
+    pthread_mutex_lock(&demod->data_mutex);
+    while(demod->write_ptr == demod->read_ptr)
+      pthread_cond_wait(&demod->data_cond,&demod->data_mutex);
+    
+    int chunk = (demod->write_ptr - demod->read_ptr + DATASIZE) % DATASIZE; // How much is available?
+    pthread_mutex_unlock(&demod->data_mutex);  // Done looking at write_ptr
+    chunk = min(chunk,DATASIZE - demod->read_ptr); // How much can we copy contiguously?
+    chunk = min(chunk,i); // How much do we need?
+		
     memcpy(buffer,&demod->corr_data[demod->read_ptr],chunk*sizeof(complex float));
     demod->read_ptr = (demod->read_ptr + chunk) % DATASIZE;
     i -= chunk;
@@ -172,6 +172,14 @@ double set_freq(struct demod *demod,double f,double new_lo2){
 
   return demod->frequency;
 }
+
+// Seet demodulator frequency offset
+double set_offset(struct demod *demod,double offset){
+  demod->demod_offset = offset;
+  set_freq(demod,demod->frequency,NAN);
+  return offset;
+}
+
 
 // Preferred A/D sample rate; ignored by funcube but may be used by others someday
 const int ADC_samprate = 192000;
@@ -301,9 +309,6 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
     demod->high = tmp;
   }
   demod->flags = Modes[mindex].flags;
-  // Start these at zero, let the demod change them
-  demod->doppler = 0;
-  demod->demod_offset = 0;
 
   // Suppress these in display unless they're used
   demod->snr = NAN;
@@ -344,8 +349,15 @@ int set_cal(struct demod *demod,double cal){
   }
   return 0;
 }
-int spindown(struct demod *demod,complex float *data,int len){
+// Apply LO2 to input samples, placing the resulting IF in the demod's filter input buffer
+// This function no longer updates demod->second_LO phasor directly
+// It returns the updated phasor, and you must store it back into demod->send_LO_phasor yourself
+// This simplifies demodulators that do repeated spindowns, e.g., dsb
+// Length of data input obtained from demod->filter->i_len
+complex float spindown(struct demod *demod,complex float const *data){
   assert(demod != NULL);
+  assert(demod->filter != NULL);
+  struct filter  * const filter = demod->filter;
 
   if(demod->second_LO == 0)
     return 0; // Probably not set yet, but in any event nothing to do
@@ -356,15 +368,67 @@ int spindown(struct demod *demod,complex float *data,int len){
 
   // Apply 2nd LO, compute average pre-filter signal power
   int n;
-  float power = 0;
+  complex float second_LO_phasor = demod->second_LO_phasor;
+  int len = filter->ilen;
   for(n=0; n < len; n++){
     assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
-    data[n] *= demod->second_LO_phasor;
-    power += crealf(data[n]) * crealf(data[n]) + cimagf(data[n])*cimagf(data[n]);
-    demod->second_LO_phasor *= demod->second_LO_phasor_step;
+    filter->input.c[n] = data[n] * second_LO_phasor;
+    second_LO_phasor *= demod->second_LO_phasor_step;
   }
-  demod->power = power / len;
   // Renormalize to guard against accumulated roundoff error
-  demod->second_LO_phasor /= cabs(demod->second_LO_phasor);
-  return 0;
+  return second_LO_phasor / cabs(second_LO_phasor);
+}
+
+// Compute noise spectral density by first looking for the frequency
+// bin with the least energy, then averaging all bins with energies
+// no more than 3dB higher than this minimum. This should select
+// bin with only noise?
+
+const float compute_n0(struct demod const *demod){
+  assert(demod != NULL  && demod->filter != NULL);
+  struct filter const *f = demod->filter;
+
+  int const N = f->ilen + f->impulse_length - 1;
+  float power_spectrum[N];
+  
+  // Compute smoothed power spectrum
+  // There will be some spectral leakage because the convolution FFT we're using is unwindowed
+  {
+    int n;
+    for(n=0;n<N;n++){
+      power_spectrum[n] = cnrmf(f->fdomain[n]);
+    }  
+  }
+
+  // compute average energy outside passband, then iterate computing a new average that
+  // omits N > 3dB above the previous average.
+
+  float avg_n = INFINITY;
+  int iter;
+  for(iter=0;iter<2;iter++){
+    int noisebins = 0;
+    int n;
+    float new_avg_n = 0;
+    for(n=0;n<N;n++){
+      float f;
+      if(n <= N/2)
+	f = (float)(n * demod->samprate) / N;
+      else
+	f = (float)((n-N) * demod->samprate) / N;
+      
+      if(f >= demod->low && f <= demod->high)
+	continue; // Avoid passband
+      
+      float const s = power_spectrum[n];
+      if(s < avg_n * 2){ // +3dB threshold
+	new_avg_n += s;
+	noisebins++;
+      }
+    }
+    new_avg_n /= noisebins;
+    avg_n = new_avg_n;
+  }
+
+  // return noise power per Hz
+  return avg_n / (N*demod->samprate);
 }
