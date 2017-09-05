@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.12 2017/08/04 03:35:55 karn Exp karn $
+// $Id: dsp.h,v 1.13 2017/08/12 08:49:40 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -9,11 +9,13 @@
 
 #define M_1_2PI (0.5 * M_1_PI) // fraction of a rotation in one radian
 
+double const angle_mod(double);
+
 const complex float csincosf(const float x);
 const complex double csincos(const double x);
 
-const float amplitude(const float *data,const int len);
-const float camplitude(const complex float *data, const int len);
+const float rpower(const float *data,const int len);
+const float cpower(const complex float *data, const int len);
 
 // Compute norm = x * conj(x) = Re{x}^2 + Im{x}^2
 const float cnrmf(const complex float x);
