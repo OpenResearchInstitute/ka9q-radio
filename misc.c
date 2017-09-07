@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.15 2017/08/04 03:35:55 karn Exp karn $
+// $Id: misc.c,v 1.16 2017/09/05 17:45:43 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -19,16 +19,16 @@
 #include "radio.h"
 
 double const angle_mod(double x){
-  if(x > M_PI)
+  while(x > M_PI)
     x -= 2*M_PI;
-  else if(x < -M_PI)
+  while(x < -M_PI)
     x += 2*M_PI;
   return x;
 }
 
 
 // return unit magnitude complex number with phase x radians
-const complex float csincosf(const float x){
+complex float const csincosf(const float x){
   float s,c;
 
 #if __APPLE__ // No sincos
@@ -41,7 +41,7 @@ const complex float csincosf(const float x){
 }
 
 // return unit magnitude complex number with phase x radians
-const complex double csincos(const double x){
+complex double const csincos(const double x){
   double s,c;
 
 #if __APPLE__
@@ -53,22 +53,40 @@ const complex double csincos(const double x){
   return CMPLX(c,s);
 }
 
-const float cnrmf(const complex float x){
+float const cnrmf(const complex float x){
   return crealf(x)*crealf(x) + cimagf(x) * cimagf(x);
 }
-const double cnrm(const complex double x){
+double const cnrm(const complex double x){
   return creal(x)*creal(x) + cimag(x) * cimag(x);
 }
 
+float complex const cpowers(const float complex * const data,const int len){
+  int n;
+  float amplitude = 0;
+  float noise = 0;
+  for(n=0; n < len; n++){
+    // Sample with signal rotated onto I axis
+    complex float const rsamp = data[n];
+    amplitude += crealf(rsamp) * crealf(rsamp);
+    noise += cimagf(rsamp) * cimagf(rsamp);
+  }
+  amplitude/= len;
+  noise /= len;
+  return CMPLXF(amplitude,noise);
+}
+
+
 // Average power in an array of real floats
-const float rpower(const float *data,const int len){
+float const rpower(const float *data,const int len){
   float sum = 0;  
   int n;
   
   if(len <= 0)
     return 0;
-  for(n=0; n < len; n++)
+  for(n=0; n < len; n++){
+    assert(!isnan(data[n]));
     sum += data[n] * data[n];
+  }
   return sum/len;
 }
 
@@ -79,9 +97,10 @@ const float cpower(const complex float *data, const int len){
 
   if(len <= 0)
     return 0;
-  for(n=0; n < len; n++)
+  for(n=0; n < len; n++){
+    assert(!isnan(data[n]));
     amplitude += cnrmf(data[n]);
-
+  }
   return amplitude/len;
 }
 
@@ -126,8 +145,8 @@ void chomp(char *s){
 // 12g345 (12.345 GHz)
 // If no g/m/k and number is too small, make a heuristic guess
 // NB! This assumes radio covers 100 kHz - 2 GHz; should make more general
-const double parse_frequency(const char *s){
-  char *ss = alloca(strlen(s));
+double const parse_frequency(const char *s){
+  char * const ss = alloca(strlen(s));
 
   int i;
   for(i=0;i<strlen(s);i++)
