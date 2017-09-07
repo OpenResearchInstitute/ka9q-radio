@@ -80,7 +80,7 @@ void *demod_cam(void *arg){
 	set_cal(demod,demod->calibrate - freqerror/(10. * demod->frequency));
     } else {
       // Retune second LO (and RF frequency)
-      set_offset(demod,demod->demod_offset + freqerror);
+      //      set_offset(demod,demod->demod_offset + freqerror);  // REDO THIS!!!
     }
 
     // Remove carrier DC
