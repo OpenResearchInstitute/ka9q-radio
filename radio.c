@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.60 2017/09/05 17:46:35 karn Exp karn $
+// $Id: radio.c,v 1.61 2017/09/07 02:46:58 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -141,7 +141,7 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
   pthread_mutex_unlock(&demod->status_mutex);
 
   if(isnan(new_lo2) || !LO2_in_range(demod,new_lo2,0)){
-    new_lo2 = -(f - get_first_LO(demod) + demod->demod_offset);
+    new_lo2 = -(f - get_first_LO(demod));
 
     // If the required new LO2 is out of range, recenter LO2 and retune LO1
     if(!LO2_in_range(demod,new_lo2,1)){
@@ -157,7 +157,7 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
 #endif    
     }
   }
-  double const new_lo1 = f + new_lo2 + demod->demod_offset;
+  double const new_lo1 = f + new_lo2;
     
   // returns actual frequency, which may be a fraction of a Hz
   // different from requested because of calibration offset and
@@ -170,18 +170,9 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
      set_second_LO(demod,new_lo2);
 
   // Set to new actual frequency, rather than one requested
-  demod->frequency = get_first_LO(demod) - demod->second_LO - demod->demod_offset;
+  demod->frequency = get_first_LO(demod) - demod->second_LO;
   return demod->frequency;
 }
-
-// Seet demodulator frequency offset
-double set_offset(struct demod * const demod,double const offset){
-  assert(demod != NULL);
-  demod->demod_offset = offset;
-  set_freq(demod,demod->frequency,NAN);
-  return offset;
-}
-
 
 // Preferred A/D sample rate; ignored by funcube but may be used by others someday
 const int ADC_samprate = 192000;
