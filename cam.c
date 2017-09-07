@@ -24,63 +24,48 @@ void *demod_cam(void *arg){
   demod->filter = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
-  {
-    int i;
-    for(i=0;i<filter->ilen;i++)
-      assert(!isnan(crealf(filter->response[i])) && !isnan(cimagf(filter->response[i])));
-  }
-
+  if(demod->flags & CAL)
+    demod->demod_offset = 0; // Force to zero, we'll adjust calibration
   complex float lastphase = 0;
   memset(filter->input_buffer.c,0,(filter->impulse_length - 1)*sizeof(complex float)); 
   while(!demod->terminate){
     fillbuf(demod,filter->input.c,filter->ilen);
-    {
-      int i;
-      for(i=0;i<filter->ilen;i++)
-	assert(!isnan(crealf(filter->input.c[i])) && !isnan(cimagf(filter->input.c[i])));
-    }
-
     demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
     demod->if_power = cpower(filter->input.c,filter->ilen);
-    {
-      int i;
-      for(i=0;i<filter->ilen;i++)
-	assert(!isnan(crealf(filter->input.c[i])) && !isnan(cimagf(filter->input.c[i])));
-    }
     execute_filter(filter);
     demod->bb_power = cpower(filter->output.c,filter->olen);
-    float n0 = compute_n0(demod);
-    demod->n0 += .01 * (n0 - demod->n0);
+    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
 
-
+    // Get DC (carrier) phasor by averaging
+    complex float phase = 0;
     {
-      int i;
-      for(i=0;i<filter->olen;i++)
-	assert(!isnan(crealf(filter->output.c[i])) && !isnan(cimagf(filter->output.c[i])));
+      int n;
+      for(n=0;n<filter->olen;n++)
+	phase += filter->output.c[n];
+      float amp = cabsf(phase);
+      if(amp == 0)
+	continue; // Probably no signal; skip
+      phase /= amp;
     }
 
-    // Grab carrier phase from DC bin of frequency domain
-    complex float phase = filter->f_fdomain[0];
     assert(!isnan(crealf(phase)) && !isnan(cimagf(phase)));
     
-    float amp = cabsf(phase);
-    if(amp == 0)
-      continue; // All zeroes? skip
-    phase = conj(phase) / amp;
-    // Rotate signal onto I axis, measure sighal (I), noise (Q) and DC (carrier) levels
-    float amplitude = 0;
-    float noise = 0;
-    int n;
-    for(n=0; n < filter->olen; n++){
-      // Sample with signal rotated onto I axis
-      complex float const rsamp = filter->output.c[n] *= phase;
-      amplitude += crealf(rsamp) * crealf(rsamp);
-      noise += cimagf(rsamp) * cimagf(rsamp);
+    phase = conj(phase);
+    // Rotate onto I axis
+    {
+      int n;
+      for(n=0;n<filter->olen;n++)
+	filter->output.c[n] *= phase;
     }
-    // RMS signal+noise and noise amplitudes
-    amplitude /= filter->olen;
-    noise /= filter->olen;
-    demod->snr = (amplitude / noise) - 1; // S/N as power ratio
+    // measure sighal (I), noise (Q) and DC (carrier) levels
+    float amplitude;
+    {
+      complex double const powers = cpowers(filter->output.c,filter->olen);
+      amplitude = crealf(powers);
+      float const noise = cimagf(powers);
+      demod->snr = (amplitude / noise) - 1; // S/N as power ratio
+    }
+
     amplitude = sqrtf(amplitude); // Convert to magnitude
 
     // Frequency error is the phase of this block minus the last, times blocks/sec
@@ -103,9 +88,10 @@ void *demod_cam(void *arg){
     demod->gain = demod->headroom / amplitude;
 
     float audio[filter->olen];
+    int n;
     for(n=0; n < filter->olen; n++)
-      audio[n] = demod->gain * (creal(filter->output.c[n]) - amplitude);
-    send_mono_audio(demod->audio,audio,n);
+      audio[n] = creal(filter->output.c[n]) - amplitude;
+    send_mono_audio(demod->audio,audio,filter->olen,demod->gain);
   }
   delete_filter(filter);
   demod->filter = NULL;
