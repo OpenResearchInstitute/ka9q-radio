@@ -39,8 +39,7 @@ void *demod_iq(void *arg){
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
     demod->bb_power = cpower(filter->output.c,filter->olen);
-    float n0 = compute_n0(demod);
-    demod->n0 += .01 * (n0 - demod->n0);
+    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
 
     // Automatic gain control
     // Find average amplitude for AGC
@@ -59,11 +58,7 @@ void *demod_iq(void *arg){
 	demod->gain *= agcratio;
       }
     }
-    int n;
-    for(n=0;n<filter->olen;n++)
-      filter->output.c[n] *= demod->gain;
-
-    send_stereo_audio(demod->audio,filter->output.c,n);
+    send_stereo_audio(demod->audio,filter->output.c,filter->olen,demod->gain);
   }
   delete_filter(demod->filter);
   demod->filter = NULL;
