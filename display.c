@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.74 2017/09/05 17:48:54 karn Exp karn $
+// $Id: display.c,v 1.75 2017/09/07 17:57:32 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -353,7 +353,7 @@ void *display(void *arg){
       wprintw(sig,"deviat  %10.1f Hz\n",demod->pdeviation);
 
     if(!isnan(demod->cphase))
-      wprintw(sig,"cphase  %10.3f rad\n",demod->cphase);
+      wprintw(sig,"cphase  %10.3f deg\n",demod->cphase*DEGPRA);
 
     if(!isnan(demod->plfreq))
       wprintw(sig,"plfreq  %10.1f Hz\n",demod->plfreq);
@@ -381,7 +381,7 @@ void *display(void *arg){
     wprintw(sdr,"I offset%13.6f\n",demod->DC_i);  // Scaled to +/-1
     wprintw(sdr,"Q offset%13.6f\n",demod->DC_q);
     wprintw(sdr,"I/Q imbal%12.3f dB\n",power2dB(demod->imbalance));
-    wprintw(sdr,"I/Q phi%14.5f rad\n",demod->sinphi);
+    wprintw(sdr,"I/Q phi%14.5f deg\n",demod->sinphi*DEGPRA);
     wprintw(sdr,"LNA%18u\n",demod->status.lna_gain);   // SDR dependent
     wprintw(sdr,"Mix gain%13u\n",demod->status.mixer_gain); // SDR dependent
     wprintw(sdr,"IF gain%14u dB\n",demod->status.if_gain); // SDR dependent
