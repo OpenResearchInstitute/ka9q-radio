@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.59 2017/09/04 00:38:35 karn Exp karn $
+// $Id: radio.c,v 1.60 2017/09/05 17:46:35 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -33,19 +33,22 @@ float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset
 float const Power_alpha = 0.00001; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
 float const SCALE = 1./SHRT_MAX;   // Scale signed 16-bit int to float in range -1, +1
 
-void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
+void proc_samples(struct demod * const demod,int16_t const *sp,int const cnt){
   // gain and phase balance coefficients
-  float gain_i, gain_q, secphi, tanphi;
-  gain_q = sqrtf(0.5 * (1 + demod->imbalance));
-  gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
-  secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
-  tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
+  assert(demod != NULL);
+  assert(demod->imbalance > 0);
+  assert(demod->sinphi >= -1 && demod->sinphi <= 1);
 
-  int i;
+  float const gain_q = sqrtf(0.5 * (1 + demod->imbalance));
+  float const gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
+  float const secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
+  float const tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
+
+
   float samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
   float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
   float dotprod = 0;                           // sum of I*Q, for phase balance
-
+  int i;
   for(i=0;i<cnt;i++){
     // Remove and update DC offsets
     float samp_i = *sp++ * SCALE;
@@ -64,7 +67,6 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
     dotprod += samp_i * samp_q;
     // Correct phase
     samp_q = secphi * samp_q - tanphi * samp_i;
-    assert(!isnan(samp_q) && !isnan(samp_i));
     complex float samp = CMPLXF(samp_i,samp_q);
     // Experimental notch filter
     if(demod->nf)
@@ -91,7 +93,7 @@ void proc_samples(struct demod *demod,const int16_t *sp,int cnt){
 
 // Completely fill buffer from corrected I/O input queue
 // Block until enough data is available
-int fillbuf(struct demod *demod,complex float *buffer,int cnt){
+int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
   int i = cnt;
   while(i > 0){ // data remaining to be read
     // The mutex protects demod->write_ptr
@@ -114,7 +116,7 @@ int fillbuf(struct demod *demod,complex float *buffer,int cnt){
 
 
 // Get true first LO frequency
-const double get_first_LO(const struct demod *demod){
+double const get_first_LO(const struct demod * const demod){
   assert(demod != NULL);
   assert(!isnan(demod->status.frequency));
   assert(!isnan(demod->calibrate));
@@ -124,11 +126,11 @@ const double get_first_LO(const struct demod *demod){
 
 
 // Set radio frequency with optional IF selection
-// If new_lo2 is NAN or out of range, that's a "don't care";
+// new_lo2 is explicitly allowed to be NAN. If it is, that's a "don't care"
 // we'll try to pick a new LO2 that avoids retuning LO1,
 // and if that isn't possible we'll pick a default:
 // (usually +/- 48 kHz, samprate/4)
-double set_freq(struct demod *demod,double f,double new_lo2){
+double set_freq(struct demod * const demod,double const f,double new_lo2){
   assert(demod != NULL);
   assert(!isnan(f));
 
@@ -155,13 +157,13 @@ double set_freq(struct demod *demod,double f,double new_lo2){
 #endif    
     }
   }
-  double new_lo1 = f + new_lo2 + demod->demod_offset;
+  double const new_lo1 = f + new_lo2 + demod->demod_offset;
     
   // returns actual frequency, which may be a fraction of a Hz
   // different from requested because of calibration offset and
   // the fact that the tuner can only tune in 1 Hz steps
-  double actual_lo1 = set_first_LO(demod,new_lo1);
-  new_lo2 += (actual_lo1 - new_lo1);
+  double const actual_lo1 = set_first_LO(demod,new_lo1);
+  new_lo2 += (actual_lo1 - new_lo1); // fold the difference into LO2
 
   // If front end doesn't retune don't retune LO2 either (e.g., recording)
   if(LO2_in_range(demod,new_lo2,0))
@@ -169,12 +171,12 @@ double set_freq(struct demod *demod,double f,double new_lo2){
 
   // Set to new actual frequency, rather than one requested
   demod->frequency = get_first_LO(demod) - demod->second_LO - demod->demod_offset;
-
   return demod->frequency;
 }
 
 // Seet demodulator frequency offset
-double set_offset(struct demod *demod,double offset){
+double set_offset(struct demod * const demod,double const offset){
+  assert(demod != NULL);
   demod->demod_offset = offset;
   set_freq(demod,demod->frequency,NAN);
   return offset;
@@ -188,7 +190,7 @@ const int ADC_samprate = 192000;
 // Note: single precision floating point is not accurate enough at VHF and above
 // demod->first_LO isn't updated here, but by the
 // incoming status frames so it don't change right away
-double set_first_LO(struct demod *demod,double first_LO){
+double set_first_LO(struct demod * const demod,double const first_LO){
   assert(demod != NULL);
   assert(!isnan(first_LO));
   if(first_LO == get_first_LO(demod))
@@ -205,7 +207,6 @@ double set_first_LO(struct demod *demod,double first_LO){
     
     // Wait up to 1 sec for the frequency to actually change
     // Tries are limited to keep two or more receivers from continually fighting, or if it's a recording
-    int i;
     struct timespec ts;
     struct timeval tv;
     gettimeofday(&tv,NULL);
@@ -213,6 +214,7 @@ double set_first_LO(struct demod *demod,double first_LO){
     ts.tv_nsec = 1000 * tv.tv_usec;
 
     pthread_mutex_lock(&demod->status_mutex);
+    int i;
     for(i=0;i<10;i++){
       if(demod->requested_status.frequency == demod->status.frequency)
 	break;
@@ -237,7 +239,7 @@ double set_first_LO(struct demod *demod,double first_LO){
 // sampling rate, filter setting and alias region
 //
 // If avoid_alias is false, simply test that specified frequency is between +/- samplerate/2
-int LO2_in_range(struct demod *demod,double f,int avoid_alias){
+int LO2_in_range(struct demod * const demod,double const f,int const avoid_alias){
   assert(demod != NULL);
 
   // Wait until the sample rate is known
@@ -251,12 +253,11 @@ int LO2_in_range(struct demod *demod,double f,int avoid_alias){
 	    && f <= demod->max_IF + min(0,demod->low);
   else
     return f >= -demod->samprate/2 && f <= demod->samprate/2;
-
 }
 
 // Set second local oscillator (the one in software)
 // Only limit range to +/- samprate/2; the caller must avoid the alias region, e.g., with LO2_in_range()
-double set_second_LO(struct demod *demod,double second_LO){
+double set_second_LO(struct demod * const demod,double const second_LO){
   assert(demod != NULL);
   assert(!isnan(second_LO));
 
@@ -277,7 +278,7 @@ double set_second_LO(struct demod *demod,double second_LO){
   return second_LO;
 }
 
-int set_mode(struct demod *demod,const char *mode,int defaults){
+int set_mode(struct demod * const demod,const char * const mode,int const defaults){
   assert(demod != NULL);
 
   int mindex;
@@ -287,7 +288,7 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
   if(mindex == Nmodes)
     return -1; // Unregistered mode
 
-  // Send EOF to current demod thread, if any, to cause clean exit
+  // Kill current demod thread, if any, to cause clean exit
   demod->terminate = 1;
   pthread_join(demod->demod_thread,NULL); // Wait for it to finish
   demod->terminate = 0;
@@ -335,17 +336,16 @@ int set_mode(struct demod *demod,const char *mode,int defaults){
 
 // Set TXCO calibration for front end
 // + means clock is fast, - means clock is slow
-int set_cal(struct demod *demod,double cal){
+int set_cal(struct demod * const demod,double const cal){
   assert(demod != NULL);
   assert(!isnan(cal));
 
-  double f = demod->frequency;
   demod->calibrate = cal;
   // Don't get deadlocked if this is before we know the sample rate
   // e.g., with the -c command line option
   if(demod->status.samprate != 0){
     demod->samprate = demod->status.samprate * (1 + cal);
-    set_freq(demod,f,NAN); // Keep original dial frequency
+    set_freq(demod,demod->frequency,NAN); // Keep original dial frequency
   }
   return 0;
 }
@@ -354,23 +354,22 @@ int set_cal(struct demod *demod,double cal){
 // It returns the updated phasor, and you must store it back into demod->send_LO_phasor yourself
 // This simplifies demodulators that do repeated spindowns, e.g., dsb
 // Length of data input obtained from demod->filter->i_len
-complex float spindown(struct demod *demod,complex float const *data){
+complex float spindown(struct demod * const demod,complex float const * const data){
   assert(demod != NULL);
-  assert(demod->filter != NULL);
-  struct filter  * const filter = demod->filter;
-
   if(demod->second_LO == 0)
     return 0; // Probably not set yet, but in any event nothing to do
 
+  assert(demod->filter != NULL);
+  struct filter  * const filter = demod->filter;
   assert(data != NULL);
   assert(!isnan(creal(demod->second_LO_phasor_step)) && !isnan(cimag(demod->second_LO_phasor_step)));
   assert(cnrm(demod->second_LO_phasor) != 0);
 
   // Apply 2nd LO, compute average pre-filter signal power
-  int n;
+
   complex float second_LO_phasor = demod->second_LO_phasor;
-  int len = filter->ilen;
-  for(n=0; n < len; n++){
+  int n;
+  for(n=0; n < filter->ilen; n++){
     assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
     filter->input.c[n] = data[n] * second_LO_phasor;
     second_LO_phasor *= demod->second_LO_phasor_step;
@@ -379,15 +378,14 @@ complex float spindown(struct demod *demod,complex float const *data){
   return second_LO_phasor / cabs(second_LO_phasor);
 }
 
-// Compute noise spectral density by first looking for the frequency
-// bin with the least energy, then averaging all bins with energies
-// no more than 3dB higher than this minimum. This should select
-// bin with only noise?
-
-const float compute_n0(struct demod const *demod){
+// Compute noise spectral density - experimental, my algorithm
+// The problem is telling signal from noise
+// Heuristic: first average all bins outside the bandwidth
+// Then recompute the average, tossing bins > 3 dB above the previous average
+// Hopefully this will get rid of any signals from the noise estimate
+float const compute_n0(struct demod const * const demod){
   assert(demod != NULL  && demod->filter != NULL);
   struct filter const *f = demod->filter;
-
   int const N = f->ilen + f->impulse_length - 1;
   float power_spectrum[N];
   
@@ -407,8 +405,8 @@ const float compute_n0(struct demod const *demod){
   int iter;
   for(iter=0;iter<2;iter++){
     int noisebins = 0;
-    int n;
     float new_avg_n = 0;
+    int n;
     for(n=0;n<N;n++){
       float f;
       if(n <= N/2)
@@ -428,7 +426,6 @@ const float compute_n0(struct demod const *demod){
     new_avg_n /= noisebins;
     avg_n = new_avg_n;
   }
-
   // return noise power per Hz
   return avg_n / (N*demod->samprate);
 }
