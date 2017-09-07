@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.38 2017/08/06 05:32:16 karn Exp karn $
+// $Id: audio.c,v 1.39 2017/08/12 08:49:40 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -33,7 +33,7 @@
 #define PCM_BUFSIZE 512        // 16-bit word count; must fit in Ethernet MTU
 
 
-static short const scaleclip(float x){
+static short const scaleclip(float const x){
   if(x >= 1.0)
     return SHRT_MAX;
   else if(x <= -1.0)
@@ -42,26 +42,36 @@ static short const scaleclip(float x){
 }
   
 // Send 'size' stereo samples, each in a complex float
-int send_stereo_audio(struct audio *audio,complex float const *buffer,int size){
-  if(audio->opus_bitrate != 0)
-    write(audio->opus_stereo_write_fd,buffer,size * sizeof(*buffer));
-  else
-    write(audio->pcm_stereo_write_fd,buffer,size * sizeof(*buffer));    
+int send_stereo_audio(struct audio const * const audio,complex float const * const buffer,int const size, float const gain){
+  int i;
+  complex float obuf[size];
+  for(i=0;i<size;i++)
+    obuf[i] = buffer[i] * gain;
+
+  int fd = audio->opus_bitrate ? audio->opus_stereo_write_fd : audio->pcm_stereo_write_fd;
+  write(fd,obuf,sizeof(obuf));
   return 0;
 }
 
 // Send 'size' mono samples, each in a float
-int send_mono_audio(struct audio *audio,float const *buffer,int size){
+int send_mono_audio(struct audio const * const audio,float const * const buffer,int const size,float const gain){
+
   if(audio->opus_bitrate != 0){
     // Send to opus encoder as stereo with duplicate channels
     complex float obuf[size];
     int i;
     for(i=0;i<size;i++)
-      obuf[i] = CMPLXF(buffer[i],buffer[i]);
+      obuf[i] = CMPLXF(buffer[i],buffer[i]) * gain;
 
     write(audio->opus_stereo_write_fd,obuf,sizeof(obuf));
-  } else
-    write(audio->pcm_mono_write_fd,buffer,size * sizeof(*buffer));    
+  } else {
+    float obuf[size];
+    int i;
+    for(i=0;i<size;i++)
+      obuf[i] = buffer[i] * gain;
+
+    write(audio->pcm_mono_write_fd,obuf,sizeof(obuf));
+  }
   return 0;
 }
 
@@ -118,7 +128,7 @@ void *stereo_opus_audio(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
-  float decay = expf(-0.5 * (float)opus_blocksize / audio->samprate);
+  float const decay = expf(-0.5 * (float)opus_blocksize / audio->samprate);
 
   complex float opusbuf[sizeof(complex float) * opus_blocksize];
   while(pipefill(audio->opus_stereo_read_fd,opusbuf,sizeof(*opusbuf) * opus_blocksize) > 0){
@@ -184,7 +194,7 @@ void *stereo_pcm_audio(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
   
-  float decay = expf(-0.5 * (PCM_BUFSIZE/2)/ audio->samprate);
+  float const decay = expf(-0.5 * (PCM_BUFSIZE/2)/ audio->samprate);
 
   complex float buffer[PCM_BUFSIZE/2];
   while(pipefill(audio->pcm_stereo_read_fd,buffer,sizeof(buffer)) > 0){
@@ -240,7 +250,7 @@ void *mono_pcm_audio(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
     
-  float decay = expf(-0.5 * PCM_BUFSIZE / audio->samprate);
+  float const decay = expf(-0.5 * PCM_BUFSIZE / audio->samprate);
 
   float buffer[PCM_BUFSIZE];
   while(pipefill(audio->pcm_mono_read_fd,buffer,sizeof(buffer)) > 0){
@@ -265,7 +275,7 @@ void *mono_pcm_audio(void *arg){
 }
 
 // Set up pipes to encoding/sending tasks and start them up
-int setup_audio(struct audio *audio){
+int setup_audio(struct audio * const audio){
   
   if(Verbose)
     fprintf(stderr,"%s\n",opus_get_version_string());
