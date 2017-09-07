@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.73 2017/09/04 00:43:34 karn Exp karn $
+// $Id: display.c,v 1.74 2017/09/05 17:48:54 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -127,7 +127,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     set_freq(demod,demod->frequency,NAN);
     break;
   case 2: // Demodulator auto-track offset (CAM, DSB, etc)
-    set_offset(demod,demod->demod_offset + tunestep);
+    demod->demod_offset += tunestep;
     break;
   case 3: // First LO
     if(fabs(tunestep) < 1)
