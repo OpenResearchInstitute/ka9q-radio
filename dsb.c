@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.13 2017/09/05 17:41:55 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.14 2017/09/07 02:47:08 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -42,10 +42,23 @@ void *demod_dsb(void *arg){
   float kaiser_window[filter->olen];
   make_kaiser(kaiser_window,filter->olen,demod->kaiser_beta);
 
-  complex float phasestate = 0;
 
-  float loopcap = 0;
-  float lastphase = 0;
+  complex double offset_phasor = 1; // offset LO
+  float integrator = 0; // 2nd order loop integrator
+  complex double offset_step = 1;
+  const double samptime = demod->decimate / demod->samprate;
+
+  // Proportionality constant for offset oscillator in radians per decimated (output) sample per hertz
+  const double phase_scale = 2 * M_PI * samptime;
+  // Second-order loop (see Gardner)
+  const float vcogain = 2*M_PI; // 1 Hz = 2pi radians/sec per "volt"
+  const float pdgain = 1;       // "volts" per radian (unity)
+  const float natfreq = 1 * (2*M_PI);   // natural frequency 1 Hz = 2*pi rad/s
+  const float tau1 = vcogain * pdgain / (natfreq*natfreq); // 1 / 2pi
+  const float integrator_gain = 1 / tau1; // 2pi
+  const float damping = M_SQRT1_2;
+  const float tau2 = 2 * damping / natfreq; // sqrt(2) / 2pi = 1/ (pi*sqrt(2))
+  const float prop_gain = tau2 / tau1;    // sqrt(2)/2
 
   while(!demod->terminate){
     // New samples
@@ -106,30 +119,25 @@ void *demod_dsb(void *arg){
 
 
 
+    // Lag-lead (integral plus proportional)
 
-    // single-pole RC
+    // Apply offset, determine phase
     int n;
     complex float accum = 0;
-    for(n=0; n<filter->olen;n++)
-      accum += filter->output.c[n];  // non-squared
-    float const carrier_phase = cargf(accum);
-    //    demod->cphase = carrier_phase;
-
-    loopcap = .001 * angle_mod(carg(accum - phasestate));
-    phasestate += .01 * (accum - phasestate);
-    demod->cphase = carg(phasestate);
-
-    //    loopcap += 0.0001 * carrier_phase; // RC integrator
-    //    loopcap = .01 * angle_mod(carrier_phase - lastphase);
-    //    lastphase = carrier_phase;
-
-    double new_offset = demod->demod_offset + loopcap;
-    if(new_offset > 200)
-      new_offset = 200;
-    if(new_offset < -200)
-      new_offset = -200;
-
-    set_offset(demod,new_offset);
+    double offset = demod->demod_offset; // Grab value that might have been manually changed
+    for(n=0;n<filter->olen;n++){
+      filter->output.c[n] *= offset_phasor;
+      accum += filter->output.c[n];
+      double carrier_phase = carg(filter->output.c[n]);
+      integrator += carrier_phase * samptime;
+      float feedback = integrator * integrator_gain + prop_gain * carrier_phase;
+      offset = feedback > 100 ? 100 : feedback < -100 ? -100 : feedback;
+      offset_step = csincos(-phase_scale * offset);
+      offset_phasor *= offset_step;
+    }
+    demod->cphase = cargf(accum);
+    offset_phasor /= cabs(offset_phasor);
+    demod->demod_offset = offset;
 
     // We're finally done iterating on frequency
     demod->second_LO_phasor = LO_phasor; // Commit LO
@@ -137,6 +145,7 @@ void *demod_dsb(void *arg){
     demod->if_power = cpower(filter->input.c,filter->ilen);
     demod->bb_power = cpower(filter->output.c,filter->olen);
     demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+#if 0
     // Rotate onto I axis
     {
       assert(!isnan(demod->cphase));
@@ -146,6 +155,7 @@ void *demod_dsb(void *arg){
       for(n=0;n<filter->olen;n++)
 	filter->output.c[n] *= phase;
     }
+#endif
     // compute signal (I) and noise (Q) levels, total level and SNR
     float totampl;
     {
