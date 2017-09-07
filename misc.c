@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.16 2017/09/05 17:45:43 karn Exp karn $
+// $Id: misc.c,v 1.17 2017/09/07 02:41:10 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -98,7 +98,7 @@ const float cpower(const complex float *data, const int len){
   if(len <= 0)
     return 0;
   for(n=0; n < len; n++){
-    assert(!isnan(data[n]));
+    assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
     amplitude += cnrmf(data[n]);
   }
   return amplitude/len;
