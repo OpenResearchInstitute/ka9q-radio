@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.13 2017/08/12 08:49:40 karn Exp karn $
+// $Id: dsp.h,v 1.14 2017/09/05 17:44:58 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -11,18 +11,19 @@
 
 double const angle_mod(double);
 
-const complex float csincosf(const float x);
-const complex double csincos(const double x);
+complex float const csincosf(const float x);
+complex double const csincos(const double x);
 
-const float rpower(const float *data,const int len);
-const float cpower(const complex float *data, const int len);
+float const rpower(const float *data,const int len);
+float const cpower(const complex float *data, const int len);
+float complex const cpowers(complex float const *,const int);
 
 // Compute norm = x * conj(x) = Re{x}^2 + Im{x}^2
-const float cnrmf(const complex float x);
-const double cnrm(const complex double x);
+float const cnrmf(const complex float x);
+double const cnrm(const complex double x);
 
 int pipefill(int,void *,const int);
-const double parse_frequency(const char *);
+double const parse_frequency(const char *);
 void chomp(char *);
 
 
