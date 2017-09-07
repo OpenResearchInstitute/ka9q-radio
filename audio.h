@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.21 2017/08/05 08:07:33 karn Exp karn $
+// $Id: audio.h,v 1.22 2017/08/06 00:08:25 karn Exp karn $
 // Variables and structures for KA9Q SDR receiver audio subsystem
 // Copyright 2017 Phil Karn, KA9Q
 
@@ -40,8 +40,8 @@ struct audio {
 
 extern struct audio Audio;
 
-int send_mono_audio(struct audio *,float const *,int);
-int send_stereo_audio(struct audio *,complex float const *,int);
+int send_mono_audio(struct audio const * const,float const * const,int const,float const);
+int send_stereo_audio(struct audio const * const,complex float const * const,int const, float const);
 int setup_audio(struct audio *);
 
 extern int DAC_samprate;
