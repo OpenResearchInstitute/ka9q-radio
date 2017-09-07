@@ -35,7 +35,7 @@ void *demod_ssb(void *arg){
 
 #if 0
   // Experimental notch filter
-  struct notchfilter *nf = notch_create(48000./demod->samprate,0.001);
+  struct notchfilter * const nf = notch_create(48000./demod->samprate,0.001);
 #endif
 
   while(!demod->terminate){
@@ -52,11 +52,10 @@ void *demod_ssb(void *arg){
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
     demod->bb_power = rpower(filter->output.r,filter->olen);
-    float n0 = compute_n0(demod);
-    demod->n0 += .01 * (n0 - demod->n0);
+    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
 
     // Automatic gain control
-    float amplitude = sqrtf(demod->bb_power);
+    float const amplitude = sqrtf(demod->bb_power);
     if(demod->gain * amplitude > demod->headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
       demod->gain = demod->headroom / amplitude;
@@ -70,11 +69,7 @@ void *demod_ssb(void *arg){
 	demod->gain *= agcratio;
       }
     }
-    int n;
-    for(n=0;n<filter->olen;n++)
-      filter->output.r[n] *= demod->gain;
-
-    send_mono_audio(demod->audio,filter->output.r,n);
+    send_mono_audio(demod->audio,filter->output.r,filter->olen,demod->gain);
   }
   delete_filter(demod->filter);
   demod->filter = NULL;
