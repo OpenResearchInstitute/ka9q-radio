@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.34 2017/08/11 16:21:24 karn Exp karn $
+// $Id: fm.c,v 1.35 2017/09/05 17:44:10 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -161,9 +161,9 @@ void *demod_fm(void *arg){
 
     if(n < plfilter->olen){
       if(afilter == NULL)
-	send_mono_audio(demod->audio,plfilter->input.r,plfilter->ilen); // Send filter input
+	send_mono_audio(demod->audio,plfilter->input.r,plfilter->ilen,demod->gain); // Send filter input
       else
-	send_mono_audio(demod->audio,afilter->output.r,afilter->olen);
+	send_mono_audio(demod->audio,afilter->output.r,afilter->olen,demod->gain);
 
       fftwf_execute(pl_plan);
       int peakbin = -1;

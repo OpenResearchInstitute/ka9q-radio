@@ -32,13 +32,11 @@ void *demod_am(void *arg){
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
     demod->bb_power = cpower(filter->output.c,filter->olen);
-    float n0 = compute_n0(demod);
-    demod->n0 += .01 * (n0 - demod->n0);
+    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
 
+    // Envelope detection
     float average = 0;
     float audio[filter->olen];
-    
-    // Envelope detection
     int n;
     for(n=0; n < filter->olen; n++)
       average += audio[n] = cabs(filter->output.c[n]);
@@ -47,10 +45,11 @@ void *demod_am(void *arg){
     // AM AGC is carrier-driven
     //    demod->gain = demod->headroom / average;
     demod->gain = 0.5/average;
+    // Remove carrier component
     for(n=0; n<filter->olen; n++)
-      audio[n] = (audio[n] - average) * demod->gain;
+      audio[n] -= average;
     
-    send_mono_audio(demod->audio,audio,n);
+    send_mono_audio(demod->audio,audio,n,demod->gain);
   }
   delete_filter(filter);
   demod->filter = NULL;
