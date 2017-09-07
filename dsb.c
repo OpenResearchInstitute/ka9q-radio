@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.12 2017/09/04 00:37:15 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.13 2017/09/05 17:41:55 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -29,7 +29,6 @@ void *demod_dsb(void *arg){
   int hangcount = 0;
   float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
   int const hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
-  float lastblock_angle = NAN;
 
   demod->gain = dB2voltage(70.);
 
@@ -43,25 +42,39 @@ void *demod_dsb(void *arg){
   float kaiser_window[filter->olen];
   make_kaiser(kaiser_window,filter->olen,demod->kaiser_beta);
 
+  complex float phasestate = 0;
+
+  float loopcap = 0;
+  float lastphase = 0;
+
   while(!demod->terminate){
     // New samples
     complex float if_samples[filter->ilen];
     fillbuf(demod,if_samples,filter->ilen);
 
     int tries;
-    complex double LO_phasor;
-    for(tries=0;tries<10;tries++){
+    complex double LO_phasor = 1;
+    for(tries=0;tries<2;tries++){
 
       // Tentatively apply 2nd LO
       LO_phasor = spindown(demod,if_samples);
       execute_filter_nocopy(filter); // Stateless execution (don't commit state)
       
-      // Perform FFT on squares to ensure peak is in DC bin; extract phase
+#if !defined(COARSE)
+      break;
+#endif
+
+      // Perform FFT to ensure peak is in DC bin; extract phase
       int n;
+#if SQUARE
       for(n=0; n < filter->olen; n++){
 	complex float const s = filter->output.c[n];
 	fftbuf[n] = s * s * kaiser_window[n];
       }
+#else
+      for(n=0; n < filter->olen; n++)
+	fftbuf[n] = filter->output.c[n] * kaiser_window[n];
+#endif	
       fftwf_execute(fft_plan);
       int maxbin = 0;
       float maxenergy = 0;
@@ -75,49 +88,75 @@ void *demod_dsb(void *arg){
       if(maxbin >= filter->olen/2)
 	maxbin -= filter->olen; // negative frequency
       
-      if(maxbin == 0)
+      if(maxbin == 0) // Locked onto right bin
 	break;
-      // Coarse retune to correct bin and retry. Each bin is one full cycle per input buffer
-      double const delta_f = maxbin / (2.0 * filter->ilen); // cycles per input sample, with /2 for squaring
-      set_offset(demod,demod->demod_offset + delta_f); // Adjusts second LO for new offset
-      lastblock_angle = NAN; // Don't do fine tuning on next iteration
+      // Coarse retune to correct bin and retry. Each bin is two full cycles of carrier due to squaring
+      double delta_f = demod->samprate * maxbin / filter->ilen; // cycles per second
+#if SQUARE
+      delta_f /= 2;
+#endif
+      double new_offset = demod->demod_offset + delta_f;
+      if(new_offset > 200)
+	new_offset = 200;
+      if(new_offset < -200)
+	new_offset = -200;
+
+      set_offset(demod,new_offset); // Adjusts second LO for new offset
     }
-    // Do this only when we're done iterating
+
+
+
+
+    // single-pole RC
+    int n;
+    complex float accum = 0;
+    for(n=0; n<filter->olen;n++)
+      accum += filter->output.c[n];  // non-squared
+    float const carrier_phase = cargf(accum);
+    //    demod->cphase = carrier_phase;
+
+    loopcap = .001 * angle_mod(carg(accum - phasestate));
+    phasestate += .01 * (accum - phasestate);
+    demod->cphase = carg(phasestate);
+
+    //    loopcap += 0.0001 * carrier_phase; // RC integrator
+    //    loopcap = .01 * angle_mod(carrier_phase - lastphase);
+    //    lastphase = carrier_phase;
+
+    double new_offset = demod->demod_offset + loopcap;
+    if(new_offset > 200)
+      new_offset = 200;
+    if(new_offset < -200)
+      new_offset = -200;
+
+    set_offset(demod,new_offset);
+
+    // We're finally done iterating on frequency
     demod->second_LO_phasor = LO_phasor; // Commit LO
     commit_filter(filter);
+    demod->if_power = cpower(filter->input.c,filter->ilen);
     demod->bb_power = cpower(filter->output.c,filter->olen);
-    float n0 = compute_n0(demod);
-    demod->n0 += .01 * (n0 - demod->n0);
-
-    float const angle = cargf(fftbuf[0])/2; // DC carrier phase  in current block
-    if(!isnan(lastblock_angle)){ // Only if last block wasn't a coarse retune
-      // Perform fine frequency adjustment
-      // How much the phase changed from the last block gives us
-      // the frequency offset
-      double pdiff = angle_mod(angle - lastblock_angle);
-      
-      demod->cphase = pdiff; // Radians per block
-      pdiff *= demod->samprate / (2 * M_PI * filter->ilen); // cycles per second
-      set_offset(demod,demod->demod_offset + 0.25 * pdiff); // Ad hoc constant!!
+    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+    // Rotate onto I axis
+    {
+      assert(!isnan(demod->cphase));
+      complex float const phase = csincos(-demod->cphase);
+      assert(!isnan(crealf(phase)) && !isnan(cimagf(phase)));
+      int n;
+      for(n=0;n<filter->olen;n++)
+	filter->output.c[n] *= phase;
     }
-    lastblock_angle = angle; // Save for comparison with next block
-    complex float const phase = csincosf(-angle);
-
-    // Rotate signal onto I axis, compute signal (I) and noise (Q) levels
-    float amplitude = 0;
-    float noise = 0;
-    int n;
-    for(n=0; n<filter->olen; n++){
-      complex float const rsamp = filter->output.c[n] *= phase;
-      amplitude += crealf(rsamp) * crealf(rsamp);
-      noise += cimagf(rsamp) * cimagf(rsamp);
+    // compute signal (I) and noise (Q) levels, total level and SNR
+    float totampl;
+    {
+      complex float const p = cpowers(filter->output.c,filter->olen);
+      float const amplitude = crealf(p);
+      float const noise = cimagf(p);
+      assert(!isnan(amplitude) && !isnan(noise));
+      // signal+noise and noise powers
+      demod->snr = (amplitude / noise) - 1; // S/N as power ratio
+      totampl = sqrtf(amplitude + noise);
     }
-    // signal+noise and noise powers
-    amplitude /= filter->olen;
-    noise /= filter->olen;
-    demod->snr = (amplitude / noise) - 1; // S/N as power ratio
-
-    float totampl = sqrtf(amplitude + noise);
 
     // Q is on the right channel, so use both I and Q for gain setting so we don't blast our ears when the phase is wrong
     if(demod->gain * totampl > demod->headroom){ // Target to about -10 dBFS
@@ -133,9 +172,7 @@ void *demod_dsb(void *arg){
 	demod->gain *= agcratio;
       }
     }
-    for(n=0; n<filter->olen; n++)
-      filter->output.c[n] *= demod->gain;
-    send_stereo_audio(demod->audio,filter->output.c,n);
+    send_stereo_audio(demod->audio,filter->output.c,filter->olen,demod->gain);
   }
   fftwf_free(fftbuf);
   fftwf_destroy_plan(fft_plan);
