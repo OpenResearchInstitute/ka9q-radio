@@ -11,7 +11,8 @@ FM           FM         -8000          +8000          0
 FMF          FM         -8000          +8000          0	    FLAT     # no post-detection filtering
 AM           AM         -5000          +5000          0
 CAM          CAM        -5000          +5000          0
-DSB	     DSB	-5000	       +5000          0
+DSB	     DSB	-5000	       +5000          0      DSB
+CAM	     DSB	-5000	       +5000	      0
 IQ           IQ         -5000          +5000          0
 ISB          IQ         -5000          +5000          0	     CONJ    # add/subtract conjugates of +/- freqs
 # USB/LSB/CWU/CWL are derived from SSB
@@ -19,4 +20,5 @@ USB          SSB         +300          +3000          0
 CWU          SSB         +200           +600       +400
 LSB          SSB        -3000           -300          0
 CWL          SSB         -600           -200       -400
-CAL	     CAM	 -3000		+3000	      0       CAL
+CAL	     DSB	 -3000		+3000	      0       CAL
+
