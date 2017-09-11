@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.62 2017/08/12 08:49:40 karn Exp karn $
+# $Id: Makefile,v 1.63 2017/08/13 06:06:50 karn Exp karn $
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -34,7 +34,7 @@ modulate: modulate.o misc.o filter.o
 monitor: monitor.o multicast.o
 	$(CC) -g -o $@ $^ -lasound -lopus -lbsd -lm
 
-radio: main.o radio.o am.o fm.o ssb.o iq.o cam.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
+radio: main.o radio.o am.o fm.o ssb.o iq.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lbsd -lm
 
 libfcd.a: fcd.o hid-libusb.o
@@ -45,7 +45,6 @@ am.o: am.c dsp.h filter.h radio.h audio.h
 attr.o: attr.c attr.h
 audio.o: audio.c dsp.h audio.h rtp.h
 bandplan.o: bandplan.c bandplan.h
-cam.o: cam.c dsp.h filter.h radio.h audio.h
 control.o: control.c dsp.h radio.h
 display.o: display.c radio.h audio.h dsp.h filter.h bandplan.h multicast.h rtp.h
 dsb.o: dsb.c dsp.h filter.h radio.h audio.h
