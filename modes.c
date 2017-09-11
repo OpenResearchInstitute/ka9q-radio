@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.13 2017/08/12 09:07:37 karn Exp karn $
+// $Id: modes.c,v 1.14 2017/09/04 00:33:14 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
 #if defined(linux)
@@ -22,7 +22,6 @@ struct demodtab {
 } Demodtab[] = {
   {"fm",  demod_fm},
   {"am",  demod_am},
-  {"cam", demod_cam},
   {"ssb", demod_ssb},
   {"dsb", demod_dsb},
   {"iq",  demod_iq},
@@ -68,7 +67,10 @@ int readmodes(char *file){
       Modes[Nmodes].flags |= FLAT;
     } else if(strcasecmp(options,"cal") == 0){
       Modes[Nmodes].flags |= CAL;
+    } else if(strcasecmp(options,"dsb") == 0){
+      Modes[Nmodes].flags |= DSB;
     }
+
     Nmodes++;
   }
   return 0;
