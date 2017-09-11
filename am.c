@@ -31,25 +31,36 @@ void *demod_am(void *arg){
     demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
-    demod->bb_power = cpower(filter->output.c,filter->olen);
-    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+    //    demod->bb_power = cpower(filter->output.c,filter->olen); // do this below to save time
+    if(isnan(demod->n0))
+      demod->n0 = compute_n0(demod);
+    else
+      demod->n0 += .01 * (compute_n0(demod) - demod->n0);
 
     // Envelope detection
     float average = 0;
     float audio[filter->olen];
-    int n;
-    for(n=0; n < filter->olen; n++)
-      average += audio[n] = cabs(filter->output.c[n]);
-    average /= filter->olen;
-    
+    {
+      demod->bb_power = 0;
+      int n;
+      for(n=0; n < filter->olen; n++){
+	complex float const t = cnrmf(filter->output.c[n]);
+	demod->bb_power += t;
+	average += audio[n] = sqrtf(t);
+      }
+      demod->bb_power /= filter->olen;
+      average /= filter->olen;
+    }    
     // AM AGC is carrier-driven
     //    demod->gain = demod->headroom / average;
     demod->gain = 0.5/average;
     // Remove carrier component
-    for(n=0; n<filter->olen; n++)
-      audio[n] -= average;
-    
-    send_mono_audio(demod->audio,audio,n,demod->gain);
+    {
+      int n;
+      for(n=0; n<filter->olen; n++)
+	audio[n] -= average;
+    }  
+    send_mono_audio(demod->audio,audio,filter->olen,demod->gain);
   }
   delete_filter(filter);
   demod->filter = NULL;
