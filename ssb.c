@@ -52,7 +52,10 @@ void *demod_ssb(void *arg){
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
     demod->bb_power = rpower(filter->output.r,filter->olen);
-    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+    if(isnan(demod->n0))
+      demod->n0 = compute_n0(demod);
+    else
+      demod->n0 += .01 * (compute_n0(demod) - demod->n0);
 
     // Automatic gain control
     float const amplitude = sqrtf(demod->bb_power);
