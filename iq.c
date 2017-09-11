@@ -39,8 +39,11 @@ void *demod_iq(void *arg){
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
     demod->bb_power = cpower(filter->output.c,filter->olen);
-    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
-
+    if(isnan(demod->n0))
+      demod->n0 = compute_n0(demod);
+    else
+      demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+    
     // Automatic gain control
     // Find average amplitude for AGC
     float amplitude = sqrtf(demod->bb_power);
