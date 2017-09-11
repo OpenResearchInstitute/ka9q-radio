@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.15 2017/09/07 17:57:47 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.16 2017/09/11 04:38:23 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -86,10 +86,8 @@ void *demod_dsb(void *arg){
   float integrator = 0;                 // 2nd order loop integrator
   float delta_f = 0;                    // FFT-derived offset
   float ramp = 0;                       // Frequency sweep (do we still need this?)
-
-  int unlock_time = 0; // Time since apparent loss of lock, samples
-
-  float calibrate_offset = 0; // Frequency error for calibration mode
+  int unlock_time = 0;                  // Time since apparent loss of lock, samples
+  float calibrate_offset = 0;           // Frequency error for calibration mode
 
   while(!demod->terminate){
     // New samples
@@ -98,9 +96,9 @@ void *demod_dsb(void *arg){
     demod->second_LO_phasor = spindown(demod,if_samples);
     demod->if_power = cpower(filter->input.c,filter->ilen);
     if(!isnan(demod->n0))
-	 demod->n0 += .01 * (compute_n0(demod) - demod->n0);
-       else
-	 demod->n0 = compute_n0(demod); // Happens at startup
+      demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+    else
+      demod->n0 = compute_n0(demod); // Happens at startup
     execute_filter(filter);
 
     // Copy into circular input buffer for FFT in case we need it
@@ -179,6 +177,7 @@ void *demod_dsb(void *arg){
       fine_phasor *= fine_phasor_step;
 
       if((demod->flags & CAL) && demod->snr >= snrthresh){
+	// In calibrate mode, keep highly smoothed estimate of frequency offset
 	calibrate_offset += .00001 * (demod->demod_offset - calibrate_offset);
       }
     }
@@ -209,10 +208,10 @@ void *demod_dsb(void *arg){
       }
     }
     if((demod->flags & CAL) && demod->snr >= snrthresh){
+      // In calibrate mode, apply and clear the measured offset
       set_cal(demod,demod->calibrate - calibrate_offset/demod->frequency);
       calibrate_offset = 0;
     }
-
 
     // Q is on the right channel, so use both I and Q for gain setting so we don't blast our ears when the phase is wrong
     if(demod->gain * totampl > demod->headroom){ // Target to about -10 dBFS
