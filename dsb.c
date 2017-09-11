@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.14 2017/09/07 02:47:08 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.15 2017/09/07 17:57:47 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -17,161 +17,208 @@
 #include "radio.h"
 #include "audio.h"
 
-static float const hangtime = 1.1;    // Hang for 1.1 seconds after new peak
-static float const recovery_rate = 6; // Recover gain at 6 db/sec after hang finishes
+// Configurable parameters
+
+static float const hangtime = 1.1;      // AGC Hang for 1.1 seconds after new peak
+static float const recovery_rate = 6;   // AGC recovery rate 6 db/sec after hang finishes
+static float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
+static int   const fftsize = 1 << 16;   // search FFT bin size = 64K = 1.37 sec @ 48 kHz
+static float const damping = M_SQRT1_2; // PLL loop damping factor; 1/sqrt(2) is "critical" damping
+static float const searchhigh = 1000;   // FFT search limits
+static float const searchlow = -1000;
+static float const unlock_time = 1;     // Search 1 sec after loss of lock
 
 
 void *demod_dsb(void *arg){
   pthread_setname("dsb");
   assert(arg != NULL);
-
   struct demod * const demod = arg;
+
+#if 0
+  if(demod->flags != 0){
+    fprintf(stderr,"flags %d\n",demod->flags);
+    exit(1);
+  }
+#endif
+  // Set derived (and other) constants
+  float const samptime = demod->decimate / demod->samprate;  // Time between (decimated) samples
+  float const snrthresh = powf(10,snrthreshdb/10);           // SNR threshold for lock
+  // FFT search params
+  int   const unlock_limit = unlock_time / samptime;        // Start acquiring after loss of lock
+  float const binsize = 1 / (fftsize * samptime);           // FFT bin size, Hz
+  int   const lowlimit = round(searchlow / binsize);        // FFT bin indices for search limits
+  int   const highlimit = round(searchhigh / binsize);
+
+  // Second-order PLL loop filter (see Gardner)
+  float const phase_scale = 2 * M_PI * samptime;           // Convert hertz to radians/sample
+  float const vcogain = 2*M_PI;                            // 1 Hz = 2pi radians/sec per "volt"
+  float const pdgain = 1;                                  // "volts" per radian (unity)
+  float const natfreq = binsize * 2*M_PI;                  // loop natural frequency in rad/sec
+  float const tau1 = vcogain * pdgain / (natfreq*natfreq); // 1 / 2pi
+  float const integrator_gain = 1 / tau1;                  // 2pi
+  float const tau2 = 2 * damping / natfreq;                // sqrt(2) / 2pi = 1/ (pi*sqrt(2))
+  float const prop_gain = tau2 / tau1;                     // sqrt(2)/2
+  float const ramprate = binsize * samptime / integrator_gain;   // sweep at one bin/sec
+
+  // AGC
   int hangcount = 0;
   float const agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
   int const hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
 
   demod->gain = dB2voltage(70.);
+  demod->snr = -INFINITY;
 
+  // Detection filter
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
   demod->filter = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
-  // Kaiser window and FFT used for coarse frequency acquision
-  complex float * const fftbuf = fftwf_alloc_complex(filter->olen);
-  fftwf_plan fft_plan = fftwf_plan_dft_1d(filter->olen,fftbuf,fftbuf,FFTW_FORWARD,FFTW_ESTIMATE);
-  float kaiser_window[filter->olen];
-  make_kaiser(kaiser_window,filter->olen,demod->kaiser_beta);
+  // Search FFT
+  complex float * const fftinbuf = fftwf_alloc_complex(fftsize);
+  complex float * const fftoutbuf = fftwf_alloc_complex(fftsize);  
+  fftwf_plan fft_plan = fftwf_plan_dft_1d(fftsize,fftinbuf,fftoutbuf,FFTW_FORWARD,FFTW_ESTIMATE);
+  int fft_ptr = 0;
 
+  // Initialize PLL
+  complex float fine_phasor = 1;        // fine offset LO
+  complex float coarse_phasor = 1;      // FFT-controlled offset LO
+  complex float coarse_phasor_step = 1; // 0 Hz to start
+  float integrator = 0;                 // 2nd order loop integrator
+  float delta_f = 0;                    // FFT-derived offset
+  float ramp = 0;                       // Frequency sweep (do we still need this?)
 
-  complex double offset_phasor = 1; // offset LO
-  float integrator = 0; // 2nd order loop integrator
-  complex double offset_step = 1;
-  const double samptime = demod->decimate / demod->samprate;
+  int unlock_time = 0; // Time since apparent loss of lock, samples
 
-  // Proportionality constant for offset oscillator in radians per decimated (output) sample per hertz
-  const double phase_scale = 2 * M_PI * samptime;
-  // Second-order loop (see Gardner)
-  const float vcogain = 2*M_PI; // 1 Hz = 2pi radians/sec per "volt"
-  const float pdgain = 1;       // "volts" per radian (unity)
-  const float natfreq = 1 * (2*M_PI);   // natural frequency 1 Hz = 2*pi rad/s
-  const float tau1 = vcogain * pdgain / (natfreq*natfreq); // 1 / 2pi
-  const float integrator_gain = 1 / tau1; // 2pi
-  const float damping = M_SQRT1_2;
-  const float tau2 = 2 * damping / natfreq; // sqrt(2) / 2pi = 1/ (pi*sqrt(2))
-  const float prop_gain = tau2 / tau1;    // sqrt(2)/2
+  float calibrate_offset = 0; // Frequency error for calibration mode
 
   while(!demod->terminate){
     // New samples
     complex float if_samples[filter->ilen];
     fillbuf(demod,if_samples,filter->ilen);
+    demod->second_LO_phasor = spindown(demod,if_samples);
+    demod->if_power = cpower(filter->input.c,filter->ilen);
+    if(!isnan(demod->n0))
+	 demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+       else
+	 demod->n0 = compute_n0(demod); // Happens at startup
+    execute_filter(filter);
 
-    int tries;
-    complex double LO_phasor = 1;
-    for(tries=0;tries<2;tries++){
+    // Copy into circular input buffer for FFT in case we need it
+    if(demod->flags & DSB){
+      int i;
+      for(i=0;i<filter->olen;i++)
+	fftinbuf[fft_ptr+i] = filter->output.c[i] * filter->output.c[i];
+    } else {
+      memcpy(fftinbuf+fft_ptr,filter->output.c,filter->olen*sizeof(*filter->output.c));
+    }
+    fft_ptr = (fft_ptr + filter->olen) % fftsize; // assumes filter->olen divides fftsize, otherwise we'll have a buffer overrun!
 
-      // Tentatively apply 2nd LO
-      LO_phasor = spindown(demod,if_samples);
-      execute_filter_nocopy(filter); // Stateless execution (don't commit state)
-      
-#if !defined(COARSE)
-      break;
-#endif
-
-      // Perform FFT to ensure peak is in DC bin; extract phase
-      int n;
-#if SQUARE
-      for(n=0; n < filter->olen; n++){
-	complex float const s = filter->output.c[n];
-	fftbuf[n] = s * s * kaiser_window[n];
-      }
-#else
-      for(n=0; n < filter->olen; n++)
-	fftbuf[n] = filter->output.c[n] * kaiser_window[n];
-#endif	
-      fftwf_execute(fft_plan);
-      int maxbin = 0;
-      float maxenergy = 0;
-      for(n=0;n<filter->olen;n++){
-	float const e = cnrmf(fftbuf[n]);
-	if(e > maxenergy){
-	  maxenergy = e;
-	  maxbin = n;
+    if(demod->snr < snrthresh){
+      unlock_time += filter->olen;
+      if(unlock_time >= unlock_limit){
+	// Run FFT, look for peak bin
+	fftwf_execute(fft_plan);
+	// Search limited range of FFT buffer for peak energy
+	int maxbin = 0;
+	float maxenergy = 0;
+	
+	int n;
+	for(n = lowlimit; n <= highlimit; n++){
+	  float const e = cnrmf(fftoutbuf[(n + fftsize) % fftsize]);
+	  if(e > maxenergy){
+	    maxenergy = e;
+	    maxbin = n;
+	  }
 	}
+	
+	delta_f = binsize * maxbin; // cycles per second
+	if(demod->flags & DSB)
+	  delta_f /= 2; // Squaring loop provides 2x frequency
+	
+	coarse_phasor_step = csincos(-phase_scale * delta_f);
+	if(ramp == 0) // not already sweeping
+	  ramp = ramprate;
       }
-      if(maxbin >= filter->olen/2)
-	maxbin -= filter->olen; // negative frequency
-      
-      if(maxbin == 0) // Locked onto right bin
-	break;
-      // Coarse retune to correct bin and retry. Each bin is two full cycles of carrier due to squaring
-      double delta_f = demod->samprate * maxbin / filter->ilen; // cycles per second
-#if SQUARE
-      delta_f /= 2;
-#endif
-      double new_offset = demod->demod_offset + delta_f;
-      if(new_offset > 200)
-	new_offset = 200;
-      if(new_offset < -200)
-	new_offset = -200;
-
-      set_offset(demod,new_offset); // Adjusts second LO for new offset
+    } else {
+      unlock_time = 0; // Reset
+      ramp = 0;
     }
 
-
-
-    // Lag-lead (integral plus proportional)
-
-    // Apply offset, determine phase
+    // Apply offset, determine fine frequency adjustment with PLL
     int n;
     complex float accum = 0;
-    double offset = demod->demod_offset; // Grab value that might have been manually changed
     for(n=0;n<filter->olen;n++){
-      filter->output.c[n] *= offset_phasor;
-      accum += filter->output.c[n];
-      double carrier_phase = carg(filter->output.c[n]);
-      integrator += carrier_phase * samptime;
-      float feedback = integrator * integrator_gain + prop_gain * carrier_phase;
-      offset = feedback > 100 ? 100 : feedback < -100 ? -100 : feedback;
-      offset_step = csincos(-phase_scale * offset);
-      offset_phasor *= offset_step;
-    }
-    demod->cphase = cargf(accum);
-    offset_phasor /= cabs(offset_phasor);
-    demod->demod_offset = offset;
+      filter->output.c[n] *= coarse_phasor;
+      filter->output.c[n] *= fine_phasor;
+      float carrier_phase;
+      if(demod->flags & DSB){
+	complex float const ss = filter->output.c[n] * filter->output.c[n];
+	accum += ss;
+	//carrier_phase = fast_cargf(ss)/2;
+	carrier_phase = cargf(ss)/2;
+      } else {
+	accum += filter->output.c[n];
+	// Fast (?) approximation to atan2/carg
+	//carrier_phase = fast_cargf(filter->output.c[n]);
+	carrier_phase = cargf(filter->output.c[n]);
+      }	
+      // Lag-lead (integral plus proportional)
+      integrator += carrier_phase * samptime + ramp;
+      // Acquisition frequency sweep between +/- binsize/2
+      if((integrator * integrator_gain >= binsize/2) && (ramp > 0))
+	ramp = -ramprate; // reached sweep limit, toggle ramp direction
+      else if((integrator * integrator_gain <= -binsize/2) && (ramp < 0))
+	ramp = ramprate;
+	
+      float const feedback = integrator_gain * integrator + prop_gain * carrier_phase; // units of Hz
+      demod->demod_offset = feedback + delta_f;
+      // Small angle approximation to csincosf(-phase_scale * feedback); 
+      complex float const fine_phasor_step = CMPLXF(1,-phase_scale * feedback); 
 
-    // We're finally done iterating on frequency
-    demod->second_LO_phasor = LO_phasor; // Commit LO
-    commit_filter(filter);
-    demod->if_power = cpower(filter->input.c,filter->ilen);
-    demod->bb_power = cpower(filter->output.c,filter->olen);
-    demod->n0 += .01 * (compute_n0(demod) - demod->n0);
-#if 0
-    // Rotate onto I axis
-    {
-      assert(!isnan(demod->cphase));
-      complex float const phase = csincos(-demod->cphase);
-      assert(!isnan(crealf(phase)) && !isnan(cimagf(phase)));
-      int n;
-      for(n=0;n<filter->olen;n++)
-	filter->output.c[n] *= phase;
+      coarse_phasor *= coarse_phasor_step;
+      fine_phasor *= fine_phasor_step;
+
+      if((demod->flags & CAL) && demod->snr >= snrthresh){
+	calibrate_offset += .00001 * (demod->demod_offset - calibrate_offset);
+      }
     }
-#endif
+    if(demod->flags & DSB)
+      demod->cphase = cargf(accum)/2;
+    else
+      demod->cphase = cargf(accum);
+
+    fine_phasor /= cabsf(fine_phasor);
+    coarse_phasor /= cabsf(coarse_phasor);
+
+
     // compute signal (I) and noise (Q) levels, total level and SNR
     float totampl;
     {
       complex float const p = cpowers(filter->output.c,filter->olen);
-      float const amplitude = crealf(p);
+      float const signal = crealf(p);
       float const noise = cimagf(p);
-      assert(!isnan(amplitude) && !isnan(noise));
-      // signal+noise and noise powers
-      demod->snr = (amplitude / noise) - 1; // S/N as power ratio
-      totampl = sqrtf(amplitude + noise);
+      if(isnan(signal) || isnan(noise)){
+	// Startup transient
+	demod->bb_power = 0;
+	demod->snr = -INFINITY;
+	totampl = 0;
+      } else {
+	demod->snr = (signal / noise) - 1; // S/N as power ratio
+	demod->bb_power = signal + noise;
+	totampl = sqrtf(signal + noise);
+      }
     }
+    if((demod->flags & CAL) && demod->snr >= snrthresh){
+      set_cal(demod,demod->calibrate - calibrate_offset/demod->frequency);
+      calibrate_offset = 0;
+    }
+
 
     // Q is on the right channel, so use both I and Q for gain setting so we don't blast our ears when the phase is wrong
     if(demod->gain * totampl > demod->headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
-      demod->gain = demod->headroom / totampl;
+      if(totampl != 0)
+	demod->gain = demod->headroom / totampl;
       hangcount = hangmax;
     } else {
       // Not a new peak, but the AGC is still hanging at the last peak
@@ -184,7 +231,8 @@ void *demod_dsb(void *arg){
     }
     send_stereo_audio(demod->audio,filter->output.c,filter->olen,demod->gain);
   }
-  fftwf_free(fftbuf);
+  fftwf_free(fftinbuf);
+  fftwf_free(fftoutbuf);  
   fftwf_destroy_plan(fft_plan);
   delete_filter(filter);
   demod->filter = NULL;
