@@ -159,7 +159,7 @@ void *demod_fm(void *arg){
       if(plfilter->output.r[n] != 0)
 	break;
 
-    if(n < plfilter->olen){
+    if(n < plfilter->olen){ // Not silent
       if(afilter == NULL)
 	send_mono_audio(demod->audio,plfilter->input.r,plfilter->ilen,demod->gain); // Send filter input
       else
@@ -170,7 +170,7 @@ void *demod_fm(void *arg){
       float peakenergy = 0;
       float totenergy = 0; // Total energy, all bins
       assert(malloc_usable_size(pl_spectrum) >= pl_fft_size/2 * sizeof(complex float));
-      for(n=1;n<pl_fft_size/2;n++){
+      for(n=1;n<pl_fft_size/2;n++){ // skip DC
 	float energy = cnrmf(pl_spectrum[n]);
 	totenergy += energy;
 	if(energy > peakenergy){
