@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.17 2017/09/07 02:41:10 karn Exp karn $
+// $Id: misc.c,v 1.18 2017/09/07 18:00:51 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -59,6 +59,36 @@ float const cnrmf(const complex float x){
 double const cnrm(const complex double x){
   return creal(x)*creal(x) + cimag(x) * cimag(x);
 }
+
+// Fast arctangent approximation
+// http://www.embedded.com/design/other/4216719/Performing-efficient-arctangent-approximation
+float const fast_atan2f(float const y,float const x){
+  float term;
+  if(fabsf(x) > fabsf(y)){
+    // octants 1, 4, 5, 8
+    term = (x * y) / (x*x + 0.28125*y*y);
+    if(x > 0)
+      return term; // 1 or 8
+    else {
+      if(term > 0) // 5 octant - special case
+	return -M_PI + term;
+      else
+	return M_PI + term; // octant 4;
+    }
+  } else {
+    // octants 2, 3, 6, 7
+    term = -(x * y) / (y*y + 0.28125*x*x);
+    if(y > 0)
+      return M_PI/2 + term; // 2 or 3
+    else
+      return -M_PI/2 + term; // 6 or 7
+  }
+}
+float const fast_cargf(complex float const x){
+  return fast_atan2f(cimagf(x),creal(x));
+}
+
+
 
 float complex const cpowers(const float complex * const data,const int len){
   int n;
