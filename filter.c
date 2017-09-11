@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.24 2017/09/04 00:35:58 karn Exp karn $
+// $Id: filter.c,v 1.25 2017/09/05 17:43:38 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -132,6 +132,8 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
 // Segfault will occur if master is deleted and slave is executed
 struct filter *create_filter_slave(const struct filter * master,complex float * response,int decimate){
   assert(master != NULL);
+  if(master == NULL)
+    return NULL;
 
   int const N = master->ilen + master->impulse_length - 1;
   int const N_dec = N / decimate;
@@ -141,7 +143,8 @@ struct filter *create_filter_slave(const struct filter * master,complex float * 
     fprintf(stderr,"Warning: FFT size %'u is not divisible by decimation ratio %d\n",N,decimate);
 
   struct filter * const f = calloc(1,sizeof(*f));
-  assert(f != NULL);
+  if(f == NULL)
+    return NULL;
   pthread_mutex_init(&f->mutex,NULL);
   f->slave = 1;
   // Share all but decimation ratio, response and output
@@ -186,7 +189,11 @@ struct filter *create_filter_slave(const struct filter * master,complex float * 
 
 // Perform overlap-and-save operation for fast convolution; note memmove is non-destructive
 // This "commits" the filter by updating hidden state
-int commit_filter(struct filter *f){
+int commit_filter(struct filter * const f){
+  assert(f != NULL);
+  if(f == NULL)
+    return -1;
+
   switch(f->in_type){
   default:
   case COMPLEX:
@@ -201,7 +208,8 @@ int commit_filter(struct filter *f){
 
 
 // Execute the filter after the input buffer has been loaded
-int execute_filter(struct filter *f){
+int execute_filter(struct filter * const f){
+  assert(f != NULL);
   if(f == NULL)
     return -1;
   execute_filter_nocopy(f);
@@ -211,7 +219,8 @@ int execute_filter(struct filter *f){
 }
 
 
-int execute_filter_nocopy(struct filter *f){
+int execute_filter_nocopy(struct filter * const f){
+  assert(f != NULL);
   if(f == NULL)
     return -1;
 
@@ -224,20 +233,6 @@ int execute_filter_nocopy(struct filter *f){
   int const N_dec = N / f->decimate;                     // points in (decimated) output buffer
 
   if(!f->slave){
-#if !defined(NDEBUG)
-    if(f->in_type == COMPLEX){
-      int i;
-      for(i=0;i<N;i++){
-	assert(!isnan(cimagf(f->input_buffer.c[i])));
-	assert(!isnan(crealf(f->input_buffer.c[i])));
-      }
-    } else {
-      int i;
-      for(i=0;i<N;i++){
-	assert(!isnan(f->input_buffer.r[i]));
-      }
-    }
-#endif
     fftwf_execute(f->fwd_plan);  // Forward transform only in master
   }
 
@@ -250,7 +245,6 @@ int execute_filter_nocopy(struct filter *f){
   int p;
   for(p=0; p <= N_dec/2; p++){
     f->f_fdomain[p] = f->response[p] * f->fdomain[p];
-    assert(!isnan(crealf(f->f_fdomain[p])) && !isnan(crealf(f->response[p])) && !isnan(creal(f->fdomain[p])));
   }
   if(f->in_type == REAL){
     if(f->out_type != REAL){
@@ -259,7 +253,6 @@ int execute_filter_nocopy(struct filter *f){
       int p,dn;
       for(p=1,dn=N_dec-1; dn > N_dec/2; p++,dn--){
 	f->f_fdomain[dn] = f->response[dn] * conjf(f->fdomain[p]);
-	assert(!isnan(crealf(f->f_fdomain[dn])) && !isnan(crealf(f->f_fdomain[dn])));
       }
     } // out_type == REAL already handled
   } else { // in_type == COMPLEX
@@ -272,7 +265,6 @@ int execute_filter_nocopy(struct filter *f){
       int n,dn;
       for(n=N-1,dn=N_dec-1; dn > N_dec/2;n--,dn--){
 	f->f_fdomain[dn] = f->response[dn] * f->fdomain[n];
-	assert(!isnan(crealf(f->f_fdomain[dn])) && !isnan(crealf(f->f_fdomain[dn])));
       }
     } else {
       // Real output; fold conjugates of negative frequencies into positive to force pure real result
@@ -281,7 +273,6 @@ int execute_filter_nocopy(struct filter *f){
       int n,p,dn;
       for(n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--){
 	f->f_fdomain[p] += conjf(f->response[dn] * f->fdomain[n]);
-	assert(!isnan(crealf(f->f_fdomain[p])) && !isnan(crealf(f->f_fdomain[p])));
       }
     }
   }
@@ -303,7 +294,7 @@ int execute_filter_nocopy(struct filter *f){
   return 0;
 }
 
-int delete_filter(struct filter *f){
+int delete_filter(struct filter * const f){
   if(f == NULL)
     return 0;
   
@@ -366,7 +357,7 @@ const static float blackman(int const n,int const M){
 
 // Jim Kaiser was in my Bellcore department in the 1980s. Wonder whatever happened to him.
 // Superseded by make_kaiser() routine that more efficiently computes entire window at once
-const static float kaiser(const int n,const int M, const float beta){
+static float const kaiser(int const n,int const M, float const beta){
   static float old_beta = NAN;
   static float old_inv_denom;
 
@@ -382,8 +373,10 @@ const static float kaiser(const int n,const int M, const float beta){
 
 // Compute an entire Kaiser window
 // More efficient than repeatedly calling kaiser(n,M,beta)
-int make_kaiser(float *window,const int M,const float beta){
+int make_kaiser(float * const window,int const M,float const beta){
   assert(window != NULL);
+  if(window == NULL)
+    return -1;
   // Precompute unchanging partial values
   float const numc = M_PI * beta;
   float const inv_denom = 1. / i0(numc); // Inverse of denominator
@@ -411,6 +404,8 @@ int make_kaiser(float *window,const int M,const float beta){
 // L and M refer to the decimated output
 int window_filter(int const L,int const M,complex float * const response,float const beta){
   assert(response != NULL);
+  if(response == NULL)
+    return -1;
   int const N = L + M - 1;
   assert(malloc_usable_size(response) >= N*sizeof(*response));
   // fftw_plan can overwrite its buffers, so we're forced to make a temp. Ugh.
@@ -462,8 +457,10 @@ int window_filter(int const L,int const M,complex float * const response,float c
 // response[] is only N/2+1 elements containing DC and positive frequencies only
 // Negative frequencies are inplicitly the conjugate of the positive frequencies
 // L and M refer to the decimated output
-int window_rfilter(const int L,const int M,complex float * const response,const float beta){
+int window_rfilter(int const L,int const M,complex float * const response,float const beta){
   assert(response != NULL);
+  if(response == NULL)
+    return -1;
   int const N = L + M - 1;
   assert(malloc_usable_size(response) >= (N/2+1)*sizeof(*response));
   complex float * const buffer = fftwf_alloc_complex(N/2 + 1); // plan destroys its input
@@ -511,20 +508,21 @@ int window_rfilter(const int L,const int M,complex float * const response,const 
 }
 
 // Gain of filter (output / input) on uniform gaussian noise
-float const noise_gain(struct filter const *filter){
+float const noise_gain(struct filter const * const filter){
   if(filter == NULL)
-    return 0;
-  const int N = filter->ilen + filter->impulse_length - 1;
-  const int N_dec = N / filter->decimate;
+    return NAN;
+  int const N = filter->ilen + filter->impulse_length - 1;
+  int const N_dec = N / filter->decimate;
 
   float sum = 0;
-  if(filter->out_type != REAL){
+  if(filter->in_type == REAL && filter->out_type == REAL){
     int i;
-    for(i=0;i<N_dec;i++)
+
+    for(i=0;i<N_dec/2+1;i++)
       sum += cnrmf(filter->response[i]);
   } else {
     int i;
-    for(i=0;i<N_dec/2+1;i++)
+    for(i=0;i<N_dec;i++)
       sum += cnrmf(filter->response[i]);
   }
   // the factor N compensates for the unity gain scaling
@@ -539,8 +537,10 @@ float const noise_gain(struct filter const *filter){
 }
 
 
-int set_filter(struct filter *filter,float dsamprate,float low,float high,float kaiser_beta){
+int set_filter(struct filter * const filter,float const dsamprate,float const low,float const high,float const kaiser_beta){
   assert(filter != NULL);
+  if(filter == NULL)
+    return -1;
   
   int const L_dec = filter->olen;
   int const M_dec = (filter->impulse_length - 1) / filter->decimate + 1;
@@ -581,9 +581,11 @@ int set_filter(struct filter *filter,float dsamprate,float low,float high,float 
 
 // Experimental IIR complex notch filter
 
-struct notchfilter *notch_create(double f,float bw){
+struct notchfilter *notch_create(double const f,float const bw){
   struct notchfilter *nf = calloc(1,sizeof(struct notchfilter));
-  assert(nf != NULL);
+  if(nf == NULL)
+    return NULL;
+
   nf->osc_phase = 1;
   nf->osc_step = csincos(2*M_PI*f);
   nf->dcstate = 0;
@@ -591,8 +593,9 @@ struct notchfilter *notch_create(double f,float bw){
   return nf;
 }
 
-complex float notch(struct notchfilter *nf,complex float s){
-  assert(nf != NULL);
+complex float notch(struct notchfilter * const nf,complex float s){
+  if(nf == NULL)
+    return NAN;
   s = s * conj(nf->osc_phase) - nf->dcstate; // Spin down and remove DC
   nf->dcstate += nf->bw * s;   // Update smoothed estimate
   s *= nf->osc_phase;          // Spin back up
