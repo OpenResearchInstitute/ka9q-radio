@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.14 2017/09/05 17:44:58 karn Exp karn $
+// $Id: dsp.h,v 1.15 2017/09/07 02:39:33 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -10,6 +10,11 @@
 #define M_1_2PI (0.5 * M_1_PI) // fraction of a rotation in one radian
 
 double const angle_mod(double);
+
+float const fast_atan2f(float,float);
+inline float const fast_cargf(complex float x){
+  return fast_atan2f(cimagf(x),crealf(x));
+}
 
 complex float const csincosf(const float x);
 complex double const csincos(const double x);
