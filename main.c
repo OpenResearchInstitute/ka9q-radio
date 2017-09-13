@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.70 2017/08/13 06:06:59 karn Exp karn $
+// $Id: main.c,v 1.71 2017/09/04 00:42:36 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -158,7 +158,14 @@ int main(int argc,char *argv[]){
       Quiet++;  // Suppress display
       break;
     case 'R':   // Set audio multicast address
-      strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
+      if((strncmp(optarg,"/",1) == 0) || (strncmp(optarg,"./",2) == 0)){
+	Audio.filename = optarg;
+	if((Audio.stream = fopen(Audio.filename,"w")) == NULL){
+	  fprintf(stderr,"Can't stream to %s\n",Audio.filename);
+	  exit(1);
+	}
+      } else 
+	strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
       break;
     case 't':   // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);

@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.76 2017/09/07 18:06:53 karn Exp karn $
+// $Id: display.c,v 1.77 2017/09/11 04:32:27 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -108,11 +108,18 @@ void getentry(char const *prompt,char *response,int len){
   delwin(pwin);
 }
 
+FILE *Tty;
+SCREEN *Term;
+
 
 void display_cleanup(void *arg){
   echo();
   nocbreak();
   endwin();
+  if(Term)
+    delscreen(Term);
+  if(Tty)
+    fclose(Tty);
 }
 
 // Adjust the selected item up or down one step
@@ -200,9 +207,19 @@ void *display(void *arg){
   double tunestep10 = pow(10.,demod->tunestep);
   int tuneitem = 0;
 
-  pthread_cleanup_push(display_cleanup,demod);
+  //  pthread_cleanup_push(display_cleanup,demod);
 
-  initscr();
+#if 0
+  if(!isatty(fileno(stdout))){
+#endif
+    // Stdout has been redirected, talk directly to the terminal
+    Tty = fopen("/dev/tty","r+");
+    Term = newterm(NULL,Tty,Tty);
+    set_term(Term);
+#if 0
+  } else 
+    initscr(); // don't do both!
+#endif
   keypad(stdscr,TRUE);
   timeout(Update_interval); // update interval when nothing is typed
   cbreak();
@@ -385,17 +402,20 @@ void *display(void *arg){
     wprintw(sdr,"LNA%18u\n",demod->status.lna_gain);   // SDR dependent
     wprintw(sdr,"Mix gain%13u\n",demod->status.mixer_gain); // SDR dependent
     wprintw(sdr,"IF gain%14u dB\n",demod->status.if_gain); // SDR dependent
-    // Audio output dest address (usually multicast)
-    wprintw(sdr,"Dest  %s\n",audio->audio_mcast_address_text);
-    if(audio->opus_bitrate > 0){
+    if(audio->filename != NULL){
+      wprintw(sdr,"PCM stream %s\n",audio->filename);
+    } else {
+      // Audio output dest address (usually multicast)
+      wprintw(sdr,"Dest  %s\n",audio->audio_mcast_address_text);
+      if(audio->opus_bitrate > 0){
       wprintw(sdr,"Opus%4.0fms%4s",audio->opus_blocktime,audio->opus_dtx ? " dtx":"");
       wprintw(sdr,"%7.1f kb/s\n",audio->opus_bitrate/1000.);
-    } else {
-      wprintw(sdr,"PCM %'17d Hz\n",audio->samprate);
+      } else {
+	wprintw(sdr,"PCM %'17d Hz\n",audio->samprate);
+      }
+      wprintw(sdr,"Bitrate%'14.0f bps\n",audio->bitrate);
+      wprintw(sdr,"Pkts%'17llu\n",audio->audio_packets);
     }
-    wprintw(sdr,"Bitrate%'14.0f bps\n",audio->bitrate);
-    wprintw(sdr,"Pkts%'17llu\n",audio->audio_packets);
-
     wnoutrefresh(sdr);
     doupdate();
 
@@ -620,7 +640,13 @@ void *display(void *arg){
     doupdate();
   }
  done:;
-  pthread_cleanup_pop(1);
+  endwin();
+  set_term(NULL);
+  if(Term != NULL)
+    delscreen(Term);
+  if(Tty != NULL)
+    fclose(Tty);
+  
   // Dump receiver state to default
   savestate(demod,"default");
   exit(0);

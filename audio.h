@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.22 2017/08/06 00:08:25 karn Exp karn $
+// $Id: audio.h,v 1.23 2017/09/07 02:42:38 karn Exp karn $
 // Variables and structures for KA9Q SDR receiver audio subsystem
 // Copyright 2017 Phil Karn, KA9Q
 
@@ -17,6 +17,8 @@ struct audio {
   unsigned long long audio_packets;
   float bitrate;      // Average recent bitrate
 
+  char *filename;
+  FILE *stream;       // File pointer to stream to instead of multicasting
   
   // Opus encoder parameters
   // Opus only takes stereo because it compresses mono-as-stereo very efficiently
