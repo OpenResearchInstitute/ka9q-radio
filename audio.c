@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.39 2017/08/12 08:49:40 karn Exp karn $
+// $Id: audio.c,v 1.40 2017/09/07 02:43:13 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -43,20 +43,39 @@ static short const scaleclip(float const x){
   
 // Send 'size' stereo samples, each in a complex float
 int send_stereo_audio(struct audio const * const audio,complex float const * const buffer,int const size, float const gain){
-  int i;
-  complex float obuf[size];
-  for(i=0;i<size;i++)
-    obuf[i] = buffer[i] * gain;
+  if(audio->stream){
+    int i;
+    for(i=0;i<size;i++){
+      int16_t sample;
 
-  int fd = audio->opus_bitrate ? audio->opus_stereo_write_fd : audio->pcm_stereo_write_fd;
-  write(fd,obuf,sizeof(obuf));
+      sample = scaleclip(crealf(buffer[i]) * gain);
+      fwrite(&sample,sizeof(sample),1,audio->stream);
+      sample = scaleclip(cimagf(buffer[i]) * gain);
+      fwrite(&sample,sizeof(sample),1,audio->stream);
+    }
+  } else {
+    int i;
+    complex float obuf[size];
+    for(i=0;i<size;i++)
+      obuf[i] = buffer[i] * gain;
+    int fd = audio->opus_bitrate ? audio->opus_stereo_write_fd : audio->pcm_stereo_write_fd;
+    write(fd,obuf,sizeof(obuf));
+  }
   return 0;
 }
 
 // Send 'size' mono samples, each in a float
 int send_mono_audio(struct audio const * const audio,float const * const buffer,int const size,float const gain){
-
-  if(audio->opus_bitrate != 0){
+  if(audio->stream){
+    // Stream in stereo for consistency
+    int i;
+    for(i=0;i<size;i++){
+      int16_t sample;
+      sample = scaleclip(buffer[i] * gain);
+      fwrite(&sample,sizeof(sample),1,audio->stream);
+      fwrite(&sample,sizeof(sample),1,audio->stream);
+    }
+  } else if(audio->opus_bitrate != 0){
     // Send to opus encoder as stereo with duplicate channels
     complex float obuf[size];
     int i;
@@ -74,6 +93,7 @@ int send_mono_audio(struct audio const * const audio,float const * const buffer,
   }
   return 0;
 }
+
 
 // Thread for compressing and multicasting audio with Opus codec
 void *stereo_opus_audio(void *arg){
@@ -276,14 +296,14 @@ void *mono_pcm_audio(void *arg){
 
 // Set up pipes to encoding/sending tasks and start them up
 int setup_audio(struct audio * const audio){
-  
+  assert(audio != NULL);
   if(Verbose)
     fprintf(stderr,"%s\n",opus_get_version_string());
-  
-  assert(audio != NULL);
 
+  if(audio->stream != NULL)
+    return 0;
   audio->bitrate = 0;
-  
+
   // Set up audio output stream(s)
   if(audio->audio_mcast_fd > 0)
     close(audio->audio_mcast_fd);
