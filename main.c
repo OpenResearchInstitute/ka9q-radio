@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.71 2017/09/04 00:42:36 karn Exp karn $
+// $Id: main.c,v 1.72 2017/09/13 23:09:30 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -107,12 +107,11 @@ int main(int argc,char *argv[]){
   demod->input_source_address.sa_family = -1; // Set invalid
   demod->low = NAN;
   demod->high = NAN;
-  demod->dial_offset = NAN;
+  demod->shift = 0;
 
   // Find any file argument and load it
-  int c;
   char optstring[] = "B:c:s:f:I:k:l:L:m:M:r:R:qo:t:u:vx";
-  while((c = getopt(argc,argv,optstring)) != EOF)
+  while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
     loadstate(demod,argv[optind]);
@@ -121,6 +120,7 @@ int main(int argc,char *argv[]){
   
   // Go back and re-read args for real this time, possibly overwriting loaded parameters
   optind = 1;
+  int c;
   while((c = getopt(argc,argv,optstring)) != EOF){
     switch(c){
     case 'B':   // Opus encoder block time; must be 2.5, 5, 10, 20, 40, 60, 80, 120
@@ -330,8 +330,7 @@ void *input_loop(void *arg){
 
     if(FD_ISSET(demod->input_fd,&mask)){
       // Receive I/Q data from front end
-      int cnt;
-      cnt = recvmsg(demod->input_fd,&message,0);
+      int cnt = recvmsg(demod->input_fd,&message,0);
       if(cnt <= 0){    // ??
 	perror("recvfrom");
 	break;
@@ -407,7 +406,7 @@ int savestate(struct demod *dp,char const *filename){
   fprintf(fp,"Impulse len %d\n",dp->M);
   fprintf(fp,"Frequency %.3f Hz\n",dp->frequency);
   fprintf(fp,"Mode %s\n",dp->mode);
-  fprintf(fp,"Dial offset %.3f Hz\n",dp->dial_offset);
+  fprintf(fp,"Shift %.3f Hz\n",dp->shift);
   fprintf(fp,"Filter low %.3f Hz\n",dp->low);
   fprintf(fp,"Filter high %.3f Hz\n",dp->high);
   fprintf(fp,"Tunestep %d\n",dp->tunestep);
@@ -418,7 +417,7 @@ int savestate(struct demod *dp,char const *filename){
 // Load receiver state from file
 // Some of these are problematic since they're overwritten from the mode
 // table when the mode is actually set on the first A/D packet:
-// dial_offset, filter low, filter high, tuning step (not currently set)
+// shift, filter low, filter high, tuning step (not currently set)
 // 
 int loadstate(struct demod *dp,char const *filename){
   FILE *fp;
@@ -439,7 +438,7 @@ int loadstate(struct demod *dp,char const *filename){
     if(sscanf(line,"Frequency %lf",&dp->start_freq) > 0){
     } else if(strncmp(line,"Mode ",5) == 0){
       strlcpy(dp->mode,&line[5],sizeof(dp->mode));
-    } else if(sscanf(line,"Dial offset %lf",&dp->dial_offset) > 0){
+    } else if(sscanf(line,"Shift %lf",&dp->shift) > 0){
     } else if(sscanf(line,"Filter low %f",&dp->low) > 0){
     } else if(sscanf(line,"Filter high %f",&dp->high) > 0){
     } else if(sscanf(line,"Kaiser Beta %f",&dp->kaiser_beta) > 0){
