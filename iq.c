@@ -21,7 +21,7 @@ void *demod_iq(void *arg){
   assert(arg != NULL);
   pthread_setname("iq");
   struct demod * const demod = arg;
-  demod->foffset = NAN; // not used
+  demod->foffset = 0; // not used
   demod->pdeviation = NAN;
   const int hangmax = hangtime * (demod->samprate/demod->L); // 1.1 second hang before gain increase
   const float agcratio = dB2voltage(recovery_rate * ((float)demod->L/demod->samprate)); // 6 dB/sec
@@ -44,6 +44,15 @@ void *demod_iq(void *arg){
     else
       demod->n0 += .01 * (compute_n0(demod) - demod->n0);
     
+    // Frequency shift
+    if(demod->shift != 0){
+      for(int n=0; n < filter->olen; n++){
+	filter->output.c[n] *= demod->shift_phasor;
+	demod->shift_phasor *= demod->shift_phasor_step;
+      }
+      demod->shift_phasor /= cabs(demod->shift_phasor);
+    }
+
     // Automatic gain control
     // Find average amplitude for AGC
     float amplitude = sqrtf(demod->bb_power);
