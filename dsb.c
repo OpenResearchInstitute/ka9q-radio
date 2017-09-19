@@ -1,4 +1,4 @@
-// $Id: dsb.c,v 1.16 2017/09/11 04:38:23 karn Exp karn $: DSB-AM / BPSK
+// $Id: dsb.c,v 1.17 2017/09/11 08:11:16 karn Exp karn $: DSB-AM / BPSK
 
 #define _GNU_SOURCE 1
 #include <complex.h>
@@ -120,8 +120,7 @@ void *demod_dsb(void *arg){
 	int maxbin = 0;
 	float maxenergy = 0;
 	
-	int n;
-	for(n = lowlimit; n <= highlimit; n++){
+	for(int n = lowlimit; n <= highlimit; n++){
 	  float const e = cnrmf(fftoutbuf[(n + fftsize) % fftsize]);
 	  if(e > maxenergy){
 	    maxenergy = e;
@@ -143,9 +142,8 @@ void *demod_dsb(void *arg){
     }
 
     // Apply offset, determine fine frequency adjustment with PLL
-    int n;
     complex float accum = 0;
-    for(n=0;n<filter->olen;n++){
+    for(int n=0;n<filter->olen;n++){
       filter->output.c[n] *= coarse_phasor;
       filter->output.c[n] *= fine_phasor;
       float carrier_phase;
@@ -169,17 +167,18 @@ void *demod_dsb(void *arg){
 	ramp = ramprate;
 	
       float const feedback = integrator_gain * integrator + prop_gain * carrier_phase; // units of Hz
-      demod->demod_offset = feedback + delta_f;
       // Small angle approximation to csincosf(-phase_scale * feedback); 
       complex float const fine_phasor_step = CMPLXF(1,-phase_scale * feedback); 
+
+      if((demod->flags & CAL) && demod->snr >= snrthresh){
+	// In calibrate mode, keep highly smoothed estimate of frequency offset
+	calibrate_offset += .00001 * (feedback + delta_f - calibrate_offset);
+      }
+      demod->foffset += .001 * (feedback + delta_f - demod->foffset);
 
       coarse_phasor *= coarse_phasor_step;
       fine_phasor *= fine_phasor_step;
 
-      if((demod->flags & CAL) && demod->snr >= snrthresh){
-	// In calibrate mode, keep highly smoothed estimate of frequency offset
-	calibrate_offset += .00001 * (demod->demod_offset - calibrate_offset);
-      }
     }
     if(demod->flags & DSB)
       demod->cphase = cargf(accum)/2;
@@ -213,6 +212,14 @@ void *demod_dsb(void *arg){
       calibrate_offset = 0;
     }
 
+    // Frequency shift
+    if(demod->shift != 0){
+      for(int n=0; n < filter->olen; n++){
+	filter->output.c[n] *= demod->shift_phasor;
+	demod->shift_phasor *= demod->shift_phasor_step;
+      }
+      demod->shift_phasor /= cabs(demod->shift_phasor);
+    }
     // Q is on the right channel, so use both I and Q for gain setting so we don't blast our ears when the phase is wrong
     if(demod->gain * totampl > demod->headroom){ // Target to about -10 dBFS
       // New signal peak: decrease gain and inhibit re-increase for a while
