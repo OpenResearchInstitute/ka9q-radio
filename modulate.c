@@ -1,4 +1,4 @@
-// $Id$ AM modulator - will eventually support other modes
+// $Id: modulate.c,v 1.5 2017/08/10 10:48:04 karn Exp karn $ AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
 #include <stdio.h>
 #include <unistd.h>
@@ -68,8 +68,7 @@ int main(int argc,char *argv[]){
   complex float * const response = fftwf_alloc_complex(N);
   {
     float gain = 4./N; // Compensate for FFT/IFFT scaling and 4x upsampling
-    int i;
-    for(i=0;i<N;i++){
+    for(int i=0;i<N;i++){
       float f;
       f = Samprate * ((float)i/N);
       if(f > Samprate/2)
@@ -82,12 +81,11 @@ int main(int argc,char *argv[]){
   struct filter * const filter = create_filter(L,M,response,1,REAL,COMPLEX);
 
   while(1){
-    int i,j;
     int16_t samp[L/4];
     if(pipefill(0,samp,sizeof(samp)) <= 0)
       break;
     // Filter will upsample by 4x
-    for(j=i=0;i<L;){
+    for(int j=0,i=0;i<L;){
       filter->input.r[i++] = samp[j++] * scale;
       filter->input.r[i++] = 0;
       filter->input.r[i++] = 0;
@@ -97,11 +95,11 @@ int main(int argc,char *argv[]){
     execute_filter(filter);
     
     // Add AM carrier
-    for(i=0;i<L;i++)
+    for(int i=0;i<L;i++)
       filter->output.c[i] += 1;
 
     // Spin up to chosen carrier frequency
-    for(i=0;i<L;i++){
+    for(int i=0;i<L;i++){
       filter->output.c[i] *= phase * amplitude;
       phase *= phase_step;
       phase_step *= phase_accel;
@@ -109,7 +107,7 @@ int main(int argc,char *argv[]){
     phase /= cabs(phase);
     phase_step /= cabs(phase_step);
     int16_t output[2*L];
-    for(i=0;i<L;i++){
+    for(int i=0;i<L;i++){
       output[2*i] = crealf(filter->output.c[i]) * SHRT_MAX;
       output[2*i+1] = cimagf(filter->output.c[i]) * SHRT_MAX;
     }

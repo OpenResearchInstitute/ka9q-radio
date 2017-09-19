@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.20 2017/08/12 00:31:05 karn Exp karn $
+// $Id: funcube.c,v 1.21 2017/08/12 08:49:40 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -172,8 +172,7 @@ int main(int argc,char *argv[]){
       // average energy (I+Q) in each sample, current block, **including DC offset**
       // At low levels, will disagree with demod's IF1 figure, which has the DC removed
       float sumsq = 0;
-      int i;
-      for(i=0;i<2*Blocksize;i++)
+      for(int i=0;i<2*Blocksize;i++)
 	sumsq += (float)sampbuf[i] * sampbuf[i];
 
       FCD.power = sumsq/Blocksize;

@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.25 2017/09/05 17:43:38 karn Exp karn $
+// $Id: filter.c,v 1.26 2017/09/11 04:36:54 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -85,14 +85,12 @@ struct filter *create_filter(int const L,int const M, complex float * const resp
       // and length N_dec (for all others).
       if(in_type == REAL && out_type == REAL){
 	assert(malloc_usable_size(response) >= (N_dec/2+1) * sizeof(*response));
-	int n;
-	for(n=0;n<=N_dec/2;n++)
+	for(int n=0;n<=N_dec/2;n++)
 	  f->response[n] *= M_SQRT1_2;
       } else {
 #if 0
 	assert(malloc_usable_size(response) >= N_dec * sizeof(*response));
-	int n;
-	for(n=0;n<N_dec;n++)
+	for(int n=0;n<N_dec;n++)
 	  f->response[n] *= M_SQRT1_2;
 #endif
       }
@@ -242,8 +240,7 @@ int execute_filter_nocopy(struct filter * const f){
   assert(malloc_usable_size(f->fdomain) >= (N_dec/2+1) * sizeof(*f->fdomain));
   pthread_mutex_lock(&f->mutex); // Protect access to response[] array
   assert(f->response != NULL);
-  int p;
-  for(p=0; p <= N_dec/2; p++){
+  for(int p=0; p <= N_dec/2; p++){
     f->f_fdomain[p] = f->response[p] * f->fdomain[p];
   }
   if(f->in_type == REAL){
@@ -262,16 +259,14 @@ int execute_filter_nocopy(struct filter * const f){
       assert(malloc_usable_size(f->response) >= N_dec * sizeof(*f->response));
       assert(malloc_usable_size(f->f_fdomain) >= N_dec * sizeof(*f->f_fdomain));
 
-      int n,dn;
-      for(n=N-1,dn=N_dec-1; dn > N_dec/2;n--,dn--){
+      for(int n=N-1,dn=N_dec-1; dn > N_dec/2;n--,dn--){
 	f->f_fdomain[dn] = f->response[dn] * f->fdomain[n];
       }
     } else {
       // Real output; fold conjugates of negative frequencies into positive to force pure real result
       assert(malloc_usable_size(f->fdomain) >= N * sizeof(*f->fdomain));
       assert(malloc_usable_size(f->response) >= N_dec * sizeof(*f->response));
-      int n,p,dn;
-      for(n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--){
+      for(int n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--){
 	f->f_fdomain[p] += conjf(f->response[dn] * f->fdomain[n]);
       }
     }
@@ -281,8 +276,7 @@ int execute_filter_nocopy(struct filter * const f){
   if(f->out_type == CROSS_CONJ){
     // hack for ISB; forces negative frequencies onto I, positive onto Q
     assert(malloc_usable_size(f->f_fdomain) >= N_dec * sizeof(*f->f_fdomain));
-    int p,dn;
-    for(p=1,dn=N_dec-1; p < N_dec/2; p++,dn--){
+    for(int p=1,dn=N_dec-1; p < N_dec/2; p++,dn--){
       complex float const pos = f->f_fdomain[p];
       complex float const neg = f->f_fdomain[dn];
       
@@ -321,8 +315,7 @@ static const float i0(float const x){
   const float t = 0.25 * x * x;
   float sum = 1 + t;
   float term = t;
-  int k;
-  for(k=2;k<40;k++){
+  for(int k=2;k<40;k++){
     term *= t/(k*k);
     sum += term;
     if(term < 1e-12 * sum)
@@ -384,8 +377,7 @@ int make_kaiser(float * const window,int const M,float const beta){
 
   // The window is symmetrical, so compute only half of it and mirror
   // this won't compute the middle value in an odd-length sequence
-  int n;
-  for(n = 0; n < M/2; n++){
+  for(int n = 0; n < M/2; n++){
     float const p = pc * n  - 1;
     window[M-1-n] = window[n] = i0(numc * sqrtf(1-p*p)) * inv_denom;
   }
@@ -424,8 +416,7 @@ int window_filter(int const L,int const M,complex float * const response,float c
 
   // Round trip through FFT/IFFT scales by N
   float const gain = 1./N;
-  int n;
-  for(n = M - 1; n >= 0; n--)
+  for(int n = M - 1; n >= 0; n--)
     buffer[n] = buffer[(n-M/2+N)%N] * kaiser_window[n] * gain;
 
   // Pad with zeroes on right side
@@ -433,7 +424,7 @@ int window_filter(int const L,int const M,complex float * const response,float c
 
 #if 0
   fprintf(stderr,"Filter impulse response, shifted, windowed and zero padded\n");
-  for(n=0;n< N;n++)
+  for(int n=0;n< N;n++)
     fprintf(stderr,"%d %lg %lg\n",n,crealf(buffer[n]),cimagf(buffer[n]));
 #endif
   
@@ -443,7 +434,7 @@ int window_filter(int const L,int const M,complex float * const response,float c
 
 #if 0
   fprintf(stderr,"Filter response amplitude\n");
-  for(n=0;n<N;n++){
+  for(int n=0;n<N;n++){
     float f = n*192000./N;
     fprintf(stderr,"%.1f %.1f\n",f,power2dB(cnrmf(buffer[n])));
   }
@@ -480,15 +471,14 @@ int window_rfilter(int const L,int const M,complex float * const response,float 
   make_kaiser(kaiser_window,M,beta);
   // Round trip through FFT/IFFT scales by N
   float const gain = 1./N;
-  int n;
-  for(n = M - 1; n >= 0; n--)
+  for(int n = M - 1; n >= 0; n--)
     timebuf[n] = timebuf[(n-M/2+N)%N] * kaiser_window[n] * gain;
   
   // Pad with zeroes on right side
   memset(timebuf+M,0,(N-M)*sizeof(*timebuf));
 #if 0
   printf("Filter impulse response, shifted, windowed and zero padded\n");
-  for(n=0;n< M;n++)
+  for(int n=0;n< M;n++)
     printf("%d %lg\n",n,timebuf[n]);
 #endif
   
@@ -498,7 +488,7 @@ int window_rfilter(int const L,int const M,complex float * const response,float 
   fftwf_free(timebuf);
 #if 0
   printf("Filter frequency response\n");
-  for(n=0; n < N/2 + 1; n++)
+  for(int n=0; n < N/2 + 1; n++)
     printf("%d %g %g (%.1f dB)\n",n,crealf(buffer[n]),cimagf(buffer[n]),
 	   power2dB(cnrmf(buffer[n])));
 #endif
@@ -516,13 +506,10 @@ float const noise_gain(struct filter const * const filter){
 
   float sum = 0;
   if(filter->in_type == REAL && filter->out_type == REAL){
-    int i;
-
-    for(i=0;i<N_dec/2+1;i++)
+    for(int i=0;i<N_dec/2+1;i++)
       sum += cnrmf(filter->response[i]);
   } else {
-    int i;
-    for(i=0;i<N_dec;i++)
+    for(int i=0;i<N_dec;i++)
       sum += cnrmf(filter->response[i]);
   }
   // the factor N compensates for the unity gain scaling
@@ -554,8 +541,7 @@ int set_filter(struct filter * const filter,float const dsamprate,float const lo
 #endif
 
   complex float * const response = fftwf_alloc_complex(N_dec);
-  int n;
-  for(n=0;n<N_dec;n++){
+  for(int n=0;n<N_dec;n++){
     float f;
     if(n <= N_dec/2)
       f = (float)n * dsamprate / N_dec;

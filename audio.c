@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.40 2017/09/07 02:43:13 karn Exp karn $
+// $Id: audio.c,v 1.41 2017/09/13 23:07:11 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -44,8 +44,7 @@ static short const scaleclip(float const x){
 // Send 'size' stereo samples, each in a complex float
 int send_stereo_audio(struct audio const * const audio,complex float const * const buffer,int const size, float const gain){
   if(audio->stream){
-    int i;
-    for(i=0;i<size;i++){
+    for(int i=0;i<size;i++){
       int16_t sample;
 
       sample = scaleclip(crealf(buffer[i]) * gain);
@@ -54,9 +53,8 @@ int send_stereo_audio(struct audio const * const audio,complex float const * con
       fwrite(&sample,sizeof(sample),1,audio->stream);
     }
   } else {
-    int i;
     complex float obuf[size];
-    for(i=0;i<size;i++)
+    for(int i=0;i<size;i++)
       obuf[i] = buffer[i] * gain;
     int fd = audio->opus_bitrate ? audio->opus_stereo_write_fd : audio->pcm_stereo_write_fd;
     write(fd,obuf,sizeof(obuf));
@@ -68,8 +66,7 @@ int send_stereo_audio(struct audio const * const audio,complex float const * con
 int send_mono_audio(struct audio const * const audio,float const * const buffer,int const size,float const gain){
   if(audio->stream){
     // Stream in stereo for consistency
-    int i;
-    for(i=0;i<size;i++){
+    for(int i=0;i<size;i++){
       int16_t sample;
       sample = scaleclip(buffer[i] * gain);
       fwrite(&sample,sizeof(sample),1,audio->stream);
@@ -78,15 +75,13 @@ int send_mono_audio(struct audio const * const audio,float const * const buffer,
   } else if(audio->opus_bitrate != 0){
     // Send to opus encoder as stereo with duplicate channels
     complex float obuf[size];
-    int i;
-    for(i=0;i<size;i++)
+    for(int i=0;i<size;i++)
       obuf[i] = CMPLXF(buffer[i],buffer[i]) * gain;
 
     write(audio->opus_stereo_write_fd,obuf,sizeof(obuf));
   } else {
     float obuf[size];
-    int i;
-    for(i=0;i<size;i++)
+    for(int i=0;i<size;i++)
       obuf[i] = buffer[i] * gain;
 
     write(audio->pcm_mono_write_fd,obuf,sizeof(obuf));
@@ -218,8 +213,7 @@ void *stereo_pcm_audio(void *arg){
 
   complex float buffer[PCM_BUFSIZE/2];
   while(pipefill(audio->pcm_stereo_read_fd,buffer,sizeof(buffer)) > 0){
-    int i;
-    for(i=0;i<PCM_BUFSIZE/2;i++){
+    for(int i=0;i<PCM_BUFSIZE/2;i++){
       PCM_buf[2*i] = htons(scaleclip(crealf(buffer[i])));
       PCM_buf[2*i+1] = htons(scaleclip(cimagf(buffer[i])));
     }
@@ -274,8 +268,7 @@ void *mono_pcm_audio(void *arg){
 
   float buffer[PCM_BUFSIZE];
   while(pipefill(audio->pcm_mono_read_fd,buffer,sizeof(buffer)) > 0){
-    int i;
-    for(i=0;i<PCM_BUFSIZE;i++)
+    for(int i=0;i<PCM_BUFSIZE;i++)
       PCM_buf[i] = htons(scaleclip(buffer[i]));
 
     rtp.seq = htons(seq++);

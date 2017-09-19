@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.13 2017/08/04 03:35:55 karn Exp karn $
+// $Id: iqplay.c,v 1.14 2017/08/12 08:49:40 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -169,8 +169,7 @@ int main(int argc,char *argv[]){
       fprintf(stderr,"Transmitting from stdin ");
     playfile(Rtp_sock,0,Blocksize);
   } else {
-    int i;
-    for(i=optind;i<argc;i++){
+    for(int i=optind;i<argc;i++){
       int fd;
       if((fd = open(argv[i],O_RDONLY)) == -1){
 	fprintf(stderr,"Can't read %s; ",argv[i]);

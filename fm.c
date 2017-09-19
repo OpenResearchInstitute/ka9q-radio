@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.37 2017/09/11 04:35:35 karn Exp karn $
+// $Id: fm.c,v 1.38 2017/09/11 08:12:15 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -48,9 +48,8 @@ void *demod_fm(void *arg){
   float const filter_gain = 1./AN;  // Filter gain is 1./AN for both filters
   {
     memset(plresponse,0,(PL_N/2+1)*sizeof(*plresponse));
-    int j;
     // Positive frequencies only
-    for(j=0;j<=PL_N/2;j++){
+    for(int j=0;j<=PL_N/2;j++){
       float const f = (float)j * dsamprate / AN; // frequencies are relative to INPUT sampling rate
       if(f > 0 && f < 300)
 	plresponse[j] = filter_gain;
@@ -70,8 +69,7 @@ void *demod_fm(void *arg){
   if(!(demod->flags & FLAT)){
     complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
     memset(aresponse,0,(AN/2+1) * sizeof(*aresponse));
-    int j;
-    for(j=0;j<=AN/2;j++){
+    for(int j=0;j<=AN/2;j++){
       float const f = (float)j * dsamprate / AN;
       if(f >= 300 && f <= 6000)
 	aresponse[j] = filter_gain * 300./f; // -6 dB/octave de-emphasis to handle PM (indirect FM) transmission
@@ -104,19 +102,17 @@ void *demod_fm(void *arg){
     // We also need average magnitude^2, but we have that from demod->bb_power
     // Approximate for SNR because magnitude has a chi-squared distribution with 2 degrees of freedom
     float avg_amp = 0;
-    {
-      demod->bb_power = 0;
-      int n;
-      for(n=0;n<filter->olen;n++){
-	float const t = cnrmf(filter->output.c[n]);
-	demod->bb_power += t;
-	avg_amp += sqrtf(t);        // magnitude
-      }
-      demod->bb_power /= filter->olen;
-      avg_amp /= filter->olen;         // Average magnitude
-      float const fm_variance = demod->bb_power - avg_amp*avg_amp;
-      demod->snr = avg_amp*avg_amp/(2*fm_variance) - 1;
-    }    
+    demod->bb_power = 0;
+    for(int n=0;n<filter->olen;n++){
+      float const t = cnrmf(filter->output.c[n]);
+      demod->bb_power += t;
+      avg_amp += sqrtf(t);        // magnitude
+    }
+    demod->bb_power /= filter->olen;
+    avg_amp /= filter->olen;         // Average magnitude
+    float const fm_variance = demod->bb_power - avg_amp*avg_amp;
+    demod->snr = avg_amp*avg_amp/(2*fm_variance) - 1;
+
     if(demod->snr > 2){
       // Threshold extension by comparing sample amplitude to threshold
       // 0.55 is empirical constant, 0.5 to 0.6 seems to sound good
@@ -126,9 +122,8 @@ void *demod_fm(void *arg){
       // Actual FM demodulation, with impulse noise blanking
       float pdev_pos = 0;
       float pdev_neg = 0;
-      int n;      
       float avg_f = 0;
-      for(n=0; n<filter->olen; n++){
+      for(int n=0; n<filter->olen; n++){
 	complex float const samp = filter->output.c[n];
 	if(cnrmf(samp) > min_ampl){
 	  lastaudio = plfilter->input.r[n] = cargf(samp * state);
@@ -168,13 +163,11 @@ void *demod_fm(void *arg){
 
     // Let the filter tail leave after the squelch is closed, but don't send pure silence
     int silent = 1;
-    {
-      int n;
-      for(n=0; n<plfilter->olen; n++)
-	if(plfilter->output.r[n] != 0){
-	  silent = 0;
-	  break;
-	}
+    for(int n=0; n<plfilter->olen; n++){
+      if(plfilter->output.r[n] != 0){
+	silent = 0;
+	break;
+      }
     }
     if(!silent){
       if(afilter == NULL)
@@ -188,8 +181,7 @@ void *demod_fm(void *arg){
       float peakenergy = 0;  // Energy in peak bin
       float totenergy = 0;   // Total energy, all bins
       assert(malloc_usable_size(pl_spectrum) >= pl_fft_size/2 * sizeof(complex float));
-      int n;
-      for(n=1;n<pl_fft_size/2;n++){ // skip DC
+      for(int n=1;n<pl_fft_size/2;n++){ // skip DC
 	float const energy = cnrmf(pl_spectrum[n]);
 	totenergy += energy;
 	if(energy > peakenergy){

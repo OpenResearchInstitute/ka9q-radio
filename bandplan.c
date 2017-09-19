@@ -71,8 +71,7 @@ int init_bandplan(){
     memset(&Bandplans[i],0,sizeof(struct bandplan));
     Bandplans[i].lower = lower;
     Bandplans[i].upper = upper;
-    char *cp;
-    for(cp = classes;*cp != '\0';cp++){
+    for(char *cp = classes;*cp != '\0';cp++){
       switch(tolower(*cp)){
       case 'e':
 	Bandplans[i].classes |= EXTRA_CLASS;
@@ -91,7 +90,7 @@ int init_bandplan(){
 	break;
       }
     }
-    for(cp = modes;*cp != '\0';cp++){
+    for(char *cp = modes;*cp != '\0';cp++){
       switch(tolower(*cp)){
       case 'c':
 	Bandplans[i].modes |= CW;
