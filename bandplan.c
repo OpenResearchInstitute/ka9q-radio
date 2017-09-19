@@ -73,6 +73,9 @@ int init_bandplan(){
     Bandplans[i].upper = upper;
     for(char *cp = classes;*cp != '\0';cp++){
       switch(tolower(*cp)){
+      case '-':
+	Bandplans[i].classes = 0; // No privileges
+	break;
       case 'e':
 	Bandplans[i].classes |= EXTRA_CLASS;
 	break;
@@ -92,6 +95,9 @@ int init_bandplan(){
     }
     for(char *cp = modes;*cp != '\0';cp++){
       switch(tolower(*cp)){
+      case '-':
+	Bandplans[i].modes = 0; // No modes!
+	break;
       case 'c':
 	Bandplans[i].modes |= CW;
 	break;
