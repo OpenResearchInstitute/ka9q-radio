@@ -18,7 +18,7 @@ void *demod_ssb(void *arg){
   assert(arg != NULL);
   pthread_setname("ssb");
   struct demod * const demod = arg;
-  demod->foffset = NAN; // not used
+  demod->foffset = 0; // not used
   demod->pdeviation = NAN;
   demod->gain = dB2voltage(70.); // 70 dB starting point, will adjust with ssb_agc
   demod->hangtime = 1.1;    // Hang for 1.1 seconds after new peak
@@ -42,11 +42,8 @@ void *demod_ssb(void *arg){
     fillbuf(demod,filter->input.c,filter->ilen);
 #if 0
     // experimental notch
-    {
-      int i;
-      for(i=0;i<filter->ilen;i++)
-	filter->input.c[i] = notch(nf,filter->input.c[i]);
-    }
+    for(int i=0;i<filter->ilen;i++)
+      filter->input.c[i] = notch(nf,filter->input.c[i]);
 #endif
     demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
     demod->if_power = cpower(filter->input.c,filter->ilen);
@@ -56,6 +53,9 @@ void *demod_ssb(void *arg){
       demod->n0 = compute_n0(demod);
     else
       demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+
+    if(cabs(demod->shift_phasor_step) != 0 && cabs(demod->shift_phasor) != 0 && demod->shift_phasor != 1){
+    }
 
     // Automatic gain control
     float const amplitude = sqrtf(demod->bb_power);
