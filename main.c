@@ -107,10 +107,10 @@ int main(int argc,char *argv[]){
   demod->input_source_address.sa_family = -1; // Set invalid
   demod->low = NAN;
   demod->high = NAN;
-  demod->shift = 0;
+  demod->shift = NAN;
 
   // Find any file argument and load it
-  char optstring[] = "B:c:s:f:I:k:l:L:m:M:r:R:qo:t:u:vx";
+  char optstring[] = "B:c:f:I:k:l:L:m:M:r:R:qo:s:t:u:vx";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -167,6 +167,12 @@ int main(int argc,char *argv[]){
       } else 
 	strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
       break;
+    case 's':
+      {
+	double shift = strtod(optarg,NULL);
+	set_shift(demod,shift);
+      }
+      break;
     case 't':   // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);
       fftwf_init_threads();
@@ -183,9 +189,9 @@ int main(int argc,char *argv[]){
       Audio.opus_dtx = 1;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-t threads] [-u update_ms] [-v]\n",argv[0]);
-      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -t %d -u %d [-x]\n",
-	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,"default",demod->start_freq,demod->iq_mcast_address_text,Locale,demod->L,demod->mode,demod->M,Audio.audio_mcast_address_text,Audio.opus_bitrate,Nthreads,Update_interval);
+      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-s shift] [-t threads] [-u update_ms] [-v]\n",argv[0]);
+      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -s %.1f -t %d -u %d [-x]\n",
+	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,"default",demod->start_freq,demod->iq_mcast_address_text,Locale,demod->L,demod->mode,demod->M,Audio.audio_mcast_address_text,Audio.opus_bitrate,demod->shift,Nthreads,Update_interval);
       exit(1);
       break;
     }
@@ -240,10 +246,9 @@ int main(int argc,char *argv[]){
   // Actually set the mode and frequency already specified
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
   fprintf(stderr,"Waiting for SDR response...\n");
-  set_freq(demod,demod->start_freq,NAN);
+  set_freq(demod,demod->start_freq,NAN); 
   demod->start_freq = 0;
   set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
-
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
