@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.14 2017/09/04 00:33:14 karn Exp karn $
+// $Id: modes.c,v 1.15 2017/09/11 04:36:05 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
 #if defined(linux)
@@ -43,8 +43,8 @@ int readmodes(char *file){
       continue; // comment
 
     char name[16],demod[16],options[16];
-    float low,high,dial;
-    if(sscanf(line,"%16s %16s %f %f %f %16s",name,demod,&low,&high,&dial,options) < 4)
+    float low,high,shift;
+    if(sscanf(line,"%16s %16s %f %f %f %16s",name,demod,&low,&high,&shift,options) < 4)
       continue; // Too short, or in wrong format
 
     int i;
@@ -59,7 +59,7 @@ int readmodes(char *file){
     Modes[Nmodes].demod = Demodtab[i].demod;
     Modes[Nmodes].low = low;
     Modes[Nmodes].high = high;
-    Modes[Nmodes].dial = dial;
+    Modes[Nmodes].shift = shift;
     Modes[Nmodes].flags = 0;
     if(strcasecmp(options,"conj") == 0){
       Modes[Nmodes].flags |= CONJ;
