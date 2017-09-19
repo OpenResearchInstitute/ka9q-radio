@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.62 2017/09/07 17:56:37 karn Exp karn $
+// $Id: radio.c,v 1.63 2017/09/19 13:00:28 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -296,7 +296,8 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
     strlcpy(demod->mode,mode,sizeof(demod->mode));
 
   if(defaults || isnan(demod->shift))
-    demod->shift = Modes[mindex].shift;
+    set_shift(demod,Modes[mindex].shift);
+
   if(defaults || isnan(demod->low))
     demod->low = Modes[mindex].low;
   if(defaults || isnan(demod->high))
@@ -308,11 +309,6 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
     demod->high = tmp;
   }
   demod->flags = Modes[mindex].flags;
-  if(cabs(demod->shift_phasor) == 0)
-    demod->shift_phasor = 1;
-
-  if(cabs(demod->shift_phasor_step) == 0)
-    demod->shift_phasor_step = 1;
   
   // Suppress these in display unless they're used
   demod->snr = NAN;
