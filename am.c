@@ -19,7 +19,7 @@ void *demod_am(void *arg){
   assert(arg != NULL);
   pthread_setname("am");
   struct demod * const demod = arg;
-  demod->foffset = NAN; // not used
+  demod->foffset = 0; // not used
   demod->pdeviation = NAN;
 
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
@@ -40,26 +40,22 @@ void *demod_am(void *arg){
     // Envelope detection
     float average = 0;
     float audio[filter->olen];
-    {
-      demod->bb_power = 0;
-      int n;
-      for(n=0; n < filter->olen; n++){
-	complex float const t = cnrmf(filter->output.c[n]);
-	demod->bb_power += t;
-	average += audio[n] = sqrtf(t);
-      }
-      demod->bb_power /= filter->olen;
-      average /= filter->olen;
-    }    
+    demod->bb_power = 0;
+    for(int n=0; n < filter->olen; n++){
+      complex float const t = cnrmf(filter->output.c[n]);
+      demod->bb_power += t;
+      average += audio[n] = sqrtf(t);
+    }
+    demod->bb_power /= filter->olen;
+    average /= filter->olen;
+
     // AM AGC is carrier-driven
     //    demod->gain = demod->headroom / average;
     demod->gain = 0.5/average;
     // Remove carrier component
-    {
-      int n;
-      for(n=0; n<filter->olen; n++)
-	audio[n] -= average;
-    }  
+    for(int n=0; n<filter->olen; n++)
+      audio[n] -= average;
+
     send_mono_audio(demod->audio,audio,filter->olen,demod->gain);
   }
   delete_filter(filter);
