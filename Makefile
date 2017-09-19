@@ -1,7 +1,9 @@
-# $Id: Makefile,v 1.63 2017/08/13 06:06:50 karn Exp karn $
+# $Id: Makefile,v 1.64 2017/09/11 04:37:41 karn Exp karn $
+#CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+#COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -13,7 +15,7 @@ install: all
 	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt modes.txt
 
 clean:
-	rm -f *.o *.a control funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt
+	rm -f *.o *.a control funcube iqplay iqrecord modulate monitor radio
 	rcsclean
 
 control: control.o modes.o
