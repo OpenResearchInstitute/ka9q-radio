@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.61 2017/09/07 02:46:58 karn Exp karn $
+// $Id: radio.c,v 1.62 2017/09/07 17:56:37 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -48,8 +48,7 @@ void proc_samples(struct demod * const demod,int16_t const *sp,int const cnt){
   float samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
   float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
   float dotprod = 0;                           // sum of I*Q, for phase balance
-  int i;
-  for(i=0;i<cnt;i++){
+  for(int i=0;i<cnt;i++){
     // Remove and update DC offsets
     float samp_i = *sp++ * SCALE;
     samp_i_sum += samp_i;
@@ -94,8 +93,7 @@ void proc_samples(struct demod * const demod,int16_t const *sp,int const cnt){
 // Completely fill buffer from corrected I/O input queue
 // Block until enough data is available
 int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
-  int i = cnt;
-  while(i > 0){ // data remaining to be read
+  for(int i = cnt;i > 0;){
     // The mutex protects demod->write_ptr
     pthread_mutex_lock(&demod->data_mutex);
     while(demod->write_ptr == demod->read_ptr)
@@ -205,8 +203,7 @@ double set_first_LO(struct demod * const demod,double const first_LO){
     ts.tv_nsec = 1000 * tv.tv_usec;
 
     pthread_mutex_lock(&demod->status_mutex);
-    int i;
-    for(i=0;i<10;i++){
+    for(int i=0;i<10;i++){
       if(demod->requested_status.frequency == demod->status.frequency)
 	break;
 
@@ -269,16 +266,26 @@ double set_second_LO(struct demod * const demod,double const second_LO){
   return second_LO;
 }
 
+// Set audio shift after downconversion and detection (linear modes only: SSB, IQ, DSB)
+double set_shift(struct demod * const demod,double const shift){
+  demod->shift = shift;
+  demod->shift_phasor_step = csincos(2*M_PI*shift*demod->decimate/demod->samprate);
+  if(cabs(demod->shift_phasor) == 0)
+    demod->shift_phasor = 1;
+  return shift;
+}
+
+
 int set_mode(struct demod * const demod,const char * const mode,int const defaults){
   assert(demod != NULL);
 
   int mindex;
-  for(mindex=0; mindex<Nmodes; mindex++)
+  for(mindex=0; mindex<Nmodes; mindex++){
     if(strcasecmp(mode,Modes[mindex].name) == 0)
       break;
+  }
   if(mindex == Nmodes)
     return -1; // Unregistered mode
-
   // Kill current demod thread, if any, to cause clean exit
   demod->terminate = 1;
   pthread_join(demod->demod_thread,NULL); // Wait for it to finish
@@ -288,8 +295,8 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   if(demod->mode != mode)
     strlcpy(demod->mode,mode,sizeof(demod->mode));
 
-  if(defaults || isnan(demod->dial_offset))
-    demod->dial_offset = Modes[mindex].dial;
+  if(defaults || isnan(demod->shift))
+    demod->shift = Modes[mindex].shift;
   if(defaults || isnan(demod->low))
     demod->low = Modes[mindex].low;
   if(defaults || isnan(demod->high))
@@ -301,10 +308,14 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
     demod->high = tmp;
   }
   demod->flags = Modes[mindex].flags;
+  if(cabs(demod->shift_phasor) == 0)
+    demod->shift_phasor = 1;
 
+  if(cabs(demod->shift_phasor_step) == 0)
+    demod->shift_phasor_step = 1;
+  
   // Suppress these in display unless they're used
   demod->snr = NAN;
-  demod->foffset = NAN;
   demod->pdeviation = NAN;
   demod->cphase = NAN;
   demod->plfreq = NAN;
@@ -343,7 +354,7 @@ int set_cal(struct demod * const demod,double const cal){
 // Apply LO2 to input samples, placing the resulting IF in the demod's filter input buffer
 // This function no longer updates demod->second_LO phasor directly
 // It returns the updated phasor, and you must store it back into demod->send_LO_phasor yourself
-// This simplifies demodulators that do repeated spindowns, e.g., dsb
+// This simplifies demodulators that do repeated spindowns (but don't forget filter state)
 // Length of data input obtained from demod->filter->i_len
 complex float spindown(struct demod * const demod,complex float const * const data){
   assert(demod != NULL);
@@ -359,8 +370,7 @@ complex float spindown(struct demod * const demod,complex float const * const da
   // Apply 2nd LO, compute average pre-filter signal power
 
   complex float second_LO_phasor = demod->second_LO_phasor;
-  int n;
-  for(n=0; n < filter->ilen; n++){
+  for(int n=0; n < filter->ilen; n++){
     assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
     filter->input.c[n] = data[n] * second_LO_phasor;
     second_LO_phasor *= demod->second_LO_phasor_step;
@@ -382,23 +392,18 @@ float const compute_n0(struct demod const * const demod){
   
   // Compute smoothed power spectrum
   // There will be some spectral leakage because the convolution FFT we're using is unwindowed
-  {
-    int n;
-    for(n=0;n<N;n++){
-      power_spectrum[n] = cnrmf(f->fdomain[n]);
-    }  
-  }
+  for(int n=0;n<N;n++){
+    power_spectrum[n] = cnrmf(f->fdomain[n]);
+  }  
 
   // compute average energy outside passband, then iterate computing a new average that
   // omits N > 3dB above the previous average.
 
   float avg_n = INFINITY;
-  int iter;
-  for(iter=0;iter<2;iter++){
+  for(int iter=0;iter<2;iter++){
     int noisebins = 0;
     float new_avg_n = 0;
-    int n;
-    for(n=0;n<N;n++){
+    for(int n=0;n<N;n++){
       float f;
       if(n <= N/2)
 	f = (float)(n * demod->samprate) / N;

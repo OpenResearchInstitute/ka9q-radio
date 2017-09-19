@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.42 2017/09/05 17:46:35 karn Exp karn $
+// $Id: radio.h,v 1.43 2017/09/11 04:36:17 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -23,7 +23,7 @@ struct modetab {
   char name[16];
   void * (*demod)(void *); // Address of demodulator routine
   int flags;        // Special purpose flags, e.g., CONJ
-  float dial;       // Display frequency offset (mainly for CW/RTTY)
+  float shift;      // Audio frequency shift (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
   float low;        // Lower edge of IF passband
   float high;       // Upper edge of IF passband
@@ -45,8 +45,6 @@ struct status {
 
 struct demod {
   // Global parameters
-
-
 
   // Input thread state
   pthread_t input_thread;
@@ -106,14 +104,17 @@ struct demod {
   double frequency;     // Nominal (dial) frequency
   double doppler;       // Open-loop doppler correction from satellite tracking program
                         // To be handled by a separate spindown, not in radio.c
-  double demod_offset;  // Offset applied by auto tracking demodulators (CAM, DSB, etc)
-  double dial_offset;   // displayed dial frequency = carrier freq + dial_offset (useful for CW)
-                        // Ignored by routines in radio.c
+
+
   // Second LO parameters
   complex double second_LO_phasor; // Second LO phasor
   double second_LO;     // True second LO frequency, including calibration
                         // Provided because round trip through csincos/carg is less accurate
   complex double second_LO_phasor_step;  // LO step phasor = csincos(2*pi*second_LO/samprate)
+
+  double shift;         // frequency shift after demodulation (for CW,DSB)
+  complex double shift_phasor;
+  complex double shift_phasor_step;
 
   int frequency_lock; // inhibits tuning of RF and LO & IF tuning operate in lockstep
   int tunestep;       // User interface cursor location, log10(); e.g., 3 -> thousands
@@ -139,7 +140,7 @@ struct demod {
   float n0;         // Noise spectral density esimate (experimemtal)
   float snr;        // Estimated signal-to-noise ratio (only some demodulators)
   float gain;       // Audio gain
-  float foffset;    // Frequency offset (FM)
+  float foffset;    // Frequency offset (FM, coherent AM, cal, dsb)
   float pdeviation; // Peak frequency deviation (FM)
   float cphase;     // Carrier phase change (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
@@ -157,7 +158,7 @@ extern int Nmodes;
 int fillbuf(struct demod *,complex float *,const int);
 int LO2_in_range(struct demod *,double f,int);
 double set_freq(struct demod *,double,double);
-double set_offset(struct demod *,double);
+double set_shift(struct demod *,double);
 double set_first_LO(struct demod *,double);
 const double get_first_LO(struct demod const *);
 double set_second_LO(struct demod *,double);
