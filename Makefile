@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.65 2017/09/19 13:05:07 karn Exp karn $
+# $Id: Makefile,v 1.66 2017/09/20 06:42:42 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -36,7 +36,7 @@ modulate: modulate.o misc.o filter.o
 monitor: monitor.o multicast.o
 	$(CC) -g -o $@ $^ -lasound -lopus -lbsd -lm
 
-radio: main.o radio.o am.o fm.o iq.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
+radio: main.o radio.o am.o fm.o linear.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lbsd -lm
 
 libfcd.a: fcd.o hid-libusb.o
@@ -49,16 +49,15 @@ audio.o: audio.c dsp.h audio.h rtp.h
 bandplan.o: bandplan.c bandplan.h
 control.o: control.c dsp.h radio.h
 display.o: display.c radio.h audio.h dsp.h filter.h bandplan.h multicast.h rtp.h
-dsb.o: dsb.c dsp.h filter.h radio.h audio.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c dsp.h filter.h
 fm.o: fm.c dsp.h filter.h radio.h audio.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h dsp.h rtp.h multicast.h
 gr.o: gr.c sdr.h
 hid-libusb.o: hid-libusb.c hidapi.h
-iq.o: iq.c dsp.h filter.h radio.h audio.h
 iqplay.o: iqplay.c rtp.h dsp.h radio.h multicast.h attr.h
 iqrecord.o: iqrecord.c rtp.h radio.h multicast.h attr.h
+linear.o: linear.c dsp.h filter.h radio.h audio.h
 main.o: main.c radio.h filter.h dsp.h audio.h rtp.h multicast.h
 misc.o: misc.c
 modes.o: modes.c 
@@ -66,4 +65,3 @@ modulate.o: modulate.c dsp.h filter.h radio.h
 monitor.o: monitor.c rtp.h dsp.h multicast.h
 multicast.o: multicast.c multicast.h
 radio.o: radio.c radio.h filter.h dsp.h audio.h
-#ssb.o: ssb.c dsp.h filter.h radio.h audio.h
