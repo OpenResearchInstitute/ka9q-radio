@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.16 2017/09/19 12:59:42 karn Exp karn $
+// $Id: modes.c,v 1.17 2017/09/20 06:41:54 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
 #if defined(linux)
@@ -20,10 +20,9 @@ struct demodtab {
   char name[16];
   void * (*demod)(void *);
 } Demodtab[] = {
-  {"fm",  demod_fm},  // NBFM and noncoherent PM
-  {"am",  demod_am},  // Envelope detection of AM
-  {"dsb", demod_dsb}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
-  {"iq",  demod_iq},  // Linear (but not coherent) demodulation of ISB, SSB, CW; also raw IQ
+  {"fm",     demod_fm},  // NBFM and noncoherent PM
+  {"am",     demod_am},  // Envelope detection of AM
+  {"linear", demod_dsb}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
 };
 #define NDEMOD (sizeof(Demodtab)/sizeof(struct demodtab))
 
@@ -65,9 +64,11 @@ int readmodes(char *file){
     } else if(strcasecmp(options,"flat") == 0){
       Modes[Nmodes].flags |= FLAT;
     } else if(strcasecmp(options,"cal") == 0){
-      Modes[Nmodes].flags |= CAL;
-    } else if(strcasecmp(options,"dsb") == 0){
-      Modes[Nmodes].flags |= DSB;
+      Modes[Nmodes].flags |= CAL|COHERENT;
+    } else if(strcasecmp(options,"square") == 0){
+      Modes[Nmodes].flags |= SQUARE|COHERENT;
+    } else if(strcasecmp(options,"coherent") == 0){
+      Modes[Nmodes].flags |= COHERENT;
     }
 
     Nmodes++;
