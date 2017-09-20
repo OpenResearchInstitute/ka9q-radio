@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.79 2017/09/19 13:03:38 karn Exp karn $
+// $Id: display.c,v 1.80 2017/09/19 21:57:24 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -200,11 +200,11 @@ void *display(void *arg){
 
   WINDOW * const band = newwin(5,42,0,36);     // Band information
 
-  WINDOW * const filtering = newwin(9,23,7,0);
+  WINDOW * const filtering = newwin(10,23,7,0);
 
   WINDOW * const sig = newwin(14,26,7,25); // Signal information
 
-  WINDOW * const sdr = newwin(11,25,7,53); // SDR information
+  WINDOW * const sdr = newwin(12,25,7,53); // SDR information
 
   WINDOW * const network = newwin(11,78,21,0); // Network status information
   
@@ -232,7 +232,7 @@ void *display(void *arg){
     if(demod->frequency_lock)
       mvwchgat(tuning,row,15,20,A_UNDERLINE,0,NULL);
 
-    mvwprintw(tuning,++row,1,"Center%'23.3f Hz",demod->frequency - (demod->high + demod->low)/2);
+    mvwprintw(tuning,++row,1,"Center%'23.3f Hz",demod->frequency + (demod->high + demod->low)/2);
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
     mvwprintw(tuning,++row,1,"First LO%'21.3f Hz",get_first_LO(demod));
@@ -323,13 +323,15 @@ void *display(void *arg){
     wnoutrefresh(band);
     
     row = 0;
+    int const N = demod->L + demod->M - 1;
     mvwprintw(filtering,++row,1,"low  %'+10.3f Hz",demod->low);
     mvwprintw(filtering,++row,1,"high %'+10.3f Hz",demod->high);
     mvwprintw(filtering,++row,1,"shift%'+10.3f Hz",demod->shift);
     mvwprintw(filtering,++row,1,"beta %'10.3f",demod->kaiser_beta);
     mvwprintw(filtering,++row,1,"block%'10d samp",demod->L);
     mvwprintw(filtering,++row,1,"FIR  %'10d samp",demod->M);
-    mvwprintw(filtering,++row,1,"bin  %'10.3f Hz",demod->samprate / (demod->L + demod->M - 1));
+    mvwprintw(filtering,++row,1,"bin  %'10.3f Hz",demod->samprate / N);
+    mvwprintw(filtering,++row,1,"delay%'10.3f s",(N - (demod->M - 1)/2)/demod->samprate);
     if(tuneitem >= 4 && tuneitem <= 7)
       mvwchgat(filtering,tuneitem+1-4,hcol+11,1,A_STANDOUT,0,NULL);
     box(filtering,0,0);
@@ -377,6 +379,7 @@ void *display(void *arg){
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 0;
     mvwprintw(sdr,++row,1,"Samprate%'10d Hz",demod->status.samprate); // Nominal
+    mvwprintw(sdr,++row,1,"LO%'16.0f Hz",demod->status.frequency); // Integer for now (SDR dependent)
     mvwprintw(sdr,++row,1,"TCXO cal%'+10.3f ppm",demod->calibrate *1e6);
     mvwprintw(sdr,++row,1,"I offset%+10.6f",demod->DC_i);  // Scaled to +/-1
     mvwprintw(sdr,++row,1,"Q offset%+10.6f",demod->DC_q);
