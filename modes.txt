@@ -7,16 +7,16 @@
 # DSB - (coherent) Double Sideband; I on left, Q on right; CAL - calibrate, DSB - squaring loop
 #  Name      Demod Filter low    Filter high  	 Offset      flags
 FM           FM         -8000          +8000          0              # standard NBFM, high pass @ 300, -6dB/oct
-FMF          FM         -8000          +8000          0	     FLAT    # pure FM, no post-detection filtering
+FMF          FM         -8000          +8000          0	     flat    # pure FM, no post-detection filtering
 AM           AM         -5000          +5000          0              # standard AM envelope detection
-IQ           IQ         -5000          +5000          0		     # Left = I, Right = Q, no tracking
-ISB          IQ         -5000          +5000          0	     CONJ    # add/subtract conjugates of +/- freqs
-CWU          IQ          -200           +200       +700		     # dial freq is for +700 Hz tone
-CWL          IQ          -200           +200       -700              # dial freq is for -700 Hz tone
-USB          IQ          +300          +3000          0
-LSB          IQ         -3000           -300          0
-CAM	     DSB	-5000	       +5000	      0              # Coherently track carrier (AM, low mod PM)
-CAL	     DSB	-3000	       +3000	      0      CAL     # Calibrate on carrier (WWV, etc)
-DSB	     DSB	-5000	       +5000          0      DSB     # Square to regenerate suppressed carrier
+IQ           LINEAR     -5000          +5000          0		     # Left = I, Right = Q, no tracking
+ISB          LINEAR     -5000          +5000          0	     conj    # add/subtract conjugates of +/- freqs
+CWU          LINEAR      -200           +200       +700		     # dial freq is for +700 Hz tone
+CWL          LINEAR      -200           +200       -700              # dial freq is for -700 Hz tone
+USB          LINEAR      +300          +3000          0
+LSB          LINEAR     -3000           -300          0
+CAM	     LINEAR	-5000	       +5000	      0      coherent # Coherently track carrier (AM, low mod PM)
+CAL	     LINEAR	-3000	       +3000	      0      cal      # Calibrate on carrier (WWV, etc)
+DSB	     LINEAR	-5000	       +5000          0      square   # Square to regenerate suppressed carrier
 
 
