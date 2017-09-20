@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.43 2017/09/11 04:36:17 karn Exp karn $
+// $Id: radio.h,v 1.44 2017/09/19 13:00:28 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -14,10 +14,11 @@
 #define CTLPORT 7300
 
 // Modetab flags
-#define CONJ 1    // Cross-conjugation of positive and negative frequencies, for ISB
-#define FLAT 2    // No baseband filtering for FM
-#define CAL 4     // Calibrate mode in CAM; adjust calibrate rather than frequency
-#define DSB 8     // DSB demodulator uses squaring to recover suppressed carrier
+#define CONJ 1      // Cross-conjugation of positive and negative frequencies, for ISB
+#define FLAT 2      // No baseband filtering for FM
+#define COHERENT 4  // Coherent carrier tracking
+#define CAL 8       // Calibrate mode in coherent demod; adjust calibrate rather than frequency
+#define SQUARE   16 // Square carrier in coherent loop (BPSK/suppressed carrier AM)
 
 struct modetab {
   char name[16];
