@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.15 2017/09/11 04:36:05 karn Exp karn $
+// $Id: modes.c,v 1.16 2017/09/19 12:59:42 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
 #if defined(linux)
@@ -20,11 +20,10 @@ struct demodtab {
   char name[16];
   void * (*demod)(void *);
 } Demodtab[] = {
-  {"fm",  demod_fm},
-  {"am",  demod_am},
-  {"ssb", demod_ssb},
-  {"dsb", demod_dsb},
-  {"iq",  demod_iq},
+  {"fm",  demod_fm},  // NBFM and noncoherent PM
+  {"am",  demod_am},  // Envelope detection of AM
+  {"dsb", demod_dsb}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
+  {"iq",  demod_iq},  // Linear (but not coherent) demodulation of ISB, SSB, CW; also raw IQ
 };
 #define NDEMOD (sizeof(Demodtab)/sizeof(struct demodtab))
 
