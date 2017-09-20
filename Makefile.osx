@@ -1,9 +1,9 @@
-# $Id: Makefile.osx,v 1.16 2017/09/11 04:38:01 karn Exp karn $
+# $Id: Makefile.osx,v 1.17 2017/09/19 13:05:33 karn Exp karn $
 #CC=g++
 INCLUDES=-I /opt/local/include
-#COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -pthread -Wall -funsafe-math-optimizations
+#COPTS=-g -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -35,7 +35,7 @@ modulate: modulate.o misc.o filter.o
 monitor: monitor.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lm
 
-radio: main.o radio.o am.o fm.o ssb.o iq.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
+radio: main.o radio.o am.o fm.o iq.o dsb.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
 
 am.o: am.c dsp.h filter.h radio.h audio.h
@@ -58,4 +58,4 @@ modulate.o: modulate.c dsp.h filter.h radio.h
 monitor.o: monitor.c rtp.h dsp.h multicast.h
 multicast.o: multicast.c multicast.h
 radio.o: radio.c radio.h filter.h dsp.h audio.h
-ssb.o: ssb.c dsp.h filter.h radio.h audio.h
+#ssb.o: ssb.c dsp.h filter.h radio.h audio.h
