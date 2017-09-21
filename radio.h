@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.44 2017/09/19 13:00:28 karn Exp karn $
+// $Id: radio.h,v 1.45 2017/09/20 19:46:58 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -127,7 +127,8 @@ struct demod {
   struct filter *filter;
   int L;            // Signal samples in FFT buffer
   int M;            // Samples in filter impulse response
-  int decimate;     // Input/output sample rate decimation ratio, should be power of 2
+  int interpolate;  // Input sample ratio multiplier, should be power of 2
+  int decimate;     // output sample rate divisor, should be power of 2
   float low;        // Edges of filter band
   float high;
   // Window shape factor for Kaiser window
