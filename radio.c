@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.63 2017/09/19 13:00:28 karn Exp karn $
+// $Id: radio.c,v 1.64 2017/09/19 21:58:32 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -101,13 +101,24 @@ int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
     
     int chunk = (demod->write_ptr - demod->read_ptr + DATASIZE) % DATASIZE; // How much is available?
     pthread_mutex_unlock(&demod->data_mutex);  // Done looking at write_ptr
-    chunk = min(chunk,DATASIZE - demod->read_ptr); // How much can we copy contiguously?
-    chunk = min(chunk,i); // How much do we need?
-		
-    memcpy(buffer,&demod->corr_data[demod->read_ptr],chunk*sizeof(complex float));
-    demod->read_ptr = (demod->read_ptr + chunk) % DATASIZE;
-    i -= chunk;
-    buffer += chunk;
+    if(demod->interpolate == 1){
+      // Not interpolating; directly copy large blocks
+      chunk = min(chunk,DATASIZE - demod->read_ptr); // How much can we copy contiguously?
+      chunk = min(chunk,i); // How much do we need?
+      
+      memcpy(buffer,&demod->corr_data[demod->read_ptr],chunk*sizeof(complex float));
+      demod->read_ptr = (demod->read_ptr + chunk) % DATASIZE;
+      i -= chunk;
+      buffer += chunk;
+    } else {
+      // copy only one sample at a time, then stuff zeroes
+      *buffer++ = demod->corr_data[demod->read_ptr++];
+      demod->read_ptr %= DATASIZE;
+      for(int j=1; j<demod->interpolate; j++){
+	*buffer++ = 0;
+      }
+      i -= demod->interpolate;
+    }
   }
   return cnt;
 }
