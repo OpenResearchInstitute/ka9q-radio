@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.72 2017/09/13 23:09:30 karn Exp karn $
+// $Id: main.c,v 1.74 2017/09/19 21:56:54 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -371,7 +371,16 @@ void *input_loop(void *arg){
 	demod->max_IF = demod->status.samprate/2 - IF_EXCLUDE;
 	demod->min_IF = -demod->max_IF;
 	// Use nominal rates here so result is clean integer
-	demod->decimate = demod->status.samprate / Audio.samprate;
+	if(demod->status.samprate > Audio.samprate)
+	  demod->decimate = demod->status.samprate / Audio.samprate;
+	else
+	  demod->decimate = 1;
+
+	if(demod->status.samprate < Audio.samprate)
+	  demod->interpolate = Audio.samprate / demod->status.samprate;
+	else
+	  demod->interpolate = 1;
+	
 	pthread_cond_broadcast(&demod->status_cond);
 	pthread_mutex_unlock(&demod->status_mutex);
       }
