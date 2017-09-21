@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.74 2017/09/19 21:56:54 karn Exp karn $
+// $Id: main.c,v 1.75 2017/09/21 00:18:23 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -367,20 +367,22 @@ void *input_loop(void *arg){
 	// Signalled every time the status is updated
 	// status.samprate contains *nominal* A/D sample rate
 	// demod->samprate contains *corrected* A/D sample rate
-	demod->samprate = demod->status.samprate * (1 + demod->calibrate);
-	demod->max_IF = demod->status.samprate/2 - IF_EXCLUDE;
-	demod->min_IF = -demod->max_IF;
 	// Use nominal rates here so result is clean integer
-	if(demod->status.samprate > Audio.samprate)
+	demod->decimate = 1; demod->interpolate = 1;
+	if(demod->status.samprate >= Audio.samprate){
+	  // Sample rate is higher than audio rate; decimate
 	  demod->decimate = demod->status.samprate / Audio.samprate;
-	else
-	  demod->decimate = 1;
-
-	if(demod->status.samprate < Audio.samprate)
-	  demod->interpolate = Audio.samprate / demod->status.samprate;
-	else
-	  demod->interpolate = 1;
-	
+	  demod->samprate = demod->status.samprate * (1 + demod->calibrate);
+	  demod->max_IF = demod->status.samprate/2 - IF_EXCLUDE;
+	  demod->min_IF = -demod->max_IF;
+	} else {
+	  // Sample rate is lower than audio rate
+	  // Interpolate up to audio rate, pretend sample rate is audio rate
+	  demod->interpolate = Audio.samprate / demod->status.samprate;	  
+	  demod->samprate = Audio.samprate * (1 + demod->calibrate);
+	  demod->max_IF = Audio.samprate/2 - IF_EXCLUDE;
+	  demod->min_IF = -demod->max_IF;
+	}
 	pthread_cond_broadcast(&demod->status_cond);
 	pthread_mutex_unlock(&demod->status_mutex);
       }
