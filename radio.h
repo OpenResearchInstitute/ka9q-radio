@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.45 2017/09/20 19:46:58 karn Exp karn $
+// $Id: radio.h,v 1.46 2017/09/21 00:14:32 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -179,16 +179,18 @@ int readmodes(char *);
 int savestate(struct demod *,char const *);
 int loadstate(struct demod *,char const *);
 
+// Save and load calibration
+int loadcal(struct demod *,char const *);
+int savecal(struct demod *,char const *);
+
+
 // Thread entry points
 void *display(void *);
 void *keyboard(void *);
 
 // Demodulator thread entry points
 void *demod_fm(void *);
-void *demod_ssb(void *);
-void *demod_iq(void *);
-void *demod_cam(void *);
 void *demod_am(void *);
-void *demod_dsb(void *);
+void *demod_linear(void *);
 
 #endif
