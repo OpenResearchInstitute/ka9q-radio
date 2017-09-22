@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.75 2017/09/21 00:18:23 karn Exp karn $
+// $Id: main.c,v 1.76 2017/09/21 02:07:26 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -388,13 +388,47 @@ void *input_loop(void *arg){
       }
       // Pass PCM I/Q samples to corrector and input queue
       cnt -= sizeof(rtp) + sizeof(demod->status);
-      cnt /= 4; // count 4-byte stereo samples
-      proc_samples(demod,samples,cnt);
+      // count 4-byte stereo samples
+      proc_samples(demod,samples,cnt/4);
     }
   }
   return NULL;
 }
  
+// Load calibration factor for specified sending IP
+int loadcal(struct demod *demod,char const *ipaddr){
+  FILE *fp;
+  char pathname[PATH_MAX];
+  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,ipaddr);
+
+  if((fp = fopen(pathname,"r")) == NULL){
+    fprintf(stderr,"Can't read calibration file %s\n",pathname);
+    return -1;
+  }
+  double calibrate;
+  if(fscanf(fp,"%lg",&calibrate) == 1){
+    set_cal(demod,calibrate);
+  }
+  fclose(fp);
+  return 0;
+}
+// Save calibration factor for specified sending IP
+int savecal(struct demod *demod,char const *ipaddr){
+  // Dump receiver state to file
+  FILE *fp;
+  char pathname[PATH_MAX];
+  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,ipaddr);
+
+  if((fp = fopen(pathname,"w")) == NULL){
+    fprintf(stderr,"Can't write calibration file %s\n",pathname);
+    return -1;
+  }
+  fprintf(fp,"%lg\n",demod->calibrate);
+  fclose(fp);
+  return 0;
+}
+
+
 // Save receiver state to file
 // Path is Statepath[] = $HOME/.radiostate
 int savestate(struct demod *dp,char const *filename){
@@ -426,7 +460,6 @@ int savestate(struct demod *dp,char const *filename){
   fprintf(fp,"Filter low %.3f Hz\n",dp->low);
   fprintf(fp,"Filter high %.3f Hz\n",dp->high);
   fprintf(fp,"Tunestep %d\n",dp->tunestep);
-  fprintf(fp,"Calibrate %.3f ppm\n",dp->calibrate*1e6); // do last?
   fclose(fp);
   return 0;
 }
@@ -450,7 +483,6 @@ int loadstate(struct demod *dp,char const *filename){
   char line[PATH_MAX];
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
-    double f;
     if(sscanf(line,"Frequency %lf",&dp->start_freq) > 0){
     } else if(strncmp(line,"Mode ",5) == 0){
       strlcpy(dp->mode,&line[5],sizeof(dp->mode));
@@ -468,8 +500,6 @@ int loadstate(struct demod *dp,char const *filename){
     } else if(dp->audio && sscanf(line,"OPUS bitrate %d",&dp->audio->opus_bitrate) > 0){
     } else if(sscanf(line,"Locale %256s",Locale)){
       setlocale(LC_ALL,Locale);
-    } else if(sscanf(line,"Calibrate %lf",&f) > 0){
-      dp->calibrate = f * 1e-6;
     }
   }
   fclose(fp);
