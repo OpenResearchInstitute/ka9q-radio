@@ -197,15 +197,10 @@ void *display(void *arg){
   noecho();
 
   WINDOW * const tuning = newwin(7,35,0,0);    // Frequency information
-
   WINDOW * const band = newwin(5,42,0,36);     // Band information
-
   WINDOW * const filtering = newwin(11,23,7,0);
-
   WINDOW * const sig = newwin(14,26,7,25); // Signal information
-
   WINDOW * const sdr = newwin(12,25,7,53); // SDR information
-
   WINDOW * const network = newwin(11,78,21,0); // Network status information
   
   int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);  // Powermate knob?
@@ -219,13 +214,13 @@ void *display(void *arg){
   for(;;){
 
     // Update display
+    mvprintw(5,36,"KA9Q SDR Receiver v1.0");
+    mvprintw(6,36,"Compiled %s %s",__DATE__,__TIME__);
+
     // Frequency control section - these can be adjusted by the user
     // using the keyboard or tuning knob, so be careful with formatting
-    //    wclrtobot(tuning);
-
     wmove(tuning,0,0);
     wclrtobot(tuning);    
-
     int row = 0;
     mvwprintw(tuning,++row,1,"Carrier%'22.3f Hz",demod->frequency);
 
@@ -247,7 +242,6 @@ void *display(void *arg){
 	alias = get_first_LO(demod) - demod->second_LO - demod->samprate;	
       wprintw(tuning," alias %'.3f Hz",alias);
     }
-    wclrtoeol(tuning);
 #endif
 
     mvwprintw(tuning,++row,1,"IF%'27.3f Hz",-demod->second_LO);
@@ -257,11 +251,13 @@ void *display(void *arg){
 
     box(tuning,0,0);
     mvwprintw(tuning,0,5,"Tuning");
-
+    wnoutrefresh(tuning);
 
     // Display ham band emission data, if available
-    row = 1;
+    wmove(band,0,0);
     wclrtobot(band);
+    row = 1;
+
     struct bandplan const *bp_low,*bp_high;
     bp_low = lookup_frequency(demod->frequency+demod->low);
     bp_high = lookup_frequency(demod->frequency+demod->high);
@@ -300,8 +296,11 @@ void *display(void *arg){
     }
     box(band,0,0);
     mvwprintw(band,0,5,"Band info");
+    wnoutrefresh(band);
     
     row = 0;
+    wmove(filtering,0,0);
+    wclrtobot(filtering);
     int const N = demod->L + demod->M - 1;
     mvwprintw(filtering,++row,1,"low  %'+10.3f Hz",demod->low);
     mvwprintw(filtering,++row,1,"high %'+10.3f Hz",demod->high);
@@ -314,11 +313,13 @@ void *display(void *arg){
     mvwprintw(filtering,++row,1,"rate %d/%d",demod->interpolate,demod->decimate);
     box(filtering,0,0);
     mvwprintw(filtering,0,5,"Filtering");
+    wnoutrefresh(filtering);
 
     // Signal data
+    wmove(sig,0,0);
+    wclrtobot(sig);
     row = 0;
     mvwprintw(sig,++row,1,"Mode    %7s",demod->mode);
-    wclrtoeol(sig);
     mvwprintw(sig,++row,1,"IF%13.1f dBFS",power2dB(demod->if_power));
     if(demod->filter != NULL){
       mvwprintw(sig,++row,1,"Baseband%7.1f dBFS",power2dB(demod->bb_power));
@@ -329,8 +330,6 @@ void *display(void *arg){
       mvwprintw(sig,++row,1,"NBW     %7.1f dB-Hz",10*log10f(bw));
       mvwprintw(sig,++row,1,"SNRbb   %7.1f dB",10*log10f(sn0/bw));
     }
-    wclrtobot(sig);
-
     // Display these only if they're in use by the current mode
     if(!isnan(demod->snr))
       mvwprintw(sig,++row,1,"SNRdem  %7.1f dB",power2dB(demod->snr));
@@ -349,11 +348,13 @@ void *display(void *arg){
     if(!isnan(demod->plfreq))
       mvwprintw(sig,++row,1,"tone%11.1f Hz",demod->plfreq);
 
-
     box(sig,0,0);
     mvwprintw(sig,0,5,"Signal");
+    wnoutrefresh(sig);
 
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
+    wmove(sdr,0,0);
+    wclrtobot(sdr);
     row = 0;
     mvwprintw(sdr,++row,1,"Samprate%'10d Hz",demod->status.samprate); // Nominal
     mvwprintw(sdr,++row,1,"LO%'16.0f Hz",demod->status.frequency); // Integer for now (SDR dependent)
@@ -367,6 +368,7 @@ void *display(void *arg){
     mvwprintw(sdr,++row,1,"IF gain%11u dB",demod->status.if_gain); // SDR dependent
     box(sdr,0,0);
     mvwprintw(sdr,0,5,"SDR Hardware");
+    wnoutrefresh(sdr);
 
     // Network status
     if(memcmp(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address)) != 0){
@@ -378,8 +380,9 @@ void *display(void *arg){
     }
     row = 0;
     extern int Delayed,Skips;
+    wmove(network,0,0);
+    wclrtobot(network);
     mvwprintw(network,++row,1,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
-    wclrtoeol(network);
     mvwprintw(network,++row,1,"IQ Pkts%'14llu",demod->iq_packets);
     mvwprintw(network,++row,1,"Late%17d",Delayed);
     mvwprintw(network,++row,1,"Skips%16d",Skips);
@@ -396,12 +399,12 @@ void *display(void *arg){
       } else {
 	wprintw(network,"PCM %'17d Hz",audio->samprate);
       }
-      wclrtoeol(network);
       mvwprintw(network,++row,1,"Bitrate%'14.0f bps",audio->bitrate);
       mvwprintw(network,++row,1,"Pkts%'17llu",audio->audio_packets);
     }
     box(network,0,0);
     mvwprintw(network,0,5,"Network");
+    wnoutrefresh(network);
 
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
@@ -420,11 +423,14 @@ void *display(void *arg){
     } else
       hcol = 0; // can't happen, but shuts up compiler
     // Highlight digit
-    if(tuneitem >= 0 && tuneitem <= 3)
+    if(tuneitem >= 0 && tuneitem <= 3){
       mvwchgat(tuning,tuneitem+1,hcol+25,1,A_STANDOUT,0,NULL);
-    else if(tuneitem >= 4 && tuneitem <= 7)
+      wnoutrefresh(tuning);
+    }
+    else if(tuneitem >= 4 && tuneitem <= 7){
       mvwchgat(filtering,tuneitem+1-4,hcol+11,1,A_STANDOUT,0,NULL);
-
+      wnoutrefresh(filtering);
+    }
     // Poll Griffin Powermate knob, if present
 
     // Redefine stuff we need from linux/input.h
@@ -641,12 +647,6 @@ void *display(void *arg){
       break;
     }
   loopend:;
-    wnoutrefresh(tuning);
-    wnoutrefresh(band);
-    wnoutrefresh(filtering);
-    wnoutrefresh(sig);
-    wnoutrefresh(sdr);
-    wnoutrefresh(network);
     doupdate();
   }
  done:;
