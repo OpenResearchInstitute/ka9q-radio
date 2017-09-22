@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.80 2017/09/19 21:57:24 karn Exp karn $
+// $Id: display.c,v 1.81 2017/09/20 06:31:48 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -200,7 +200,7 @@ void *display(void *arg){
 
   WINDOW * const band = newwin(5,42,0,36);     // Band information
 
-  WINDOW * const filtering = newwin(10,23,7,0);
+  WINDOW * const filtering = newwin(11,23,7,0);
 
   WINDOW * const sig = newwin(14,26,7,25); // Signal information
 
@@ -255,29 +255,9 @@ void *display(void *arg){
     if(demod->doppler != 0)
       mvwprintw(tuning,++row,1,"Doppler%'+22.3f Hz",demod->doppler);
 
-    // Highlight cursor for tuning step
-    // A little messy because of the commas in the frequencies
-    // They come from the ' option in the printf formats
-    int hcol;
-    if(demod->tunestep >= -3 && demod->tunestep <= -1){ // .001 or .01 or .1
-      hcol = - demod->tunestep + 1;
-    } else if(demod->tunestep >= 0 && demod->tunestep <= 2){
-      hcol = - demod->tunestep;  // 1, 10, 100
-    } else if(demod->tunestep >= 3 && demod->tunestep <= 5){
-      hcol = - demod->tunestep - 1; // 1,000; 10,000; 100,000
-    } else if(demod->tunestep >= 6 && demod->tunestep <= 8){
-      hcol = - demod->tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
-    } else if(demod->tunestep >= 9 && demod->tunestep <= 9){
-      hcol = - demod->tunestep - 3; // 1,000,000,000
-    } else
-      hcol = 0; // can't happen, but shuts up compiler
-    // Highlight digit
-    if(tuneitem >= 0 && tuneitem <= 3)
-      mvwchgat(tuning,tuneitem+1,hcol+25,1,A_STANDOUT,0,NULL);
-
     box(tuning,0,0);
     mvwprintw(tuning,0,5,"Tuning");
-    wnoutrefresh(tuning);
+
 
     // Display ham band emission data, if available
     row = 1;
@@ -320,7 +300,6 @@ void *display(void *arg){
     }
     box(band,0,0);
     mvwprintw(band,0,5,"Band info");
-    wnoutrefresh(band);
     
     row = 0;
     int const N = demod->L + demod->M - 1;
@@ -332,11 +311,9 @@ void *display(void *arg){
     mvwprintw(filtering,++row,1,"FIR  %'10d samp",demod->M);
     mvwprintw(filtering,++row,1,"bin  %'10.3f Hz",demod->samprate / N);
     mvwprintw(filtering,++row,1,"delay%'10.3f s",(N - (demod->M - 1)/2)/demod->samprate);
-    if(tuneitem >= 4 && tuneitem <= 7)
-      mvwchgat(filtering,tuneitem+1-4,hcol+11,1,A_STANDOUT,0,NULL);
+    mvwprintw(filtering,++row,1,"rate %d/%d",demod->interpolate,demod->decimate);
     box(filtering,0,0);
     mvwprintw(filtering,0,5,"Filtering");
-    wnoutrefresh(filtering);
 
     // Signal data
     row = 0;
@@ -361,7 +338,8 @@ void *display(void *arg){
     mvwprintw(sig,++row,1,"AF Gain %7.1f dB",voltage2dB(demod->gain));
     
     if(demod->foffset != 0)
-      mvwprintw(sig,++row,1,"offset%'+9.3f Hz",demod->foffset);
+      mvwprintw(sig,++row,1,"offset%'+9.1f Hz",demod->foffset);
+
     if(!isnan(demod->pdeviation))
       mvwprintw(sig,++row,1,"deviat%9.1f Hz",demod->pdeviation);
 
@@ -374,8 +352,7 @@ void *display(void *arg){
 
     box(sig,0,0);
     mvwprintw(sig,0,5,"Signal");
-    wnoutrefresh(sig);
-    
+
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 0;
     mvwprintw(sdr,++row,1,"Samprate%'10d Hz",demod->status.samprate); // Nominal
@@ -390,7 +367,6 @@ void *display(void *arg){
     mvwprintw(sdr,++row,1,"IF gain%11u dB",demod->status.if_gain); // SDR dependent
     box(sdr,0,0);
     mvwprintw(sdr,0,5,"SDR Hardware");
-    wnoutrefresh(sdr);
 
     // Network status
     if(memcmp(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address)) != 0){
@@ -426,7 +402,28 @@ void *display(void *arg){
     }
     box(network,0,0);
     mvwprintw(network,0,5,"Network");
-    wnoutrefresh(network);
+
+    // Highlight cursor for tuning step
+    // A little messy because of the commas in the frequencies
+    // They come from the ' option in the printf formats
+    int hcol;
+    if(demod->tunestep >= -3 && demod->tunestep <= -1){ // .001 or .01 or .1
+      hcol = - demod->tunestep + 1;
+    } else if(demod->tunestep >= 0 && demod->tunestep <= 2){
+      hcol = - demod->tunestep;  // 1, 10, 100
+    } else if(demod->tunestep >= 3 && demod->tunestep <= 5){
+      hcol = - demod->tunestep - 1; // 1,000; 10,000; 100,000
+    } else if(demod->tunestep >= 6 && demod->tunestep <= 8){
+      hcol = - demod->tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
+    } else if(demod->tunestep >= 9 && demod->tunestep <= 9){
+      hcol = - demod->tunestep - 3; // 1,000,000,000
+    } else
+      hcol = 0; // can't happen, but shuts up compiler
+    // Highlight digit
+    if(tuneitem >= 0 && tuneitem <= 3)
+      mvwchgat(tuning,tuneitem+1,hcol+25,1,A_STANDOUT,0,NULL);
+    else if(tuneitem >= 4 && tuneitem <= 7)
+      mvwchgat(filtering,tuneitem+1-4,hcol+11,1,A_STANDOUT,0,NULL);
 
     // Poll Griffin Powermate knob, if present
 
@@ -640,11 +637,16 @@ void *display(void *arg){
       }
       break;
     default:
-      //      fprintf(stderr,"char %d 0x%x",c,c);
       beep();
       break;
     }
   loopend:;
+    wnoutrefresh(tuning);
+    wnoutrefresh(band);
+    wnoutrefresh(filtering);
+    wnoutrefresh(sig);
+    wnoutrefresh(sdr);
+    wnoutrefresh(network);
     doupdate();
   }
  done:;
