@@ -1,4 +1,4 @@
-// $Id$
+// $Id: linear.c,v 1.1 2017/09/20 19:47:11 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -33,8 +33,8 @@ static float const searchlow = -1000;
 static float const unlock_time = 1;     // Search 1 sec after loss of lock
 
 
-void *demod_dsb(void *arg){
-  pthread_setname("dsb");
+void *demod_linear(void *arg){
+  pthread_setname("linear");
   assert(arg != NULL);
   struct demod * const demod = arg;
 
