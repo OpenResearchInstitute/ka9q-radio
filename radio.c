@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.64 2017/09/19 21:58:32 karn Exp karn $
+// $Id: radio.c,v 1.65 2017/09/21 00:14:54 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -17,7 +17,7 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-
+#include <netdb.h>
 
 #include "audio.h"
 #include "radio.h"
@@ -297,6 +297,22 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   }
   if(mindex == Nmodes)
     return -1; // Unregistered mode
+  // Current mode is calibrate, save
+  if(demod->flags & CAL)
+  // Save calibration file
+  {
+    char source[NI_MAXHOST];
+    char sport[NI_MAXSERV];
+    memset(source,0,sizeof(source));
+    memset(sport,0,sizeof(sport));
+    // Turn into printable IP address string (no DNS resolution)
+    getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
+		  source,sizeof(source),
+		  sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
+
+    savecal(demod,source);
+  }
+
   // Kill current demod thread, if any, to cause clean exit
   demod->terminate = 1;
   pthread_join(demod->demod_thread,NULL); // Wait for it to finish
@@ -332,6 +348,20 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   while(demod->samprate == 0)
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
   pthread_mutex_unlock(&demod->status_mutex);
+
+  // Load calibration file
+  {
+    char source[NI_MAXHOST];
+    char sport[NI_MAXSERV];
+    memset(source,0,sizeof(source));
+    memset(sport,0,sizeof(sport));
+    // Turn into printable IP address string (no DNS resolution)
+    getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
+		  source,sizeof(source),
+		  sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
+
+    loadcal(demod,source);
+  }
 
   double lo2 = demod->second_LO;
   // Might now be out of range because of change in filter passband
