@@ -21,6 +21,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/select.h>
+#include <netdb.h>
 
 #include "radio.h"
 #include "filter.h"
@@ -396,10 +397,21 @@ void *input_loop(void *arg){
 }
  
 // Load calibration factor for specified sending IP
-int loadcal(struct demod *demod,char const *ipaddr){
+int loadcal(struct demod *demod){
+  char source[NI_MAXHOST];
+  char sport[NI_MAXSERV];
+  memset(source,0,sizeof(source));
+  memset(sport,0,sizeof(sport));
+  // Turn into printable IP address string (no DNS resolution)
+  if(getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
+		 source,sizeof(source),
+		 sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST) != 0){
+    return -1;    // failed
+  }
+
   FILE *fp;
   char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,ipaddr);
+  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,source);
 
   if((fp = fopen(pathname,"r")) == NULL){
     fprintf(stderr,"Can't read calibration file %s\n",pathname);
@@ -413,11 +425,23 @@ int loadcal(struct demod *demod,char const *ipaddr){
   return 0;
 }
 // Save calibration factor for specified sending IP
-int savecal(struct demod *demod,char const *ipaddr){
+int savecal(struct demod *demod){
   // Dump receiver state to file
+  char source[NI_MAXHOST];
+  char sport[NI_MAXSERV];
+  memset(source,0,sizeof(source));
+  memset(sport,0,sizeof(sport));
+  // Turn into printable IP address string (no DNS resolution)
+  if(getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
+		 source,sizeof(source),
+		 sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST) != 0){
+    return -1; // failed
+  }
+    
+
   FILE *fp;
   char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,ipaddr);
+  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,source);
 
   if((fp = fopen(pathname,"w")) == NULL){
     fprintf(stderr,"Can't write calibration file %s\n",pathname);
