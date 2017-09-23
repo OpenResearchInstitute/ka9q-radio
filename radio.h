@@ -180,8 +180,8 @@ int savestate(struct demod *,char const *);
 int loadstate(struct demod *,char const *);
 
 // Save and load calibration
-int loadcal(struct demod *,char const *);
-int savecal(struct demod *,char const *);
+int loadcal(struct demod *);
+int savecal(struct demod *);
 
 
 // Thread entry points
