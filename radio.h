@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.46 2017/09/21 00:14:32 karn Exp karn $
+// $Id: radio.h,v 1.48 2017/09/23 03:53:04 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -19,6 +19,8 @@
 #define COHERENT 4  // Coherent carrier tracking
 #define CAL 8       // Calibrate mode in coherent demod; adjust calibrate rather than frequency
 #define SQUARE   16 // Square carrier in coherent loop (BPSK/suppressed carrier AM)
+#define ENVELOPE 32 // Envelope detection of AM
+#define MONO     64 // Only output I channel of linear mode
 
 struct modetab {
   char name[16];
