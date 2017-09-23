@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.38 2017/09/11 08:12:15 karn Exp karn $
+// $Id: fm.c,v 1.39 2017/09/19 13:01:37 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -163,17 +163,24 @@ void *demod_fm(void *arg){
 
     // Let the filter tail leave after the squelch is closed, but don't send pure silence
     int silent = 1;
-    for(int n=0; n<plfilter->olen; n++){
-      if(plfilter->output.r[n] != 0){
-	silent = 0;
-	break;
+    float audio[plfilter->ilen];    
+    if(afilter == NULL){
+      for(int n=0; n < plfilter->ilen; n++){
+	audio[n] = plfilter->input.r[n] * demod->gain;
+	if(audio[n] != 0)
+	  silent = 0;
+      }
+    } else {
+      assert(plfilter->ilen == afilter->olen);
+      for(int n=0; n < afilter->olen; n++){
+	audio[n] = afilter->output.r[n] * demod->gain;
+	if(audio[n] != 0)
+	  silent = 0;
       }
     }
     if(!silent){
-      if(afilter == NULL)
-	send_mono_audio(demod->audio,plfilter->input.r,plfilter->ilen,demod->gain); // Send filter input
-      else
-	send_mono_audio(demod->audio,afilter->output.r,afilter->olen,demod->gain);
+
+      send_mono_audio(demod->audio,audio,plfilter->ilen);
 
       // Determine PL tone, if any
       fftwf_execute(pl_plan);
