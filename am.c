@@ -26,6 +26,19 @@ void *demod_am(void *arg){
   demod->filter = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
+  float average_average = 0;
+
+  // AGC
+  int hangcount = 0;
+  float samptime = demod->decimate / demod->samprate;
+  static float const hangtime = 1.1;      // AGC Hang for 1.1 seconds after new peak
+  static float const recovery_rate = 6;   // AGC recovery rate 6 db/sec after hang finishes
+  static float const attack_rate = -30;    // Attack 30 dB/sec
+
+  float const recovery_factor = dB2voltage(recovery_rate * samptime);
+  float const attack_factor = dB2voltage(attack_rate * samptime);
+  int const hangmax = hangtime / samptime; // 1.1 second hang before gain increase
+
   while(!demod->terminate){
     fillbuf(demod,filter->input.c,filter->ilen);
     demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
@@ -37,26 +50,28 @@ void *demod_am(void *arg){
     else
       demod->n0 += .01 * (compute_n0(demod) - demod->n0);
 
-    // Envelope detection
-    float average = 0;
+    // Envelope detection & AGC
     float audio[filter->olen];
     demod->bb_power = 0;
     for(int n=0; n < filter->olen; n++){
-      complex float const t = cnrmf(filter->output.c[n]);
+      float const t = cnrmf(filter->output.c[n]);
+      float const mag = sqrtf(t);
+      
       demod->bb_power += t;
-      average += audio[n] = sqrtf(t);
+      audio[n] = mag * demod->gain;
+      if(fabsf(audio[n]) > demod->headroom){
+	demod->gain *= attack_factor;
+	audio[n] = mag * demod->gain;
+	hangcount = hangmax;
+      } else if(hangcount != 0){
+	hangcount--;
+      } else {
+	demod->gain *= recovery_factor;
+      }
     }
     demod->bb_power /= filter->olen;
-    average /= filter->olen;
+    send_mono_audio(demod->audio,audio,filter->olen,1);
 
-    // AM AGC is carrier-driven
-    //    demod->gain = demod->headroom / average;
-    demod->gain = 0.5/average;
-    // Remove carrier component
-    for(int n=0; n<filter->olen; n++)
-      audio[n] -= average;
-
-    send_mono_audio(demod->audio,audio,filter->olen,demod->gain);
   }
   delete_filter(filter);
   demod->filter = NULL;
