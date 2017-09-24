@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.48 2017/09/23 03:53:04 karn Exp karn $
+// $Id: radio.h,v 1.49 2017/09/23 07:42:49 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -105,9 +105,15 @@ struct demod {
   float max_IF;
 
   double frequency;     // Nominal (dial) frequency
-  double doppler;       // Open-loop doppler correction from satellite tracking program
-                        // To be handled by a separate spindown, not in radio.c
 
+  // Doppler shift correction (optional)
+  pthread_t doppler_thread;
+  double doppler;       // Open-loop doppler correction from satellite tracking program
+  double doppler_rate;
+  complex double doppler_phasor;
+  complex double doppler_phasor_step;
+  complex double doppler_phasor_step_step;  
+  pthread_mutex_t doppler_mutex;     // Protects doppler
 
   // Second LO parameters
   complex double second_LO_phasor; // Second LO phasor
@@ -189,6 +195,7 @@ int savecal(struct demod *);
 // Thread entry points
 void *display(void *);
 void *keyboard(void *);
+void *doppler(void *);
 
 // Demodulator thread entry points
 void *demod_fm(void *);

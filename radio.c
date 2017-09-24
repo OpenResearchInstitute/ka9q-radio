@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.66 2017/09/22 18:17:31 karn Exp karn $
+// $Id: radio.c,v 1.67 2017/09/23 03:52:29 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -383,13 +383,25 @@ complex float spindown(struct demod * const demod,complex float const * const da
   assert(cnrm(demod->second_LO_phasor) != 0);
 
   // Apply 2nd LO, compute average pre-filter signal power
-
   complex float second_LO_phasor = demod->second_LO_phasor;
   for(int n=0; n < filter->ilen; n++){
     assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
     filter->input.c[n] = data[n] * second_LO_phasor;
     second_LO_phasor *= demod->second_LO_phasor_step;
   }
+  // Apply Doppler, if active
+  pthread_mutex_lock(&demod->doppler_mutex);
+  if(demod->doppler != 0){
+    for(int n=0; n < filter->ilen; n++){
+      filter->input.c[n] *= demod->doppler_phasor;
+      demod->doppler_phasor *= demod->doppler_phasor_step;
+      demod->doppler_phasor_step *= demod->doppler_phasor_step_step;
+    }
+    demod->doppler_phasor /= cabs(demod->doppler_phasor);
+    demod->doppler_phasor_step /= cabs(demod->doppler_phasor_step);
+  }
+  pthread_mutex_unlock(&demod->doppler_mutex);
+
   // Renormalize to guard against accumulated roundoff error
   return second_LO_phasor / cabs(second_LO_phasor);
 }
