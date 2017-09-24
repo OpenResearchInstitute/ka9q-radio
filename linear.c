@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.2 2017/09/22 18:16:42 karn Exp karn $
+// $Id: linear.c,v 1.3 2017/09/23 07:39:16 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -26,6 +26,7 @@
 static float const hangtime = 1.1;      // AGC Hang for 1.1 seconds after new peak
 static float const recovery_rate = 6;   // AGC recovery rate 6 db/sec after hang finishes
 static float const attack_rate = -30;   // AGC gain decrease 30 dB/sec when over set point
+
 static float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
 static int   const fftsize = 1 << 16;   // search FFT bin size = 64K = 1.37 sec @ 48 kHz
 static float const damping = M_SQRT1_2; // PLL loop damping factor; 1/sqrt(2) is "critical" damping
@@ -236,6 +237,7 @@ void *demod_linear(void *arg){
 	  if(fabs(audio[n]) > demod->headroom){
 	    demod->gain *= attack_factor;
 	    audio[n] = demod->gain * crealf(filter->output.c[n]);
+	    hangcount = hangmax;
 	  } else if(hangcount != 0){
 	    hangcount--;
 	  } else {
