@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.83 2017/09/22 18:16:30 karn Exp karn $
+// $Id: display.c,v 1.84 2017/09/23 07:42:40 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -196,13 +196,12 @@ void *display(void *arg){
   cbreak();
   noecho();
 
-  WINDOW * const tuning = newwin(7,35,0,0);    // Frequency information
-  WINDOW * const band = newwin(5,42,0,36);     // Band information
-  WINDOW * const filtering = newwin(11,23,7,0);
-  WINDOW * const sig = newwin(14,26,7,25); // Signal information
-  WINDOW * const sdr = newwin(12,25,7,53); // SDR information
-  WINDOW * const network = newwin(11,78,21,0); // Network status information
-  
+  WINDOW * const tuning = newwin(8,35,0,0);    // Frequency information
+  WINDOW * const info = newwin(8,42,0,36);     // Band information
+  WINDOW * const filtering = newwin(11,23,8,28);
+  WINDOW * const sig = newwin(14,26,8,0); // Signal information
+  WINDOW * const sdr = newwin(12,25,8,53); // SDR information
+  WINDOW * const network = newwin(6,78,22,0); // Network status information
   int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);  // Powermate knob?
 
   struct sockaddr old_input_source_address;
@@ -214,23 +213,21 @@ void *display(void *arg){
   for(;;){
 
     // Update display
-    mvprintw(5,36,"KA9Q SDR Receiver v1.0");
-    mvprintw(6,36,"Compiled %s %s",__DATE__,__TIME__);
 
     // Frequency control section - these can be adjusted by the user
     // using the keyboard or tuning knob, so be careful with formatting
     wmove(tuning,0,0);
     wclrtobot(tuning);    
     int row = 0;
-    mvwprintw(tuning,++row,1,"Carrier%'22.3f Hz",demod->frequency);
+    mvwprintw(tuning,++row,1,"Carrier%'21.3f Hz",demod->frequency);
 
     if(demod->frequency_lock)
       mvwchgat(tuning,row,15,20,A_UNDERLINE,0,NULL);
 
-    mvwprintw(tuning,++row,1,"Center%'23.3f Hz",demod->frequency + (demod->high + demod->low)/2);
+    mvwprintw(tuning,++row,1,"Center%'22.3f Hz",demod->frequency + (demod->high + demod->low)/2);
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
-    mvwprintw(tuning,++row,1,"First LO%'21.3f Hz",get_first_LO(demod));
+    mvwprintw(tuning,++row,1,"First LO%'20.3f Hz",get_first_LO(demod));
 #if 0
     if(!LO2_in_range(demod,demod->second_LO,1)){
       // LO2 is near its edges where signals from the opposite edge
@@ -244,18 +241,19 @@ void *display(void *arg){
     }
 #endif
 
-    mvwprintw(tuning,++row,1,"IF%'27.3f Hz",-demod->second_LO);
+    mvwprintw(tuning,++row,1,"IF%'26.3f Hz",-demod->second_LO);
 
-    if(demod->doppler != 0)
-      mvwprintw(tuning,++row,1,"Doppler%'+22.3f Hz",demod->doppler);
-
+    if(demod->doppler != 0){
+      mvwprintw(tuning,++row,1,"Doppler%'21.3f Hz",demod->doppler);
+      mvwprintw(tuning,++row,1,"Dop rate%20.3f Hz/s",demod->doppler_rate);
+    }
     box(tuning,0,0);
     mvwprintw(tuning,0,5,"Tuning");
     wnoutrefresh(tuning);
 
     // Display ham band emission data, if available
-    wmove(band,0,0);
-    wclrtobot(band);
+    wmove(info,0,0);
+    wclrtobot(info);
     row = 1;
 
     struct bandplan const *bp_low,*bp_high;
@@ -270,33 +268,37 @@ void *display(void *arg){
       intersect.classes = bp_low->classes & bp_high->classes;
       intersect.modes = bp_low->modes & bp_high->modes;
 
-      mvwprintw(band,row++,1,"%s",bp_low->name);
+      mvwprintw(info,row++,1,"%s",bp_low->name);
 
-      wmove(band,row++,1);
+      wmove(info,row++,1);
       if(intersect.modes & CW)
-	wprintw(band,"CW ");
+	wprintw(info,"CW ");
       if(intersect.modes & DATA)
-	wprintw(band,"Data ");
+	wprintw(info,"Data ");
       if(intersect.modes & VOICE)
-	wprintw(band,"Voice ");
+	wprintw(info,"Voice ");
       if(intersect.modes & IMAGE)
-	wprintw(band,"Image");
+	wprintw(info,"Image");
       
-      wmove(band,row++,1);
+      wmove(info,row++,1);
       if(intersect.classes & EXTRA_CLASS)
-	wprintw(band,"Extra ");
+	wprintw(info,"Extra ");
       if(intersect.classes & ADVANCED_CLASS)
-	wprintw(band,"Advanced ");
+	wprintw(info,"Advanced ");
       if(intersect.classes & GENERAL_CLASS)
-	wprintw(band,"General ");
+	wprintw(info,"General ");
       if(intersect.classes & TECHNICIAN_CLASS)
-	wprintw(band,"Technician ");
+	wprintw(info,"Technician ");
       if(intersect.classes & NOVICE_CLASS)
-	wprintw(band,"Novice ");
+	wprintw(info,"Novice ");
     }
-    box(band,0,0);
-    mvwprintw(band,0,5,"Band info");
-    wnoutrefresh(band);
+    // A message from our sponsor...
+    mvwprintw(info,row++,1,"KA9Q SDR Receiver v1.0");
+    mvwprintw(info,row++,1,"Compiled on %s at %s",__DATE__,__TIME__);
+
+    box(info,0,0);
+    mvwprintw(info,0,5,"Info");
+    wnoutrefresh(info);
     
     row = 0;
     wmove(filtering,0,0);
@@ -326,8 +328,8 @@ void *display(void *arg){
       float bw = demod->samprate * demod->filter->noise_gain;
       mvwprintw(sig,++row,1,"N0      %7.1f dBFS/Hz",power2dB(demod->n0));
       float sn0 = demod->bb_power / demod->n0 - bw;
-      mvwprintw(sig,++row,1,"S/N0    %7.1f dB-Hz",10*log10f(sn0));
-      mvwprintw(sig,++row,1,"NBW     %7.1f dB-Hz",10*log10f(bw));
+      mvwprintw(sig,++row,1,"S/N0    %7.1f dBHz",10*log10f(sn0));
+      mvwprintw(sig,++row,1,"NBW     %7.1f dBHz",10*log10f(bw));
       mvwprintw(sig,++row,1,"SNRbb   %7.1f dB",10*log10f(sn0/bw));
     }
     // Display these only if they're in use by the current mode
@@ -382,29 +384,28 @@ void *display(void *arg){
     extern int Delayed,Skips;
     wmove(network,0,0);
     wclrtobot(network);
-    mvwprintw(network,++row,1,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
-    mvwprintw(network,++row,1,"IQ Pkts%'14llu",demod->iq_packets);
-    mvwprintw(network,++row,1,"Late%17d",Delayed);
-    mvwprintw(network,++row,1,"Skips%16d",Skips);
+    mvwprintw(network,++row,1,"Source %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
+    mvwprintw(network,++row,1,"IQ pkts %'llu; late %'d; skips %'d",demod->iq_packets,
+	      Delayed,Skips);
     if(audio->filename != NULL){
       mvwprintw(network,++row,1,"PCM stream %s",audio->filename);
     } else {
       // Audio output dest address (usually multicast)
-      mvwprintw(network,++row,1,"Sink: %s",audio->audio_mcast_address_text);
-      mvwprintw(network,++row,1,"Codec: ");
+      mvwprintw(network,++row,1,"Sink %s",audio->audio_mcast_address_text);
       if(audio->opus_bitrate > 0){
-	wprintw(network,"Opus %.0fms%s %.1f kb/s",
-		  audio->opus_blocktime,audio->opus_dtx ? "  dtx":"",
-		  audio->opus_bitrate/1000.);
+	mvwprintw(network,++row,1,"Opus %.0fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
+		  audio->opus_blocktime,audio->opus_dtx ? " dtx":"",
+		  audio->opus_bitrate/1000.,audio->bitrate/1000.,audio->audio_packets);
       } else {
-	wprintw(network,"PCM %'d Hz",audio->samprate);
+	mvwprintw(network,++row,1,"PCM %'d Hz; %'.1f kb/s; pkts %'llu",audio->samprate,audio->bitrate/1000.,
+		  audio->audio_packets);
       }
-      mvwprintw(network,++row,1,"Bitrate%'14.0f bps",audio->bitrate);
-      mvwprintw(network,++row,1,"Pkts%'17llu",audio->audio_packets);
     }
     box(network,0,0);
     mvwprintw(network,0,5,"Network");
     wnoutrefresh(network);
+
+    
 
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
@@ -424,7 +425,7 @@ void *display(void *arg){
       hcol = 0; // can't happen, but shuts up compiler
     // Highlight digit
     if(tuneitem >= 0 && tuneitem <= 3){
-      mvwchgat(tuning,tuneitem+1,hcol+25,1,A_STANDOUT,0,NULL);
+      mvwchgat(tuning,tuneitem+1,hcol+24,1,A_STANDOUT,0,NULL);
       wnoutrefresh(tuning);
     }
     else if(tuneitem >= 4 && tuneitem <= 7){
