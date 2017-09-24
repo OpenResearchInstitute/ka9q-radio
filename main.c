@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.78 2017/09/23 03:51:57 karn Exp karn $
+// $Id: main.c,v 1.79 2017/09/23 07:43:29 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -225,6 +225,7 @@ int main(int argc,char *argv[]){
   pthread_cond_init(&demod->status_cond,NULL);
   pthread_mutex_init(&demod->data_mutex,NULL);
   pthread_cond_init(&demod->data_cond,NULL);
+  pthread_mutex_init(&demod->doppler_mutex,NULL);
 
   // Input socket for I/Q data from SDR
   demod->input_fd = setup_mcast(demod->iq_mcast_address_text,0);
@@ -243,6 +244,9 @@ int main(int argc,char *argv[]){
 
   // The input thread must run before calling these next functions, otherwise they'll deadlock
   pthread_create(&demod->input_thread,NULL,input_loop,demod);
+
+  // Optional doppler correction
+  pthread_create(&demod->doppler_thread,NULL,doppler,demod);
 
   // Actually set the mode and frequency already specified
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
