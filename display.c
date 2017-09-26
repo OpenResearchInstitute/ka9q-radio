@@ -662,5 +662,6 @@ void *display(void *arg){
   
   // Dump receiver state to default
   savestate(demod,"default");
+  audio_cleanup(demod->audio);
   exit(0);
 }
