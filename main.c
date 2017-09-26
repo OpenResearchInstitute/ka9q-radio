@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.81 2017/09/26 09:33:24 karn Exp karn $
+// $Id: main.c,v 1.82 2017/09/26 16:09:11 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -283,12 +283,15 @@ int main(int argc,char *argv[]){
   exit(0);
 }
 
+
 void display_cleanup(void *);
+void audio_cleanup(void *);
 
 void closedown(int a){
   if(!Quiet)
     fprintf(stderr,"radio: caught signal %d: %s\n",a,strsignal(a));
   display_cleanup(NULL);
+  audio_cleanup(&Audio);
 
   exit(1);
 }
