@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.80 2017/09/24 00:38:39 karn Exp karn $
+// $Id: main.c,v 1.81 2017/09/26 09:33:24 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -111,7 +111,7 @@ int main(int argc,char *argv[]){
   set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "aB:c:f:I:k:l:L:m:M:pr:R:qo:s:t:u:vx";
+  char optstring[] = "a:B:c:f:I:k:l:L:m:M:pr:R:qo:s:t:u:vx";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -125,7 +125,7 @@ int main(int argc,char *argv[]){
   while((c = getopt(argc,argv,optstring)) != EOF){
     switch(c){
     case 'a':
-      No_local_audio++;
+      memcpy(Audio.localdev,optarg,sizeof(Audio.localdev));
       break;
     case 'B':   // Opus encoder block time; must be 2.5, 5, 10, 20, 40, 60, 80, 120
       Audio.opus_blocktime = strtod(optarg,NULL);
