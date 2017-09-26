@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.39 2017/09/19 13:01:37 karn Exp karn $
+// $Id: fm.c,v 1.40 2017/09/23 07:38:19 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -83,7 +83,7 @@ void *demod_fm(void *arg){
 
   while(!demod->terminate){
     fillbuf(demod,filter->input.c,filter->ilen);
-    demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
+    spindown(demod,filter->input.c); // 2nd LO
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
     // Compute bb_power below along with average amplitude to save time
@@ -96,7 +96,7 @@ void *demod_fm(void *arg){
 
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
-    demod->gain = (demod->headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
+    float const gain = (demod->headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
 
     // Find average amplitude
     // We also need average magnitude^2, but we have that from demod->bb_power
@@ -166,14 +166,14 @@ void *demod_fm(void *arg){
     float audio[plfilter->ilen];    
     if(afilter == NULL){
       for(int n=0; n < plfilter->ilen; n++){
-	audio[n] = plfilter->input.r[n] * demod->gain;
+	audio[n] = plfilter->input.r[n] * gain;
 	if(audio[n] != 0)
 	  silent = 0;
       }
     } else {
       assert(plfilter->ilen == afilter->olen);
       for(int n=0; n < afilter->olen; n++){
-	audio[n] = afilter->output.r[n] * demod->gain;
+	audio[n] = afilter->output.r[n] * gain;
 	if(audio[n] != 0)
 	  silent = 0;
       }

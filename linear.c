@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.3 2017/09/23 07:39:16 karn Exp karn $
+// $Id: linear.c,v 1.4 2017/09/24 00:37:59 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -94,7 +94,7 @@ void *demod_linear(void *arg){
   while(!demod->terminate){
     // New samples
     fillbuf(demod,filter->input.c,filter->ilen);
-    demod->second_LO_phasor = spindown(demod,filter->input.c);
+    spindown(demod,filter->input.c);
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
     if(!isnan(demod->n0))
@@ -217,6 +217,7 @@ void *demod_linear(void *arg){
     } else {
       // All other linear modes
       // Manual frequency shift
+      pthread_mutex_lock(&demod->shift_mutex);
       if(demod->shift != 0){
 	for(int n=0; n < filter->olen; n++){
 	  filter->output.c[n] *= demod->shift_phasor;
@@ -224,6 +225,7 @@ void *demod_linear(void *arg){
 	}
 	demod->shift_phasor /= cabs(demod->shift_phasor);
       }
+      pthread_mutex_unlock(&demod->shift_mutex);
       float signal = 0;
       float noise = 0;
 
