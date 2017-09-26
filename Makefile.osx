@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.19 2017/09/20 19:47:35 karn Exp karn $
+# $Id: Makefile.osx,v 1.20 2017/09/23 07:44:40 karn Exp karn $
 #CC=g++
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -35,8 +35,8 @@ modulate: modulate.o misc.o filter.o
 monitor: monitor.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lm
 
-radio: main.o radio.o fm.o linear.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lm
+radio: main.o radio.o fm.o linear.o filter.o display.o doppler.o modes.o audio.o multicast.o bandplan.o misc.o
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lportaudio -lm
 
 attr.o: attr.c attr.h
 audio.o: audio.c dsp.h audio.h rtp.h
@@ -56,3 +56,4 @@ modulate.o: modulate.c dsp.h filter.h radio.h
 monitor.o: monitor.c rtp.h dsp.h multicast.h
 multicast.o: multicast.c multicast.h
 radio.o: radio.c radio.h filter.h dsp.h audio.h
+doppler.o: doppler.c radio.h filter.h dsp.h audio.h
