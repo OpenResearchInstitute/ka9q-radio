@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.43 2017/09/23 07:37:49 karn Exp karn $
+// $Id: audio.c,v 1.44 2017/09/26 09:30:36 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -297,32 +297,60 @@ void *pcm_audio(void *arg){
   return NULL;
 }
 
-// Set up pipes to encoding/sending tasks and start them up
-int setup_audio(struct audio * const audio){
+static int setup_portaudio(struct audio *const audio){
   assert(audio != NULL);
-  if(Verbose)
-    fprintf(stderr,"%s\n",opus_get_version_string());
-
-  pthread_mutex_init(&audio->buffer_mutex,NULL);
-  pthread_cond_init(&audio->buffer_cond,NULL);
-  
 
   PaError r = Pa_Initialize();
   if(r != paNoError){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
+    return r;
+  }
+  int inDevNum;
+  if(strlen(audio->localdev) == 0){
+    // not specified; use default
+    inDevNum = Pa_GetDefaultOutputDevice();
   } else {
-    r = Pa_OpenDefaultStream(&Pa_stream,0,2,paFloat32,48000,paFramesPerBufferUnspecified,
-			     pa_callback,&Audio);
+    // Find requested audio device in the list
+    int numDevices = Pa_GetDeviceCount();
     
-    if(r != paNoError){
-      fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-    } else {
-      r = Pa_StartStream(Pa_stream);
-      if(r != paNoError){
-	fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
-      }
+    for(inDevNum=0; inDevNum < numDevices; inDevNum++){
+      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
+      if(strcmp(deviceInfo->name,audio->localdev) == 0)
+	break;
     }
   }
+  if(inDevNum == paNoDevice){
+    fprintf(stderr,"Portaudio: no available devices\n");
+    return -1;
+  }
+  PaStreamParameters outputParameters;
+  memset(&outputParameters,0,sizeof(outputParameters));
+  outputParameters.channelCount = 2;
+  outputParameters.device = inDevNum;
+  outputParameters.sampleFormat = paFloat32;
+  
+  r = Pa_OpenStream(&Pa_stream,NULL,&outputParameters,48000,paFramesPerBufferUnspecified,
+		    paNoFlag,pa_callback,&Audio);
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
+    return r;
+  }
+  r = Pa_StartStream(Pa_stream);
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
+    return r;
+  }
+  return 0;
+}
+
+
+// Set up pipes to encoding/sending tasks and start them up
+int setup_audio(struct audio * const audio){
+  assert(audio != NULL);
+  pthread_mutex_init(&audio->buffer_mutex,NULL);
+  pthread_cond_init(&audio->buffer_cond,NULL);
+
+  setup_portaudio(audio);
   audio->bitrate = 0;
 
   // Set up audio output stream(s)

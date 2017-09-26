@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.25 2017/09/23 07:37:49 karn Exp karn $
+// $Id: audio.h,v 1.26 2017/09/26 09:30:36 karn Exp karn $
 // Variables and structures for KA9Q SDR receiver audio subsystem
 // Copyright 2017 Phil Karn, KA9Q
 
@@ -12,6 +12,8 @@
 
 struct audio {
   int samprate;       // Audio D/A sample rate (usually decimated from SDR A/D)
+  char localdev[128]; // Name of local audio device, if any
+
   char audio_mcast_address_text[256];
   int audio_mcast_fd; // File descriptor for multicast output
   unsigned long long audio_packets;
