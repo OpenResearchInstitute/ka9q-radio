@@ -1,4 +1,4 @@
-// $Id$
+// $Id: doppler.c,v 1.1 2017/09/24 00:37:43 karn Exp karn $
 // Real-time doppler steering
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -34,33 +34,52 @@ void *doppler(void *arg){
   double rt;
 
   pthread_mutex_lock(&demod->doppler_mutex);
+  demod->doppler = 0;
   demod->doppler_phasor = 1;
+  demod->doppler_phasor_step = 1;
+  demod->doppler_phasor_step_step = 1;  
   pthread_mutex_unlock(&demod->doppler_mutex);
 
-  input = fopen("/tmp/tracking","r");
   while(1){
-    fgets(line,sizeof(line),input);
-    int n = sscanf(line,"%lf %lf %lf %lf %lf %lf %lf %lf",
-	   &t,&az,&azrate,&el,&elrate,&range,&rangerate,&rangeraterate);
-    if(n != 8)
+    input = fopen("/tmp/tracking","r");
+    if(input == NULL){
+      usleep(100000); // Don't spin tight
       continue;
-    
-    struct timeval tv;
-    gettimeofday(&tv,NULL);
-    rt = tv.tv_sec + tv.tv_usec * 1e-6;
-    if(t < rt)
-      continue;
-    if(t > rt){
-      usleep(1000000*(t - rt)); // Wait until right time
     }
-    // Compute doppler and doppler rate
-    double const c = 299792458;
+      
+    while(fgets(line,sizeof(line),input) != NULL){
+      int n = sscanf(line,"%lf %lf %lf %lf %lf %lf %lf %lf",
+		     &t,&az,&azrate,&el,&elrate,&range,&rangerate,&rangeraterate);
+      if(n != 8)
+	continue;
+      
+      struct timeval tv;
+      gettimeofday(&tv,NULL);
+      rt = tv.tv_sec + tv.tv_usec * 1e-6;
+      if(t < rt)
+	continue;
+      if(t > rt){
+	usleep(1000000*(t - rt)); // Wait until right time
+      }
+      // Compute doppler and doppler rate
+      double const c = 299792458;
+      pthread_mutex_lock(&demod->doppler_mutex);
+      demod->doppler = demod->frequency * -rangerate/c;
+      demod->doppler_rate = demod->frequency * -rangeraterate/c;
+      demod->doppler_phasor_step = csincos(-2*M_PI*demod->doppler / demod->samprate);
+      demod->doppler_phasor_step_step = csincos(-2*M_PI*demod->doppler_rate / (demod->samprate*demod->samprate));
+      pthread_mutex_unlock(&demod->doppler_mutex);
+    }
+    fclose(input); // and try again
+
     pthread_mutex_lock(&demod->doppler_mutex);
-    demod->doppler = demod->frequency * -rangerate/c;
-    demod->doppler_rate = demod->frequency * -rangeraterate/c;
-    demod->doppler_phasor_step = csincos(-2*M_PI*demod->doppler / demod->samprate);
-    demod->doppler_phasor_step_step = csincos(-2*M_PI*demod->doppler_rate / (demod->samprate*demod->samprate));
+    demod->doppler = 0;
+    demod->doppler_rate = 0;
+    demod->doppler_phasor_step = 1;
+    demod->doppler_phasor_step_step = 1;
+    demod->doppler_phasor = 1;
     pthread_mutex_unlock(&demod->doppler_mutex);
+
   }
   pthread_exit(NULL);
 }
