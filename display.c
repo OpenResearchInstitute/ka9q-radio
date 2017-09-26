@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.84 2017/09/23 07:42:40 karn Exp karn $
+// $Id: display.c,v 1.85 2017/09/24 00:38:27 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -201,7 +201,7 @@ void *display(void *arg){
   WINDOW * const filtering = newwin(11,23,8,28);
   WINDOW * const sig = newwin(14,26,8,0); // Signal information
   WINDOW * const sdr = newwin(12,25,8,53); // SDR information
-  WINDOW * const network = newwin(6,78,22,0); // Network status information
+  WINDOW * const network = newwin(8,78,22,0); // Network status information
   int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);  // Powermate knob?
 
   struct sockaddr old_input_source_address;
@@ -387,20 +387,22 @@ void *display(void *arg){
     mvwprintw(network,++row,1,"Source %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
     mvwprintw(network,++row,1,"IQ pkts %'llu; late %'d; skips %'d",demod->iq_packets,
 	      Delayed,Skips);
-    if(audio->filename != NULL){
+    if(audio->filename != NULL)
       mvwprintw(network,++row,1,"PCM stream %s",audio->filename);
-    } else {
+
+    if(audio->opus_bitrate != 0 || audio->rtp_pcm != 0) 
       // Audio output dest address (usually multicast)
       mvwprintw(network,++row,1,"Sink %s",audio->audio_mcast_address_text);
-      if(audio->opus_bitrate > 0){
-	mvwprintw(network,++row,1,"Opus %.0fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
-		  audio->opus_blocktime,audio->opus_dtx ? " dtx":"",
-		  audio->opus_bitrate/1000.,audio->bitrate/1000.,audio->audio_packets);
-      } else {
-	mvwprintw(network,++row,1,"PCM %'d Hz; %'.1f kb/s; pkts %'llu",audio->samprate,audio->bitrate/1000.,
-		  audio->audio_packets);
-      }
-    }
+
+    if(audio->opus_bitrate > 0)
+      mvwprintw(network,++row,1,"Opus %.0fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
+		audio->opus_blocktime,audio->opus_dtx ? " dtx":"",
+		audio->opus_bitrate/1000.,audio->bitrate/1000.,audio->audio_packets);
+
+    if(audio->rtp_pcm)
+      mvwprintw(network,++row,1,"PCM %'d Hz; %'.1f kb/s; pkts %'llu",audio->samprate,audio->bitrate/1000.,
+		audio->audio_packets);
+
     box(network,0,0);
     mvwprintw(network,0,5,"Network");
     wnoutrefresh(network);
