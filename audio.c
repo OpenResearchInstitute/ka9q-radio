@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.44 2017/09/26 09:30:36 karn Exp karn $
+// $Id: audio.c,v 1.45 2017/09/26 16:08:14 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -32,9 +32,6 @@
 #include "multicast.h"
 
 #define PCM_BUFSIZE 512        // 16-bit word count; must fit in Ethernet MTU
-
-PaStream *Pa_stream;
-
 
 static short const scaleclip(float const x){
   if(x >= 1.0)
@@ -297,6 +294,27 @@ void *pcm_audio(void *arg){
   return NULL;
 }
 
+void audio_cleanup(void *p){
+  struct audio * const audio = p;
+  if(audio == NULL)
+    return;
+
+  if(audio->Pa_Stream != NULL){
+    Pa_CloseStream(&audio->Pa_Stream);
+    audio->Pa_Stream = NULL;
+    Pa_Terminate();
+  }
+  if(audio->audio_mcast_fd > 0){
+    close(audio->audio_mcast_fd);
+    audio->audio_mcast_fd = -1;
+  }
+  if(audio->stream != NULL){
+    fclose(audio->stream);
+    audio->stream = NULL;
+  }
+}
+
+
 static int setup_portaudio(struct audio *const audio){
   assert(audio != NULL);
 
@@ -329,13 +347,13 @@ static int setup_portaudio(struct audio *const audio){
   outputParameters.device = inDevNum;
   outputParameters.sampleFormat = paFloat32;
   
-  r = Pa_OpenStream(&Pa_stream,NULL,&outputParameters,48000,paFramesPerBufferUnspecified,
+  r = Pa_OpenStream(&audio->Pa_Stream,NULL,&outputParameters,48000,paFramesPerBufferUnspecified,
 		    paNoFlag,pa_callback,&Audio);
   if(r != paNoError){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
     return r;
   }
-  r = Pa_StartStream(Pa_stream);
+  r = Pa_StartStream(audio->Pa_Stream);
   if(r != paNoError){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
     return r;
