@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.79 2017/09/23 07:43:29 karn Exp karn $
+// $Id: main.c,v 1.80 2017/09/24 00:38:39 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -97,7 +97,7 @@ int main(int argc,char *argv[]){
   demod->kaiser_beta = 3.0; // Reasonable compromise
   strlcpy(demod->iq_mcast_address_text,"239.1.2.1",sizeof(demod->iq_mcast_address_text));
   demod->headroom = pow(10.,-15./20); // -15 dB
-  demod->audio->opus_bitrate = 32000;  // 32 kb/s
+  demod->audio->opus_bitrate = 0;  // off by default
   demod->audio->opus_blocktime = 20;   // 20 ms
   strlcpy(demod->audio->audio_mcast_address_text,"239.2.1.1",sizeof(demod->audio->audio_mcast_address_text));
   demod->tunestep = 0;  // single digit hertz position
@@ -108,10 +108,10 @@ int main(int argc,char *argv[]){
   demod->input_source_address.sa_family = -1; // Set invalid
   demod->low = NAN;
   demod->high = NAN;
-  demod->shift = NAN;
+  set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "B:c:f:I:k:l:L:m:M:r:R:qo:s:t:u:vx";
+  char optstring[] = "aB:c:f:I:k:l:L:m:M:pr:R:qo:s:t:u:vx";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -124,6 +124,9 @@ int main(int argc,char *argv[]){
   int c;
   while((c = getopt(argc,argv,optstring)) != EOF){
     switch(c){
+    case 'a':
+      No_local_audio++;
+      break;
     case 'B':   // Opus encoder block time; must be 2.5, 5, 10, 20, 40, 60, 80, 120
       Audio.opus_blocktime = strtod(optarg,NULL);
       break;
@@ -154,6 +157,11 @@ int main(int argc,char *argv[]){
       break;
     case 'o':   // Opus codec compressed bit rate target
       Audio.opus_bitrate = strtol(optarg,NULL,0);
+      if(Audio.opus_bitrate < 1000)
+	Audio.opus_bitrate *= 1000;	// Interpret as kilobits/sec
+      break;
+    case 'p':
+      Audio.rtp_pcm = 1;
       break;
     case 'q':
       Quiet++;  // Suppress display
@@ -190,7 +198,7 @@ int main(int argc,char *argv[]){
       Audio.opus_dtx = 1;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-s shift] [-t threads] [-u update_ms] [-v]\n",argv[0]);
+      fprintf(stderr,"Usage: %s [-a] [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-s shift] [-t threads] [-u update_ms] [-v]\n",argv[0]);
       fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -s %.1f -t %d -u %d [-x]\n",
 	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,"default",demod->start_freq,demod->iq_mcast_address_text,Locale,demod->L,demod->mode,demod->M,Audio.audio_mcast_address_text,Audio.opus_bitrate,demod->shift,Nthreads,Update_interval);
       exit(1);
@@ -226,6 +234,8 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&demod->data_mutex,NULL);
   pthread_cond_init(&demod->data_cond,NULL);
   pthread_mutex_init(&demod->doppler_mutex,NULL);
+  pthread_mutex_init(&demod->shift_mutex,NULL);
+  pthread_mutex_init(&demod->second_LO_mutex,NULL);
 
   // Input socket for I/Q data from SDR
   demod->input_fd = setup_mcast(demod->iq_mcast_address_text,0);
