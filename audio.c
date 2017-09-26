@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.45 2017/09/26 16:08:14 karn Exp karn $
+// $Id: audio.c,v 1.46 2017/09/26 18:12:12 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -371,19 +371,19 @@ int setup_audio(struct audio * const audio){
   setup_portaudio(audio);
   audio->bitrate = 0;
 
-  // Set up audio output stream(s)
-  if(audio->audio_mcast_fd > 0)
-    close(audio->audio_mcast_fd);
-  audio->audio_mcast_fd = setup_mcast(audio->audio_mcast_address_text,1);
-  if(audio->audio_mcast_fd == -1){
-    fprintf(stderr,"Can't set up multicast audio output\n");
-    return -1;
-  }
-
-  if(audio->opus_bitrate != 0)
-    pthread_create(&audio->opus_stereo_thread,NULL,stereo_opus_audio,audio);
-  if(audio->rtp_pcm != 0)
-    pthread_create(&audio->pcm_thread,NULL,pcm_audio,audio);
-
+  if(audio->opus_bitrate != 0 || audio->rtp_pcm != 0){
+    // Set up audio output stream(s)
+    if(audio->audio_mcast_fd > 0)
+      close(audio->audio_mcast_fd);
+    audio->audio_mcast_fd = setup_mcast(audio->audio_mcast_address_text,1);
+    if(audio->audio_mcast_fd == -1){
+      fprintf(stderr,"Can't set up multicast audio output\n");
+      return -1;
+    }
+    if(audio->opus_bitrate != 0)
+      pthread_create(&audio->opus_stereo_thread,NULL,stereo_opus_audio,audio);
+    if(audio->rtp_pcm != 0)
+      pthread_create(&audio->pcm_thread,NULL,pcm_audio,audio);
+  }    
   return 0;
 }
