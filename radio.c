@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.67 2017/09/23 03:52:29 karn Exp karn $
+// $Id: radio.c,v 1.68 2017/09/24 00:38:07 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -265,7 +265,7 @@ double set_second_LO(struct demod * const demod,double const second_LO){
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
   pthread_mutex_unlock(&demod->status_mutex);
     
-  assert(second_LO <= demod->samprate/2 && second_LO >= -demod->samprate/2);
+  pthread_mutex_lock(&demod->second_LO_mutex);
   if(isnan(creal(demod->second_LO_phasor)) || isnan(cimag(demod->second_LO_phasor)) || cnrm(demod->second_LO_phasor) < 0.999)
     demod->second_LO_phasor = 1;
 
@@ -273,15 +273,18 @@ double set_second_LO(struct demod * const demod,double const second_LO){
   // In case sample rate isn't set yet, just remember the frequency but don't divide by zero
   demod->second_LO_phasor_step = csincos(2*M_PI*second_LO/demod->samprate);
   demod->second_LO = second_LO;
+  pthread_mutex_unlock(&demod->second_LO_mutex);
   return second_LO;
 }
 
 // Set audio shift after downconversion and detection (linear modes only: SSB, IQ, DSB)
 double set_shift(struct demod * const demod,double const shift){
+  pthread_mutex_lock(&demod->shift_mutex);
   demod->shift = shift;
   demod->shift_phasor_step = csincos(2*M_PI*shift*demod->decimate/demod->samprate);
   if(cabs(demod->shift_phasor) == 0)
     demod->shift_phasor = 1;
+  pthread_mutex_unlock(&demod->shift_mutex);
   return shift;
 }
 
@@ -367,28 +370,33 @@ int set_cal(struct demod * const demod,double const cal){
   return 0;
 }
 // Apply LO2 to input samples, placing the resulting IF in the demod's filter input buffer
-// This function no longer updates demod->second_LO phasor directly
-// It returns the updated phasor, and you must store it back into demod->send_LO_phasor yourself
-// This simplifies demodulators that do repeated spindowns (but don't forget filter state)
 // Length of data input obtained from demod->filter->i_len
-complex float spindown(struct demod * const demod,complex float const * const data){
+int spindown(struct demod * const demod,complex float const * const data){
   assert(demod != NULL);
-  if(demod->second_LO == 0)
-    return 0; // Probably not set yet, but in any event nothing to do
+  if(demod == NULL)
+    return -1;
 
   assert(demod->filter != NULL);
-  struct filter  * const filter = demod->filter;
+  struct filter * const filter = demod->filter;
   assert(data != NULL);
+
+  pthread_mutex_lock(&demod->second_LO_mutex);
+  if(demod->second_LO == 0){
+    // Probably not set yet, but in any event nothing to do
+    pthread_mutex_unlock(&demod->second_LO_mutex);
+    return 0;
+  }
   assert(!isnan(creal(demod->second_LO_phasor_step)) && !isnan(cimag(demod->second_LO_phasor_step)));
   assert(cnrm(demod->second_LO_phasor) != 0);
 
   // Apply 2nd LO, compute average pre-filter signal power
-  complex float second_LO_phasor = demod->second_LO_phasor;
   for(int n=0; n < filter->ilen; n++){
-    assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
-    filter->input.c[n] = data[n] * second_LO_phasor;
-    second_LO_phasor *= demod->second_LO_phasor_step;
+    filter->input.c[n] = data[n] * demod->second_LO_phasor;
+    demod->second_LO_phasor *= demod->second_LO_phasor_step;
   }
+  demod->second_LO_phasor /= cabs(demod->second_LO_phasor);
+  pthread_mutex_unlock(&demod->second_LO_mutex);
+
   // Apply Doppler, if active
   pthread_mutex_lock(&demod->doppler_mutex);
   if(demod->doppler != 0){
@@ -401,9 +409,7 @@ complex float spindown(struct demod * const demod,complex float const * const da
     demod->doppler_phasor_step /= cabs(demod->doppler_phasor_step);
   }
   pthread_mutex_unlock(&demod->doppler_mutex);
-
-  // Renormalize to guard against accumulated roundoff error
-  return second_LO_phasor / cabs(second_LO_phasor);
+  return 0;
 }
 
 // Compute noise spectral density - experimental, my algorithm

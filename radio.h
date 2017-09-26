@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.49 2017/09/23 07:42:49 karn Exp karn $
+// $Id: radio.h,v 1.50 2017/09/24 00:38:07 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -107,20 +107,22 @@ struct demod {
   double frequency;     // Nominal (dial) frequency
 
   // Doppler shift correction (optional)
-  pthread_t doppler_thread;
+  pthread_t doppler_thread;          // Thread that reads file and sets this
+  pthread_mutex_t doppler_mutex;     // Protects doppler
   double doppler;       // Open-loop doppler correction from satellite tracking program
   double doppler_rate;
   complex double doppler_phasor;
   complex double doppler_phasor_step;
   complex double doppler_phasor_step_step;  
-  pthread_mutex_t doppler_mutex;     // Protects doppler
 
   // Second LO parameters
+  pthread_mutex_t second_LO_mutex;
   complex double second_LO_phasor; // Second LO phasor
   double second_LO;     // True second LO frequency, including calibration
                         // Provided because round trip through csincos/carg is less accurate
   complex double second_LO_phasor_step;  // LO step phasor = csincos(2*pi*second_LO/samprate)
 
+  pthread_mutex_t shift_mutex; // protects passband shift
   double shift;         // frequency shift after demodulation (for CW,DSB)
   complex double shift_phasor;
   complex double shift_phasor_step;
@@ -155,8 +157,9 @@ struct demod {
   float cphase;     // Carrier phase change (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
   float headroom;   // Audio level headroom
-  float hangtime;   // SSB AGC hang time, seconds
-  float recovery_rate; // SSB AGC recovery rate, db/sec
+  float hangtime;   // Linear AGC hang time, seconds
+  float recovery_rate; // Linear AGC recovery rate, dB/sec (must be positive)
+  float attack_rate;   // Linear AGC attack rate, dB/sec (must be negative)
 
   struct audio *audio; // Link to audio output system
 };
@@ -175,7 +178,7 @@ double set_second_LO(struct demod *,double);
 double set_second_LO_rate(struct demod *,double,int);
 int set_mode(struct demod *,const char *,int);
 int set_cal(struct demod *,double);
-complex float spindown(struct demod *,complex float const *);
+int spindown(struct demod *,complex float const *);
 void proc_samples(struct demod *,int16_t const *,int);
 const float compute_n0(struct demod const *);
 
