@@ -1,9 +1,9 @@
-# $Id: Makefile,v 1.68 2017/09/23 07:44:40 karn Exp karn $
+# $Id: Makefile,v 1.69 2017/09/26 09:34:43 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -22,22 +22,22 @@ control: control.o modes.o
 	$(CC) -g -o $@ $^ -lbsd -lm
 
 funcube: funcube.o multicast.o gr.o libfcd.a
-	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lpthread -lbsd -lm
+	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lbsd -lm -lpthread
 
 iqplay: iqplay.o multicast.o attr.o misc.o
-	$(CC) -g -o $@ $^ -lpthread -lbsd -lm
+	$(CC) -g -o $@ $^ -lbsd -lm -lpthread
 
 iqrecord: iqrecord.o multicast.o attr.o
-	$(CC) -g -o $@ $^ -lpthread -lbsd -lm
+	$(CC) -g -o $@ $^ -lbsd -lm -lpthread
 
 modulate: modulate.o misc.o filter.o 
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lbsd -lm
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread
 
 monitor: monitor.o multicast.o
-	$(CC) -g -o $@ $^ -lasound -lopus -lbsd -lm
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lncurses -lm -lpthread
 
 radio: main.o radio.o doppler.o fm.o linear.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lbsd -lportaudio -lm
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lopus -lbsd -lportaudio -lm -lpthread
 
 libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
