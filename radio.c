@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.68 2017/09/24 00:38:07 karn Exp karn $
+// $Id: radio.c,v 1.69 2017/09/26 09:32:44 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -34,9 +34,8 @@ float const SCALE = 1./SHRT_MAX;   // Scale signed 16-bit int to float in range 
 
 void proc_samples(struct demod * const demod,int16_t const *sp,int const cnt){
   // gain and phase balance coefficients
-  assert(demod != NULL);
-  assert(demod->imbalance > 0);
-  assert(demod->sinphi >= -1 && demod->sinphi <= 1);
+  if(demod == NULL)
+    return;
 
   float const gain_q = sqrtf(0.5 * (1 + demod->imbalance));
   float const gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
@@ -125,12 +124,53 @@ int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
 
 // Get true first LO frequency
 double const get_first_LO(const struct demod * const demod){
-  assert(demod != NULL);
-  assert(!isnan(demod->status.frequency));
-  assert(!isnan(demod->calibrate));
+  if(demod == NULL)
+    return NAN;
 	 
   return demod->status.frequency * (1 + demod->calibrate);  // True frequency, as adjusted
 }
+
+
+double get_second_LO(struct demod * const demod){
+  if(demod == NULL)
+    return NAN;
+  pthread_mutex_lock(&demod->second_LO_mutex);
+  double f = demod->second_LO;
+  pthread_mutex_unlock(&demod->second_LO_mutex);  
+  return f;
+}
+
+double get_freq(struct demod * const demod){
+  if(demod == NULL)
+    return NAN;
+  return get_first_LO(demod) - get_second_LO(demod);
+}
+
+int set_doppler(struct demod * const demod,double freq,double rate){
+  pthread_mutex_lock(&demod->doppler_mutex);
+  demod->doppler = freq;
+  demod->doppler_rate = rate;
+  demod->doppler_phasor_step = csincos(-2*M_PI*freq / demod->samprate);
+  demod->doppler_phasor_step_step = csincos(-2*M_PI*rate / (demod->samprate*demod->samprate));
+  if(!is_phasor_init(demod->doppler_phasor)) // Initialized?
+    demod->doppler_phasor = 1;
+  pthread_mutex_unlock(&demod->doppler_mutex);
+  return 0;
+}
+double get_doppler(struct demod * const demod){
+  pthread_mutex_lock(&demod->doppler_mutex);
+  double f = demod->doppler;
+  pthread_mutex_unlock(&demod->doppler_mutex);  
+  return f;
+}
+double get_doppler_rate(struct demod * const demod){
+  pthread_mutex_lock(&demod->doppler_mutex);
+  double f = demod->doppler_rate;
+  pthread_mutex_unlock(&demod->doppler_mutex);  
+  return f;
+}
+
+
 
 
 // Set radio frequency with optional IF selection
@@ -139,8 +179,8 @@ double const get_first_LO(const struct demod * const demod){
 // and if that isn't possible we'll pick a default:
 // (usually +/- 48 kHz, samprate/4)
 double set_freq(struct demod * const demod,double const f,double new_lo2){
-  assert(demod != NULL);
-  assert(!isnan(f));
+  if(demod == NULL)
+    return NAN;
 
   // Wait for sample rate to be known
   pthread_mutex_lock(&demod->status_mutex);
@@ -178,8 +218,7 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
      set_second_LO(demod,new_lo2);
 
   // Set to new actual frequency, rather than one requested
-  demod->frequency = get_first_LO(demod) - demod->second_LO;
-  return demod->frequency;
+  return get_freq(demod);
 }
 
 // Preferred A/D sample rate; ignored by funcube but may be used by others someday
@@ -190,8 +229,8 @@ const int ADC_samprate = 192000;
 // demod->first_LO isn't updated here, but by the
 // incoming status frames so it don't change right away
 double set_first_LO(struct demod * const demod,double const first_LO){
-  assert(demod != NULL);
-  assert(!isnan(first_LO));
+  if(demod == NULL)
+    return NAN;
   if(first_LO == get_first_LO(demod))
     return first_LO;
 
@@ -238,7 +277,8 @@ double set_first_LO(struct demod * const demod,double const first_LO){
 //
 // If avoid_alias is false, simply test that specified frequency is between +/- samplerate/2
 int LO2_in_range(struct demod * const demod,double const f,int const avoid_alias){
-  assert(demod != NULL);
+  if(demod == NULL)
+    return -1;
 
   // Wait until the sample rate is known
   pthread_mutex_lock(&demod->status_mutex);
@@ -249,15 +289,16 @@ int LO2_in_range(struct demod * const demod,double const f,int const avoid_alias
   if(avoid_alias)
     return f >= demod->min_IF + max(0,demod->high)
 	    && f <= demod->max_IF + min(0,demod->low);
-  else
-    return f >= -demod->samprate/2 && f <= demod->samprate/2;
+  else {
+    return fabs(f) <=  0.5 * demod->samprate; // within Nyquist limit?
+  }
 }
 
 // Set second local oscillator (the one in software)
-// Only limit range to +/- samprate/2; the caller must avoid the alias region, e.g., with LO2_in_range()
+// the caller must avoid aliasing, e.g., with LO2_in_range()
 double set_second_LO(struct demod * const demod,double const second_LO){
-  assert(demod != NULL);
-  assert(!isnan(second_LO));
+  if(demod == NULL)
+    return NAN;
 
   // Wait until the sample rate is known
   pthread_mutex_lock(&demod->status_mutex);
@@ -266,7 +307,7 @@ double set_second_LO(struct demod * const demod,double const second_LO){
   pthread_mutex_unlock(&demod->status_mutex);
     
   pthread_mutex_lock(&demod->second_LO_mutex);
-  if(isnan(creal(demod->second_LO_phasor)) || isnan(cimag(demod->second_LO_phasor)) || cnrm(demod->second_LO_phasor) < 0.999)
+  if(!is_phasor_init(demod->second_LO_phasor)) // Initialized?
     demod->second_LO_phasor = 1;
 
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
@@ -282,7 +323,7 @@ double set_shift(struct demod * const demod,double const shift){
   pthread_mutex_lock(&demod->shift_mutex);
   demod->shift = shift;
   demod->shift_phasor_step = csincos(2*M_PI*shift*demod->decimate/demod->samprate);
-  if(cabs(demod->shift_phasor) == 0)
+  if(!is_phasor_init(demod->shift_phasor))
     demod->shift_phasor = 1;
   pthread_mutex_unlock(&demod->shift_mutex);
   return shift;
@@ -290,7 +331,8 @@ double set_shift(struct demod * const demod,double const shift){
 
 
 int set_mode(struct demod * const demod,const char * const mode,int const defaults){
-  assert(demod != NULL);
+  if(demod == NULL)
+    return -1;
 
   int mindex;
   for(mindex=0; mindex<Nmodes; mindex++){
@@ -317,10 +359,10 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   if(defaults || isnan(demod->shift))
     set_shift(demod,Modes[mindex].shift);
 
-  if(defaults || isnan(demod->low))
+  if(defaults || isnan(demod->low) || isnan(demod->high)){
     demod->low = Modes[mindex].low;
-  if(defaults || isnan(demod->high))
     demod->high = Modes[mindex].high;
+  }
   // Ensure low < high
   if(demod->high < demod->low){
     float const tmp = demod->low;
@@ -347,7 +389,7 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   double lo2 = demod->second_LO;
   // Might now be out of range because of change in filter passband
   if(!LO2_in_range(demod,lo2,1))
-   set_freq(demod,demod->frequency,NAN);
+    set_freq(demod,get_freq(demod),NAN);
 
   pthread_create(&demod->demod_thread,NULL,Modes[mindex].demod,demod);
   return 0;
@@ -357,49 +399,41 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
 // Set TXCO calibration for front end
 // + means clock is fast, - means clock is slow
 int set_cal(struct demod * const demod,double const cal){
-  assert(demod != NULL);
-  assert(!isnan(cal));
+  if(demod == NULL)
+    return -1;
 
+  double f = get_freq(demod);
   demod->calibrate = cal;
   // Don't get deadlocked if this is before we know the sample rate
   // e.g., with the -c command line option
   if(demod->status.samprate != 0){
     demod->samprate = demod->status.samprate * (1 + cal);
-    set_freq(demod,demod->frequency,NAN); // Keep original dial frequency
+    set_freq(demod,f,NAN); // Keep original dial frequency
   }
   return 0;
 }
-// Apply LO2 to input samples, placing the resulting IF in the demod's filter input buffer
+// Apply LO2 to input samples
 // Length of data input obtained from demod->filter->i_len
 int spindown(struct demod * const demod,complex float const * const data){
-  assert(demod != NULL);
-  if(demod == NULL)
+  if(demod == NULL || data == NULL || demod->filter == NULL)
     return -1;
 
-  assert(demod->filter != NULL);
   struct filter * const filter = demod->filter;
-  assert(data != NULL);
 
   pthread_mutex_lock(&demod->second_LO_mutex);
-  if(demod->second_LO == 0){
-    // Probably not set yet, but in any event nothing to do
-    pthread_mutex_unlock(&demod->second_LO_mutex);
-    return 0;
+  if(is_phasor_init(demod->second_LO_phasor)) { // Initialized?
+    // Apply 2nd LO, compute average pre-filter signal power
+    for(int n=0; n < filter->ilen; n++){
+      filter->input.c[n] = data[n] * demod->second_LO_phasor;
+      demod->second_LO_phasor *= demod->second_LO_phasor_step;
+    }
+    demod->second_LO_phasor /= cabs(demod->second_LO_phasor);
   }
-  assert(!isnan(creal(demod->second_LO_phasor_step)) && !isnan(cimag(demod->second_LO_phasor_step)));
-  assert(cnrm(demod->second_LO_phasor) != 0);
-
-  // Apply 2nd LO, compute average pre-filter signal power
-  for(int n=0; n < filter->ilen; n++){
-    filter->input.c[n] = data[n] * demod->second_LO_phasor;
-    demod->second_LO_phasor *= demod->second_LO_phasor_step;
-  }
-  demod->second_LO_phasor /= cabs(demod->second_LO_phasor);
   pthread_mutex_unlock(&demod->second_LO_mutex);
-
+  
   // Apply Doppler, if active
   pthread_mutex_lock(&demod->doppler_mutex);
-  if(demod->doppler != 0){
+  if(is_phasor_init(demod->doppler_phasor)){ // Initialized?
     for(int n=0; n < filter->ilen; n++){
       filter->input.c[n] *= demod->doppler_phasor;
       demod->doppler_phasor *= demod->doppler_phasor_step;

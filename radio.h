@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.50 2017/09/24 00:38:07 karn Exp karn $
+// $Id: radio.h,v 1.51 2017/09/26 09:32:44 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -104,8 +104,6 @@ struct demod {
   float min_IF;
   float max_IF;
 
-  double frequency;     // Nominal (dial) frequency
-
   // Doppler shift correction (optional)
   pthread_t doppler_thread;          // Thread that reads file and sets this
   pthread_mutex_t doppler_mutex;     // Protects doppler
@@ -170,12 +168,17 @@ extern int Nmodes;
 
 int fillbuf(struct demod *,complex float *,const int);
 int LO2_in_range(struct demod *,double f,int);
+double get_freq(struct demod *);
 double set_freq(struct demod *,double,double);
+double get_shift(struct demod *);
 double set_shift(struct demod *,double);
-double set_first_LO(struct demod *,double);
 const double get_first_LO(struct demod const *);
+double set_first_LO(struct demod *,double);
+double get_second_LO(struct demod *);
 double set_second_LO(struct demod *,double);
-double set_second_LO_rate(struct demod *,double,int);
+double get_doppler(struct demod *);
+double get_doppler_rate(struct demod *);
+int set_doppler(struct demod *,double,double);
 int set_mode(struct demod *,const char *,int);
 int set_cal(struct demod *,double);
 int spindown(struct demod *,complex float const *);
