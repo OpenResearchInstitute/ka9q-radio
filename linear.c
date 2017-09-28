@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.4 2017/09/24 00:37:59 karn Exp karn $
+// $Id: linear.c,v 1.5 2017/09/26 09:32:26 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -82,7 +82,7 @@ void *demod_linear(void *arg){
   int fft_ptr = 0;
 
   // Initialize PLL
-  complex float fine_phasor = 1;        // fine offset LO
+  complex float fine_phasor = 1;        // fine offset LO, controlled by PLL
   complex float coarse_phasor = 1;      // FFT-controlled offset LO
   complex float coarse_phasor_step = 1; // 0 Hz to start
   float integrator = 0;                 // 2nd order loop integrator
@@ -187,7 +187,7 @@ void *demod_linear(void *arg){
       coarse_phasor /= cabsf(coarse_phasor);
       if((demod->flags & CAL) && demod->snr >= snrthresh){
 	// In calibrate mode, apply and clear the current measured offset
-	set_cal(demod,demod->calibrate - calibrate_offset/demod->frequency);
+	set_cal(demod,demod->calibrate - calibrate_offset/get_freq(demod));
 	calibrate_offset = 0;
       }
     } // if(COHERENT)
