@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.19 2017/09/02 05:48:30 karn Exp karn $
+// $Id: monitor.c,v 1.20 2017/09/28 04:59:47 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -23,6 +23,32 @@
 #include "dsp.h"
 #include "multicast.h"
 
+// Global config variables
+char *Mcast_address_text = "239.2.1.1";     // Multicast address we're listening to
+char Audiodev[256];           // Name of audio device; empty means portaudio's default
+const int Slop = 480;         // Playout delay in samples to add after an underrun
+#define Aud_bufsize 65536     // make this a power of 2 for efficiency
+const int Bufsize = 8192;     // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
+const int Samprate = 48000;   // Too hard to handle other sample rates right now
+int List_audio;               // List audio output devices and exit
+int Verbose;                  // Verbosity flag (currently unused)
+#define Hashchains 16         // Make this a power of 2 for efficiency
+int Update_interval = 1000000; // Time in usec between display updates
+int Clear_interval = 20;      // Time in sec until inactive entry is cleared
+
+pthread_t Display_thread;     // Display thread descriptor
+int Input_fd = -1;            // Multicast receive socket
+struct audio *Audio[Hashchains];     // Hash chains for session structures
+PaStream *Pa_Stream;          // Portaudio stream handle
+int inDevNum;                 // Portaudio's audio output device index
+
+// The portaudio callback continuously plays out this single buffer, into which multiple streams sum their audio
+// and the callback zeroes out each sample as played
+float Audio_buffer[Aud_bufsize]; // Audio playout buffer
+volatile int Read_ptr;           // read_pointer, modified in callback (hence volatile)
+pthread_mutex_t Buffer_mutex;
+
+
 struct audio {
   struct audio *prev;       // Linked list pointers
   struct audio *next; 
@@ -38,34 +64,16 @@ struct audio {
   int opus_frame_size;      // Opus frame size in samples
   int channels;             // Channels (1 or 2)
   int opus_bandwidth;       // Opus stream audio bandwidth
-  PaStream *Pa_Stream;      // Portaudio stream handle
-#define AUD_BUFSIZE 65536   // 1.37 sec at 48000 Hz
-  int16_t audiobuffer[AUD_BUFSIZE]; // Audio playout buffer
-  volatile int write_ptr;            // Playout buffer write pointer
-  volatile int read_ptr;             //                read_pointer, for callback
+
+  int write_ptr;   // Playout buffer write pointer
+
   unsigned long packets;    // RTP packets for this session
   unsigned long drops;      // Apparent rtp packet drops
   int age;                  // Display cycles since last active
-  int idle;                 // Device overrun on last callback implies idle
   unsigned long underruns;  // Callback count of underruns (stereo samples) replaced with silence
-  PaTime hw_delay;          // Estimated playout delay, calculated in callback
-  PaTime last_written_time; // Time of last write to playout buffer, for delay calculations
+  int hw_delay;             // Estimated playout delay in samples
 };
 
-// Global variables
-char *Mcast_address_text;     // Multicast address we're listening to
-const int Bufsize = 8192;     // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
-const int Samprate = 48000;   // Too hard to handle other sample rates right now
-int Verbose;                  // Verbosity flag (currently unused)
-#define HASHCHAINS 16         // Make this a power of 2 for efficiency
-struct audio *Audio[HASHCHAINS];     // Hash chains for session structures
-int Input_fd = -1;            // Multicast receive socket
-int inDevNum;                 // Portaudio's audio output device index
-char Audiodev[256];           // Name of audio device; empty means portaudio's default
-pthread_t Display_thread;     // Display thread descriptor
-int Update_interval = 100000; // Time in usec between display updates
-int Inactive_interval = 1;    // Time in sec until inactive entry un-bolds
-int Clear_interval = 20;      // Time in sec until inactive entry is cleared
 
 // The Audio structures are accessed by both display() and main(), so protect them
 pthread_mutex_t Audio_mutex;
@@ -76,7 +84,7 @@ struct audio *lookup_session(const struct sockaddr *,uint32_t);
 struct audio *make_session(struct sockaddr const *r,uint32_t,uint16_t,uint32_t);
 int close_session(struct audio *);
 static int pa_callback(const void *,void *,unsigned long,const PaStreamCallbackTimeInfo*,PaStreamCallbackFlags,void *);
-static void pa_complete(void *);
+int write_is_ahead(int write_ptr,int read_ptr);
 
 
 int main(int argc,char * const argv[]){
@@ -88,10 +96,13 @@ int main(int argc,char * const argv[]){
   seteuid(getuid());
 
   setlocale(LC_ALL,getenv("LANG"));
-  Mcast_address_text = "239.2.1.1";
+
   int c;
-  while((c = getopt(argc,argv,"S:I:v")) != EOF){
+  while((c = getopt(argc,argv,"a:S:I:vL")) != EOF){
     switch(c){
+    case 'L':
+      List_audio++;
+      break;
     case 'a':
       strncpy(Audiodev,optarg,sizeof(Audiodev));
       break;
@@ -112,6 +123,17 @@ int main(int argc,char * const argv[]){
   if(r != paNoError){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
     return r;
+  }
+
+  if(List_audio){
+    // On stdout, not stderr, so we can toss ALSA's noisy error messages
+    printf("Audio output devices:\n");
+    int numDevices = Pa_GetDeviceCount();
+    for(int inDevNum=0; inDevNum < numDevices; inDevNum++){
+      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
+      printf("%s\n",deviceInfo->name);
+    }
+    exit(0);
   }
 
   if(strlen(Audiodev) == 0){
@@ -178,8 +200,34 @@ int main(int argc,char * const argv[]){
   signal(SIGTERM,closedown);
   signal(SIGPIPE,SIG_IGN);
 
+  pthread_mutex_init(&Buffer_mutex,NULL);
   pthread_mutex_init(&Audio_mutex,NULL);
   pthread_create(&Display_thread,NULL,display,NULL);
+
+  // Create and start portaudio stream
+  PaStreamParameters outputParameters;
+  memset(&outputParameters,0,sizeof(outputParameters));
+  outputParameters.channelCount = 2;
+  outputParameters.device = inDevNum;
+  outputParameters.sampleFormat = paFloat32;
+  
+#if 0
+  r = Pa_OpenStream(&Pa_Stream,NULL,&outputParameters,Samprate,paFramesPerBufferUnspecified,
+		    paPrimeOutputBuffersUsingStreamCallback,pa_callback,NULL);
+#else
+  r = Pa_OpenStream(&Pa_Stream,NULL,&outputParameters,Samprate,paFramesPerBufferUnspecified,
+		    0,pa_callback,NULL);
+#endif      
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
+    exit(1);
+  }
+  r = Pa_StartStream(Pa_Stream);
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
+    exit(1);
+  }
+
 
   while(1){
     ssize_t size;
@@ -222,26 +270,43 @@ int main(int argc,char * const argv[]){
 
     int samples = 0;
     sp->type = rtp.mpt;
+
     switch(rtp.mpt){
     case 10: // Stereo
       sp->channels = 2;
       samples = size / 4;  // # 32-bit word samples
-      for(int i=0;i<2*samples;i++){
-	sp->audiobuffer[sp->write_ptr++] = ntohs(data[i]); // RTP profile specifies big-endian samples
-	if(sp->write_ptr >= AUD_BUFSIZE)
-	  sp->write_ptr -= AUD_BUFSIZE;
+      pthread_mutex_lock(&Buffer_mutex);
+      if(!write_is_ahead(sp->write_ptr,Read_ptr)){
+	// Past deadline, skip forward
+	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
+	sp->underruns++;
       }
+      for(int i=0;i<2*samples;i++){
+	Audio_buffer[sp->write_ptr++] += ntohs(data[i]); // RTP profile specifies big-endian samples
+	if(sp->write_ptr >= Aud_bufsize)
+	  sp->write_ptr -= Aud_bufsize;
+      }
+      sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
+      pthread_mutex_unlock(&Buffer_mutex);
       break;
     case 11: // Mono; send to both stereo channels
       sp->channels = 1;
       samples = size / 2;
-      for(int i=0;i<samples;i++){
-	assert(sp->write_ptr <= AUD_BUFSIZE -2);
-	sp->audiobuffer[sp->write_ptr++] = ntohs(data[i]);
-	sp->audiobuffer[sp->write_ptr++] = ntohs(data[i]);
-	if(sp->write_ptr >= AUD_BUFSIZE)
-	  sp->write_ptr -= AUD_BUFSIZE;
+      pthread_mutex_lock(&Buffer_mutex);
+      if(!write_is_ahead(sp->write_ptr,Read_ptr)){
+	// Past deadline, skip forward
+	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
+	sp->underruns++;
       }
+      for(int i=0;i<samples;i++){
+	assert(sp->write_ptr <= Aud_bufsize -2);
+	Audio_buffer[sp->write_ptr++] += ntohs(data[i]);
+	Audio_buffer[sp->write_ptr++] += ntohs(data[i]);
+	if(sp->write_ptr >= Aud_bufsize)
+	  sp->write_ptr -= Aud_bufsize;
+      }
+      sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
+      pthread_mutex_unlock(&Buffer_mutex);
       break;
     case 20: // Opus codec decode - arbitrary choice
       if(sp->opus == NULL){ // Create if it doesn't already exist
@@ -256,70 +321,37 @@ int main(int argc,char * const argv[]){
       int nb_frames = opus_packet_get_nb_frames((unsigned char *)data,size);
       sp->opus_frame_size = nb_frames * opus_packet_get_samples_per_frame((unsigned char *)data,Samprate);
 
-      int16_t outsamps[Bufsize];
-      if(drop != 0){
-	// previous packet(s) dropped; have codec tell us how much silence to emit
-	int samples = opus_decode(sp->opus,NULL,rtp.timestamp - sp->etime,(opus_int16 *)outsamps,sizeof(outsamps),0);
-	while(samples-- > 0){
-	  assert(sp->write_ptr <= AUD_BUFSIZE -2);
-	  sp->audiobuffer[sp->write_ptr++] = 0;
-	  sp->audiobuffer[sp->write_ptr++] = 0;
-	  if(sp->write_ptr >= AUD_BUFSIZE)
-	    sp->write_ptr -= AUD_BUFSIZE;
+      {
+	float outsamps[2*Bufsize];
+	if(drop != 0){
+	  // previous packet(s) dropped; have codec tell us how much silence to emit
+	  drop = opus_decode_float(sp->opus,NULL,rtp.timestamp - sp->etime,outsamps,Bufsize,0);
+	  sp->write_ptr += (2 * drop);
+	  sp->write_ptr %= Aud_bufsize;
 	}
-      }
-      samples = opus_decode(sp->opus,(unsigned char *)data,size,(opus_int16 *)outsamps,sizeof(outsamps),0);
-      for(int i=0; i < samples; i++){
-	assert(sp->write_ptr <= AUD_BUFSIZE -2);
-	sp->audiobuffer[sp->write_ptr++] = outsamps[2*i];
-	sp->audiobuffer[sp->write_ptr++] = outsamps[2*i+1];
-	if(sp->write_ptr >= AUD_BUFSIZE)
-	  sp->write_ptr -= AUD_BUFSIZE;
+	samples = opus_decode_float(sp->opus,(unsigned char *)data,size,outsamps,Bufsize,0);
+	pthread_mutex_lock(&Buffer_mutex);
+	if(!write_is_ahead(sp->write_ptr,Read_ptr)){
+	  // Past deadline, skip forward
+	  sp->underruns++;
+	  sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
+	}
+	for(int i=0; i < samples; i++){
+	  assert(sp->write_ptr <= Aud_bufsize -2);
+	  Audio_buffer[sp->write_ptr++] += outsamps[2*i];
+	  Audio_buffer[sp->write_ptr++] += outsamps[2*i+1];
+	  if(sp->write_ptr >= Aud_bufsize)
+	    sp->write_ptr -= Aud_bufsize;
+	}
+	sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
+	pthread_mutex_unlock(&Buffer_mutex);
       }
       break;
     default:
       break; // ignore
     }
-    sp->etime = rtp.timestamp + samples;
 
-    if(sp->Pa_Stream == NULL) {
-      // Create and start portaudio stream
-      PaStreamParameters outputParameters;
-      memset(&outputParameters,0,sizeof(outputParameters));
-      outputParameters.channelCount = 2;
-      outputParameters.device = inDevNum;
-      outputParameters.sampleFormat = paInt16;
-  
-#if 0
-      r = Pa_OpenStream(&sp->Pa_Stream,NULL,&outputParameters,Samprate,paFramesPerBufferUnspecified,
-			paPrimeOutputBuffersUsingStreamCallback,pa_callback,sp);
-#else
-      r = Pa_OpenStream(&sp->Pa_Stream,NULL,&outputParameters,Samprate,paFramesPerBufferUnspecified,
-			0,pa_callback,sp);
-#endif      
-      if(r != paNoError){
-	fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-	close_session(sp);
-	goto endloop;
-      }
-      r = Pa_SetStreamFinishedCallback(sp->Pa_Stream,pa_complete);
-      if(r != paNoError){
-	fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-	close_session(sp);
-	goto endloop;
-      }
-    }
-    sp->idle = 0;
-    if(Pa_IsStreamStopped(sp->Pa_Stream)){
-	r = Pa_StartStream(sp->Pa_Stream);
-	if(r != paNoError){
-	  fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
-	  close_session(sp);
-	  goto endloop;
-	}
-    }
-    // Record current clock time so callback can calculate delay
-    sp->last_written_time = Pa_GetStreamTime(sp->Pa_Stream);
+    sp->etime = rtp.timestamp + samples;
 
   endloop:;
     pthread_mutex_unlock(&Audio_mutex); // Give display thread a chance
@@ -332,23 +364,22 @@ int main(int argc,char * const argv[]){
 // Use ncurses to display streams; age out unused ones
 void *display(void *arg){
   initscr();
-  // WINDOW * const main = newwin(25,110,0,0);
-  WINDOW * const main = stdscr;
+  // WINDOW * const mainscr = newwin(25,110,0,0);
+  WINDOW * const mainscr = stdscr;
   int const agelimit = Clear_interval * 1000000 / Update_interval;
 
   while(1){
     int row = 1;
-    wmove(main,row,0);
-    wclrtobot(main);
-    mvwprintw(main,row++,1,"Type        channels   BW      SSRC     Packets     Drops   Underruns   Delay   Source");
+    wmove(mainscr,row,0);
+    wclrtobot(mainscr);
+    mvwprintw(mainscr,row++,1,"Type        channels   BW      SSRC     Packets     Drops   Underruns   Delay   Source");
     pthread_mutex_lock(&Audio_mutex);
-    for(int i=0;i<HASHCHAINS;i++){
+    for(int i=0;i<Hashchains;i++){
       struct audio *nextsp; // Save in case we close the current one
       for(struct audio *sp = Audio[i]; sp != NULL; sp = nextsp){
 	nextsp = sp->next;
 	if(++sp->age > agelimit){
 	  // Age out old session
-	  Pa_StopStream(sp->Pa_Stream);
 	  close_session(sp);
 	  continue;
 	}
@@ -390,18 +421,18 @@ void *display(void *arg){
 	  type = typebuf;
 	  break;
 	}
-	if(!sp->idle)
-	  wattr_on(main,A_BOLD,NULL); // Embolden active streams
-       	mvwprintw(main,row++,1,"%-15s%5d%5d%10lx%'12lu%'10u%'12lu%'8.3lf   %s:%s",
-		  type,sp->channels,bw,sp->ssrc,sp->packets,sp->drops,sp->underruns,sp->hw_delay,sp->addr,sp->port);
-	wattr_off(main,A_BOLD,NULL);
+	if(sp->age < 5)
+	  wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
+       	mvwprintw(mainscr,row++,1,"%-15s%5d%5d%10lx%'12lu%'10u%'12lu%'8.3lf   %s:%s",
+		  type,sp->channels,bw,sp->ssrc,sp->packets,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
+	wattr_off(mainscr,A_BOLD,NULL);
       }
     }
     pthread_mutex_unlock(&Audio_mutex);
     // Draw the box and banner last, to avoid the wclrtobot() calls
-    //    box(main,0,0);
-    mvwprintw(main,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
-    wnoutrefresh(main);
+    //    box(mainscr,0,0);
+    mvwprintw(mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
+    wnoutrefresh(mainscr);
     doupdate();
     usleep(Update_interval);
   }
@@ -410,7 +441,7 @@ void *display(void *arg){
 struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   // Walk hash chain
   struct audio *sp;
-  for(sp = Audio[ssrc % HASHCHAINS]; sp != NULL; sp = sp->next){
+  for(sp = Audio[ssrc % Hashchains]; sp != NULL; sp = sp->next){
     if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
       // Found it
 #if 0
@@ -421,8 +452,8 @@ struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
 
 	sp->prev->next = sp->next;
 	sp->prev = NULL;
-	sp->next = Audio[ssrc % HASHCHAINS];
-	Audio[ssrc % HASHCHAINS] = sp;
+	sp->next = Audio[ssrc % Hashchains];
+	Audio[ssrc % Hashchains] = sp;
       }
 #endif
       return sp;
@@ -444,10 +475,10 @@ struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t 
   sp->etime = timestamp;
 
   // Put at head of bucket chain
-  sp->next = Audio[ssrc % HASHCHAINS];
+  sp->next = Audio[ssrc % Hashchains];
   if(sp->next != NULL)
     sp->next->prev = sp;
-  Audio[ssrc % HASHCHAINS] = sp;
+  Audio[ssrc % Hashchains] = sp;
   return sp;
 }
 
@@ -455,11 +486,6 @@ int close_session(struct audio *sp){
   if(sp == NULL)
     return -1;
   
-  if(sp->Pa_Stream != NULL){
-    Pa_CloseStream(&sp->Pa_Stream);
-    sp->Pa_Stream = NULL;
-
-  }
   if(sp->opus != NULL){
     opus_decoder_destroy(sp->opus);
     sp->opus = NULL;
@@ -470,12 +496,12 @@ int close_session(struct audio *sp){
   if(sp->prev != NULL)
     sp->prev->next = sp->next;
   else
-    Audio[sp->ssrc % HASHCHAINS] = sp->next;
+    Audio[sp->ssrc % Hashchains] = sp->next;
   free(sp);
   return 0;
 }
 void closedown(int s){
-  for(int i=0; i < HASHCHAINS; i++){
+  for(int i=0; i < Hashchains; i++){
     while(Audio[i] != NULL)
       close_session(Audio[i]);
   }
@@ -492,35 +518,30 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       const PaStreamCallbackTimeInfo* timeInfo,
 		       PaStreamCallbackFlags statusFlags,
 		       void *userData){
-  int16_t *op = outputBuffer;
-  struct audio *sp = userData;
+  float *op = outputBuffer;
 
-  if(sp == NULL || op == NULL)
+  if(op == NULL)
     return paAbort;
   
-  sp->hw_delay = timeInfo->outputBufferDacTime - sp->last_written_time;
+  pthread_mutex_lock(&Buffer_mutex); // Protect Read_ptr
   for(int i=0; i<framesPerBuffer; i++){
-    if(sp->read_ptr == sp->write_ptr){
-      memset(op,0,(framesPerBuffer - i) * 2 * sizeof(*op));
-      if(!sp->idle){
-	sp->idle = 1;
-	sp->underruns++;
-      }
-      break;
-    } else {
-      assert(sp->read_ptr <= AUD_BUFSIZE-2); // should be true since buffer is even length and we always read pairs
-      *op++ = sp->audiobuffer[sp->read_ptr++];
-      *op++ = sp->audiobuffer[sp->read_ptr++];
-      if(sp->read_ptr >= AUD_BUFSIZE)
-	sp->read_ptr -= AUD_BUFSIZE;
-    }
+    assert(Read_ptr <= Aud_bufsize-2); // should be true since buffer is even length and we always read pairs
+    *op++ = Audio_buffer[Read_ptr];
+    Audio_buffer[Read_ptr++] = 0;
+    *op++ = Audio_buffer[Read_ptr];
+    Audio_buffer[Read_ptr++] = 0;      // zero out data just read
+    if(Read_ptr >= Aud_bufsize)
+      Read_ptr -= Aud_bufsize;
   }
+  pthread_mutex_unlock(&Buffer_mutex);
   return paContinue;
 }
 
-// Portaudio completion callback
-static void pa_complete(void *data){
-  struct audio *sp = data;
-
-  Pa_StopStream(&sp->Pa_Stream);
+// Check for underrun
+int write_is_ahead(int write_ptr,int read_ptr){
+  int n = (write_ptr - read_ptr + Aud_bufsize) % Aud_bufsize;
+  if(n < Aud_bufsize/2)
+    return 1; // OK
+  else
+    return 0; // Underrun has occurred
 }
