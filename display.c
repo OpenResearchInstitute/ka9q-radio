@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.85 2017/09/24 00:38:27 karn Exp karn $
+// $Id: display.c,v 1.87 2017/09/26 18:13:12 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -395,7 +395,7 @@ void *display(void *arg){
       mvwprintw(network,++row,1,"Sink %s",audio->audio_mcast_address_text);
 
     if(audio->opus_bitrate > 0)
-      mvwprintw(network,++row,1,"Opus %.0fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
+      mvwprintw(network,++row,1,"Opus %.1fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
 		audio->opus_blocktime,audio->opus_dtx ? " dtx":"",
 		audio->opus_bitrate/1000.,audio->bitrate/1000.,audio->audio_packets);
 
