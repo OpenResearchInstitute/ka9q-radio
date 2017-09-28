@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.15 2017/09/07 02:39:33 karn Exp karn $
+// $Id: dsp.h,v 1.16 2017/09/11 04:37:13 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -26,6 +26,8 @@ float complex const cpowers(complex float const *,const int);
 // Compute norm = x * conj(x) = Re{x}^2 + Im{x}^2
 float const cnrmf(const complex float x);
 double const cnrm(const complex double x);
+
+int is_phasor_init(const complex double x);
 
 int pipefill(int,void *,const int);
 double const parse_frequency(const char *);

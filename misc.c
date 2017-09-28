@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.18 2017/09/07 18:00:51 karn Exp karn $
+// $Id: misc.c,v 1.19 2017/09/11 04:35:43 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -60,6 +60,14 @@ double const cnrm(const complex double x){
   return creal(x)*creal(x) + cimag(x) * cimag(x);
 }
 
+// Return 1 if phasor appears to be initialized, 0 if not
+int is_phasor_init(const complex double x){
+  if(isnan(creal(x)) || isnan(cimag(x)) || cnrm(x) < 0.9)
+    return 0;
+  return 1;
+}
+
+
 // Fast arctangent approximation
 // http://www.embedded.com/design/other/4216719/Performing-efficient-arctangent-approximation
 float const fast_atan2f(float const y,float const x){
@@ -113,10 +121,9 @@ float const rpower(const float *data,const int len){
   
   if(len <= 0)
     return 0;
-  for(n=0; n < len; n++){
-    assert(!isnan(data[n]));
+  for(n=0; n < len; n++)
     sum += data[n] * data[n];
-  }
+
   return sum/len;
 }
 
@@ -127,10 +134,9 @@ const float cpower(const complex float *data, const int len){
 
   if(len <= 0)
     return 0;
-  for(n=0; n < len; n++){
-    assert(!isnan(crealf(data[n])) && !isnan(cimagf(data[n])));
+  for(n=0; n < len; n++)
     amplitude += cnrmf(data[n]);
-  }
+
   return amplitude/len;
 }
 
@@ -140,14 +146,12 @@ int pipefill(const int fd,void *buffer,const int cnt){
   int i;
   unsigned char *bp = buffer;
   for(i=0;i<cnt;){
-    int n;
-    
-    n = read(fd,bp+i,cnt-i);
+    int n = read(fd,bp+i,cnt-i);
     if(n < 0)
       return n;
     if(n == 0)
       break;
-   i += n;
+    i += n;
   }
   return i;
 
