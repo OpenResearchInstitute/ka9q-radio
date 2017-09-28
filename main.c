@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.82 2017/09/26 16:09:11 karn Exp karn $
+// $Id: main.c,v 1.83 2017/09/26 18:13:32 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -255,6 +255,8 @@ int main(int argc,char *argv[]){
   // The input thread must run before calling these next functions, otherwise they'll deadlock
   pthread_create(&demod->input_thread,NULL,input_loop,demod);
 
+  set_second_LO(demod,0); // Initialize LO2 phasor so demod task won't fail at startup
+
   // Optional doppler correction
   pthread_create(&demod->doppler_thread,NULL,doppler,demod);
 
@@ -496,7 +498,7 @@ int savestate(struct demod *dp,char const *filename){
   }
   fprintf(fp,"Blocksize %d\n",dp->L);
   fprintf(fp,"Impulse len %d\n",dp->M);
-  fprintf(fp,"Frequency %.3f Hz\n",dp->frequency);
+  fprintf(fp,"Frequency %.3f Hz\n",get_freq(dp));
   fprintf(fp,"Mode %s\n",dp->mode);
   fprintf(fp,"Shift %.3f Hz\n",dp->shift);
   fprintf(fp,"Filter low %.3f Hz\n",dp->low);
