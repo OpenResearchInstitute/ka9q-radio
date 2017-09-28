@@ -1,4 +1,4 @@
-// $Id: doppler.c,v 1.1 2017/09/24 00:37:43 karn Exp karn $
+// $Id: doppler.c,v 1.2 2017/09/26 09:34:24 karn Exp karn $
 // Real-time doppler steering
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -33,12 +33,7 @@ void *doppler(void *arg){
   double t,az,azrate,el,elrate,range,rangerate,rangeraterate;
   double rt;
 
-  pthread_mutex_lock(&demod->doppler_mutex);
-  demod->doppler = 0;
-  demod->doppler_phasor = 1;
-  demod->doppler_phasor_step = 1;
-  demod->doppler_phasor_step_step = 1;  
-  pthread_mutex_unlock(&demod->doppler_mutex);
+  set_doppler(demod,0,0);
 
   while(1){
     input = fopen("/tmp/tracking","r");
@@ -63,23 +58,12 @@ void *doppler(void *arg){
       }
       // Compute doppler and doppler rate
       double const c = 299792458;
-      pthread_mutex_lock(&demod->doppler_mutex);
-      demod->doppler = demod->frequency * -rangerate/c;
-      demod->doppler_rate = demod->frequency * -rangeraterate/c;
-      demod->doppler_phasor_step = csincos(-2*M_PI*demod->doppler / demod->samprate);
-      demod->doppler_phasor_step_step = csincos(-2*M_PI*demod->doppler_rate / (demod->samprate*demod->samprate));
-      pthread_mutex_unlock(&demod->doppler_mutex);
+      double const f = get_freq(demod);
+      set_doppler(demod,f * -rangerate/c,f * -rangeraterate/c);
     }
     fclose(input); // and try again
 
-    pthread_mutex_lock(&demod->doppler_mutex);
-    demod->doppler = 0;
-    demod->doppler_rate = 0;
-    demod->doppler_phasor_step = 1;
-    demod->doppler_phasor_step_step = 1;
-    demod->doppler_phasor = 1;
-    pthread_mutex_unlock(&demod->doppler_mutex);
-
+    set_doppler(demod,0,0);
   }
   pthread_exit(NULL);
 }
