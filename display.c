@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.87 2017/09/26 18:13:12 karn Exp karn $
+// $Id: display.c,v 1.88 2017/09/28 05:00:52 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -128,7 +128,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
   case 0: // Carrier frequency
   case 1: // Center frequency - treat the same
     if(!demod->frequency_lock) // Ignore if locked
-      set_freq(demod,demod->frequency + tunestep,NAN);
+      set_freq(demod,get_freq(demod) + tunestep,NAN);
     break;
   case 2: // First LO
     if(fabs(tunestep) < 1)
@@ -138,10 +138,10 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
       // Keep frequency but lower LO2, which will increase LO1
       double new_lo2 = demod->second_LO - tunestep;
       if(LO2_in_range(demod,new_lo2,0))
-	set_freq(demod,demod->frequency,new_lo2);
+	set_freq(demod,get_freq(demod),new_lo2);
     } else {
       // Retune radio but keep IF the same
-      set_freq(demod,demod->frequency + tunestep,demod->second_LO);
+      set_freq(demod,get_freq(demod) + tunestep,demod->second_LO);
     }
     break;
   case 3: // IF
@@ -149,10 +149,10 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     double new_lo2 = demod->second_LO - tunestep;
     if(LO2_in_range(demod,new_lo2,0)){ // Ignore if out of range
       if(demod->frequency_lock){
-	set_freq(demod,demod->frequency,new_lo2);
+	set_freq(demod,get_freq(demod),new_lo2);
       } else {
 	// Vary RF and IF together to keep LO1 the same
-	set_freq(demod,demod->frequency + tunestep,new_lo2);
+	set_freq(demod,get_freq(demod) + tunestep,new_lo2);
       }
     }
     break;
@@ -219,12 +219,12 @@ void *display(void *arg){
     wmove(tuning,0,0);
     wclrtobot(tuning);    
     int row = 0;
-    mvwprintw(tuning,++row,1,"Carrier%'21.3f Hz",demod->frequency);
+    mvwprintw(tuning,++row,1,"Carrier%'21.3f Hz",get_freq(demod));
 
     if(demod->frequency_lock)
       mvwchgat(tuning,row,15,20,A_UNDERLINE,0,NULL);
 
-    mvwprintw(tuning,++row,1,"Center%'22.3f Hz",demod->frequency + (demod->high + demod->low)/2);
+    mvwprintw(tuning,++row,1,"Center%'22.3f Hz",get_freq(demod) + (demod->high + demod->low)/2);
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
     mvwprintw(tuning,++row,1,"First LO%'20.3f Hz",get_first_LO(demod));
@@ -240,12 +240,13 @@ void *display(void *arg){
       wprintw(tuning," alias %'.3f Hz",alias);
     }
 #endif
-
     mvwprintw(tuning,++row,1,"IF%'26.3f Hz",-demod->second_LO);
-
-    if(demod->doppler != 0){
-      mvwprintw(tuning,++row,1,"Doppler%'21.3f Hz",demod->doppler);
-      mvwprintw(tuning,++row,1,"Dop rate%20.3f Hz/s",demod->doppler_rate);
+    {
+      double d = get_doppler(demod);
+      if(d != 0){
+	mvwprintw(tuning,++row,1,"Doppler%'21.3f Hz",d);
+	mvwprintw(tuning,++row,1,"Dop rate%20.3f Hz/s",get_doppler_rate(demod));
+      }
     }
     box(tuning,0,0);
     mvwprintw(tuning,0,5,"Tuning");
@@ -256,9 +257,13 @@ void *display(void *arg){
     wclrtobot(info);
     row = 1;
 
+    // A message from our sponsor...
+    mvwprintw(info,row++,1,"KA9Q SDR Receiver v1.0");
+    mvwprintw(info,row++,1,"Compiled on %s at %s",__DATE__,__TIME__);
+
     struct bandplan const *bp_low,*bp_high;
-    bp_low = lookup_frequency(demod->frequency+demod->low);
-    bp_high = lookup_frequency(demod->frequency+demod->high);
+    bp_low = lookup_frequency(get_freq(demod)+demod->low);
+    bp_high = lookup_frequency(get_freq(demod)+demod->high);
     // Make sure entire receiver passband is in the band
     if(bp_low != NULL && bp_high != NULL){
       struct bandplan intersect;
@@ -292,9 +297,6 @@ void *display(void *arg){
       if(intersect.classes & NOVICE_CLASS)
 	wprintw(info,"Novice ");
     }
-    // A message from our sponsor...
-    mvwprintw(info,row++,1,"KA9Q SDR Receiver v1.0");
-    mvwprintw(info,row++,1,"Compiled on %s at %s",__DATE__,__TIME__);
 
     box(info,0,0);
     mvwprintw(info,0,5,"Info");
@@ -614,7 +616,7 @@ void *display(void *arg){
       }
       break;
     case 'i':    // Recenter IF to +/- samprate/4
-      set_freq(demod,demod->frequency,demod->samprate/4);
+      set_freq(demod,get_freq(demod),demod->samprate/4);
       break;
     case 'u': // Display update rate
       {
