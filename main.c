@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.85 2017/10/01 23:26:53 karn Exp karn $
+// $Id: main.c,v 1.86 2017/10/01 23:44:21 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -21,6 +21,8 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/select.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <netdb.h>
 
 #include "radio.h"
