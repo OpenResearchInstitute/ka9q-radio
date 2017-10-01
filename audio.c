@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.47 2017/09/26 22:44:14 karn Exp karn $
+// $Id: audio.c,v 1.48 2017/10/01 23:24:09 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -66,6 +66,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 
 // Send 'size' stereo samples, each in a complex float
 int send_stereo_audio(struct audio * const audio,complex float const * const buffer,int const size){
+  // Write to circular buffer for Opus, PCM and/or portaudio
   pthread_mutex_lock(&audio->buffer_mutex);
   for(int i=0; i < size; i++){
     audio->audiobuffer[audio->write_ptr++] = buffer[i];
@@ -76,6 +77,7 @@ int send_stereo_audio(struct audio * const audio,complex float const * const buf
   pthread_mutex_unlock(&audio->buffer_mutex);
 
   if(audio->stream){
+    // Write to file stream
     for(int i=0;i<size;i++){
       int16_t sample;
 
@@ -90,6 +92,7 @@ int send_stereo_audio(struct audio * const audio,complex float const * const buf
 
 // Send 'size' mono samples, each in a float
 int send_mono_audio(struct audio * const audio,float const * const buffer,int const size){
+  // Write to circular buffer for Opus, PCM and/or portaudio
   pthread_mutex_lock(&audio->buffer_mutex);
   for(int i=0; i < size; i++){
     audio->audiobuffer[audio->write_ptr++] = CMPLXF(buffer[i],buffer[i]);
@@ -322,7 +325,11 @@ void audio_cleanup(void *p){
 
 
 static int setup_portaudio(struct audio *const audio){
-  assert(audio != NULL);
+  if(audio == NULL)
+    return -1;
+
+  if(strcmp(audio->localdev,"none") == 0)
+    return 0; // special name to disable portaudio
 
   PaError r = Pa_Initialize();
   if(r != paNoError){
