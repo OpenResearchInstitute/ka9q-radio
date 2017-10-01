@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.46 2017/09/26 18:12:12 karn Exp karn $
+// $Id: audio.c,v 1.47 2017/09/26 22:44:14 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -300,10 +300,16 @@ void audio_cleanup(void *p){
     return;
 
   if(audio->Pa_Stream != NULL){
+    Pa_AbortStream(&audio->Pa_Stream);
     Pa_CloseStream(&audio->Pa_Stream);
     audio->Pa_Stream = NULL;
     Pa_Terminate();
   }
+  pthread_cancel(audio->pcm_thread);
+  pthread_join(audio->pcm_thread,NULL);
+  pthread_cancel(audio->opus_stereo_thread);
+  pthread_join(audio->opus_stereo_thread,NULL);
+
   if(audio->audio_mcast_fd > 0){
     close(audio->audio_mcast_fd);
     audio->audio_mcast_fd = -1;
