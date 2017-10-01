@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.51 2017/09/26 09:32:44 karn Exp karn $
+// $Id: radio.h,v 1.52 2017/09/28 22:04:27 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -106,6 +106,8 @@ struct demod {
 
   // Doppler shift correction (optional)
   pthread_t doppler_thread;          // Thread that reads file and sets this
+  char *doppler_command;             // Command to execute for tracking
+
   pthread_mutex_t doppler_mutex;     // Protects doppler
   double doppler;       // Open-loop doppler correction from satellite tracking program
   double doppler_rate;
