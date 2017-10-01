@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.5 2017/09/26 09:32:26 karn Exp karn $
+// $Id: linear.c,v 1.6 2017/09/28 22:01:44 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -44,17 +44,18 @@ void *demod_linear(void *arg){
   float const samptime = demod->decimate / demod->samprate;  // Time between (decimated) samples
 
   // FFT search params
-  float const snrthresh = powf(10,snrthreshdb/10);           // SNR threshold for lock
+  float const snrthresh = powf(10,snrthreshdb/10);          // SNR threshold for lock
   int   const unlock_limit = unlock_time / samptime;        // Start acquiring after loss of lock
-  float const binsize = 1 / (fftsize * samptime);           // FFT bin size, Hz
-  int   const lowlimit = round(searchlow / binsize);        // FFT bin indices for search limits
-  int   const highlimit = round(searchhigh / binsize);
+  float const binsize = 1. / (fftsize * samptime);          // FFT bin size, Hz
+  // FFT bin indices for search limits. Squaring doubles frequency, so double the search range
+  int   const lowlimit =  round(((demod->flags & SQUARE) ? 2 : 1) * searchlow / binsize);
+  int   const highlimit = round(((demod->flags & SQUARE) ? 2 : 1) * searchhigh / binsize);
 
   // Second-order PLL loop filter (see Gardner)
   float const phase_scale = 2 * M_PI * samptime;           // Convert hertz to radians/sample
   float const vcogain = 2*M_PI;                            // 1 Hz = 2pi radians/sec per "volt"
   float const pdgain = 1;                                  // "volts" per radian (unity)
-  float const natfreq = binsize * 2*M_PI;                  // loop natural frequency in rad/sec
+  float const natfreq = 10. * binsize * 2*M_PI;                  // loop natural frequency in rad/sec
   float const tau1 = vcogain * pdgain / (natfreq*natfreq); // 1 / 2pi
   float const integrator_gain = 1 / tau1;                  // 2pi
   float const tau2 = 2 * damping / natfreq;                // sqrt(2) / 2pi = 1/ (pi*sqrt(2))
