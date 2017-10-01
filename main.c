@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.84 2017/09/28 22:01:57 karn Exp karn $
+// $Id: main.c,v 1.85 2017/10/01 23:26:53 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -208,22 +208,13 @@ int main(int argc,char *argv[]){
       Audio.opus_dtx = 1;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-a] [-B opus_blocktime] [-c calibrate_ppm] [-f frequency] [-I iq multicast address] [-l locale] [-L samplepoints] [-m mode] [-M impulsepoints] [-R Audio multicast address] [-o opus_bitrate] [-s shift] [-t threads] [-u update_ms] [-v]\n",argv[0]);
-      fprintf(stderr,"Default: %s -B %.0f -c %.2lf -d %s -f %.1f -I %s -l %s -L %d -m %s -M %d -R %s -r %d -s %.1f -t %d -u %d [-x]\n",
-	      argv[0],Audio.opus_blocktime,demod->calibrate*1e6,"default",demod->start_freq,demod->iq_mcast_address_text,Locale,demod->L,demod->mode,demod->M,Audio.audio_mcast_address_text,Audio.opus_bitrate,demod->shift,Nthreads,Update_interval);
+      fprintf(stderr,"Usage: %s [-a audiodev] [-B opus_blocktime] [-c calibrate_ppm] [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-o opus_bitrate] [-p] [-q] [-R Audio multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v] [-x]\n",argv[0]);
       exit(1);
       break;
     }
   }
-  if(Verbose){
-    fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
-    fprintf(stderr,"Copyright 2017 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
-    fprintf(stderr,"Compiled %s on %s\n",__TIME__,__DATE__);
-    fprintf(stderr,"Nmodes = %d\n",Nmodes);
-    fprintf(stderr,"D/A sample rate %'d\n",DAC_samprate);
-    fprintf(stderr,"block size: %'d complex samples\n",demod->L);
-    fprintf(stderr,"Kaiser beta %'.1lf, impulse response: %'d complex samples\n",demod->kaiser_beta,demod->M);
-  }
+  fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
+  fprintf(stderr,"Copyright 2017 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
   
   // Set up actual demod state
   demod->ctl_fd = -1;   // Invalid
@@ -296,13 +287,13 @@ int main(int argc,char *argv[]){
   exit(0);
 }
 
-
 void display_cleanup(void *);
 void audio_cleanup(void *);
 
 void closedown(int a){
   if(!Quiet)
     fprintf(stderr,"radio: caught signal %d: %s\n",a,strsignal(a));
+  audio_cleanup(NULL);
   display_cleanup(NULL);
   exit(1);
 }
