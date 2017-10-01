@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.88 2017/09/28 05:00:52 karn Exp karn $
+// $Id: display.c,v 1.89 2017/09/28 22:03:21 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -202,6 +202,7 @@ void *display(void *arg){
   WINDOW * const sig = newwin(14,26,8,0); // Signal information
   WINDOW * const sdr = newwin(12,25,8,53); // SDR information
   WINDOW * const network = newwin(8,78,22,0); // Network status information
+  WINDOW * const misc = newwin(4,78,30,0);
   int const dial_fd = open(DIAL,O_RDONLY|O_NDELAY);  // Powermate knob?
 
   struct sockaddr old_input_source_address;
@@ -257,10 +258,8 @@ void *display(void *arg){
     wclrtobot(info);
     row = 1;
 
-    // A message from our sponsor...
-    mvwprintw(info,row++,1,"KA9Q SDR Receiver v1.0");
-    mvwprintw(info,row++,1,"Compiled on %s at %s",__DATE__,__TIME__);
-
+    if(demod->doppler_command)
+      mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
     struct bandplan const *bp_low,*bp_high;
     bp_low = lookup_frequency(get_freq(demod)+demod->low);
     bp_high = lookup_frequency(get_freq(demod)+demod->high);
@@ -273,29 +272,32 @@ void *display(void *arg){
       intersect.classes = bp_low->classes & bp_high->classes;
       intersect.modes = bp_low->modes & bp_high->modes;
 
-      mvwprintw(info,row++,1,"%s",bp_low->name);
+      mvwprintw(info,row++,1,"Band: %s",bp_low->name);
 
-      wmove(info,row++,1);
-      if(intersect.modes & CW)
-	wprintw(info,"CW ");
-      if(intersect.modes & DATA)
-	wprintw(info,"Data ");
-      if(intersect.modes & VOICE)
-	wprintw(info,"Voice ");
-      if(intersect.modes & IMAGE)
-	wprintw(info,"Image");
-      
-      wmove(info,row++,1);
-      if(intersect.classes & EXTRA_CLASS)
-	wprintw(info,"Extra ");
-      if(intersect.classes & ADVANCED_CLASS)
-	wprintw(info,"Advanced ");
-      if(intersect.classes & GENERAL_CLASS)
-	wprintw(info,"General ");
-      if(intersect.classes & TECHNICIAN_CLASS)
-	wprintw(info,"Technician ");
-      if(intersect.classes & NOVICE_CLASS)
-	wprintw(info,"Novice ");
+      if(intersect.modes){
+	mvwprintw(info,row++,1,"Emissions: ");
+	if(intersect.modes & CW)
+	  wprintw(info,"CW ");
+	if(intersect.modes & DATA)
+	  wprintw(info,"Data ");
+	if(intersect.modes & VOICE)
+	  wprintw(info,"Voice ");
+	if(intersect.modes & IMAGE)
+	  wprintw(info,"Image");
+      }
+      if(intersect.classes){
+	mvwprintw(info,row++,1,"Privs: ");
+	if(intersect.classes & EXTRA_CLASS)
+	  wprintw(info,"Extra ");
+	if(intersect.classes & ADVANCED_CLASS)
+	  wprintw(info,"Advanced ");
+	if(intersect.classes & GENERAL_CLASS)
+	  wprintw(info,"General ");
+	if(intersect.classes & TECHNICIAN_CLASS)
+	  wprintw(info,"Technician ");
+	if(intersect.classes & NOVICE_CLASS)
+	  wprintw(info,"Novice ");
+      }
     }
 
     box(info,0,0);
@@ -409,6 +411,15 @@ void *display(void *arg){
     mvwprintw(network,0,5,"Network");
     wnoutrefresh(network);
 
+    // A message from our sponsor...
+    row = 0;
+    wmove(misc,0,0);
+    wclrtobot(misc);
+    mvwprintw(misc,++row,1,"Source %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
+    mvwprintw(misc,row++,1,"KA9Q SDR Receiver v1.0; Copyright 2017 Phil Karn");
+    mvwprintw(misc,row++,1,"Compiled on %s at %s",__DATE__,__TIME__);
+    box(misc,0,0);
+    wnoutrefresh(misc);
     
 
     // Highlight cursor for tuning step
