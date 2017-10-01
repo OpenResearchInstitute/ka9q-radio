@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.83 2017/09/26 18:13:32 karn Exp karn $
+// $Id: main.c,v 1.84 2017/09/28 22:01:57 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -61,6 +61,13 @@ int IF_EXCLUDE = 16000; // Hardwired for UK Funcube Dongle Pro+, make this more 
 
 
 int main(int argc,char *argv[]){
+  // if we have root, up our priority and drop privileges
+  int prio = getpriority(PRIO_PROCESS,0);
+  prio = setpriority(PRIO_PROCESS,0,prio - 5);
+
+  // Drop root if we have it
+  seteuid(getuid());
+
   // Set up program defaults
   // Some can be overridden by state file or command line args
   {
@@ -111,7 +118,7 @@ int main(int argc,char *argv[]){
   set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "a:B:c:f:I:k:l:L:m:M:pr:R:qo:s:t:u:vx";
+  char optstring[] = "a:B:c:d:f:I:k:l:L:m:M:pr:R:qo:s:t:u:vx";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -132,6 +139,9 @@ int main(int argc,char *argv[]){
       break;
     case 'c':   // SDR TCXO and A/D clock calibration in parts per million
       set_cal(demod,1e-6*strtod(optarg,NULL));
+      break;
+    case 'd':
+      demod->doppler_command = optarg;
       break;
     case 'f':   // Initial RF tuning frequency
       demod->start_freq = parse_frequency(optarg);
@@ -258,7 +268,8 @@ int main(int argc,char *argv[]){
   set_second_LO(demod,0); // Initialize LO2 phasor so demod task won't fail at startup
 
   // Optional doppler correction
-  pthread_create(&demod->doppler_thread,NULL,doppler,demod);
+  if(demod->doppler_command)
+    pthread_create(&demod->doppler_thread,NULL,doppler,demod);
 
   // Actually set the mode and frequency already specified
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
@@ -293,8 +304,6 @@ void closedown(int a){
   if(!Quiet)
     fprintf(stderr,"radio: caught signal %d: %s\n",a,strsignal(a));
   display_cleanup(NULL);
-  audio_cleanup(&Audio);
-
   exit(1);
 }
 
