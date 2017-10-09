@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.20 2017/09/28 04:59:47 karn Exp karn $
+// $Id: monitor.c,v 1.21 2017/09/28 22:02:37 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -27,7 +27,7 @@
 char *Mcast_address_text = "239.2.1.1";     // Multicast address we're listening to
 char Audiodev[256];           // Name of audio device; empty means portaudio's default
 const int Slop = 480;         // Playout delay in samples to add after an underrun
-#define Aud_bufsize 65536     // make this a power of 2 for efficiency
+#define Aud_bufsize (1<<18)     // make this a power of 2 for efficiency
 const int Bufsize = 8192;     // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
 const int Samprate = 48000;   // Too hard to handle other sample rates right now
 int List_audio;               // List audio output devices and exit
@@ -66,6 +66,7 @@ struct audio {
   int opus_bandwidth;       // Opus stream audio bandwidth
 
   int write_ptr;   // Playout buffer write pointer
+  PaTime last_write_time;
 
   unsigned long packets;    // RTP packets for this session
   unsigned long drops;      // Apparent rtp packet drops
@@ -252,6 +253,7 @@ int main(int argc,char * const argv[]){
       }
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
+      sp->write_ptr = Read_ptr;
 
     }
     sp->age = 0;
@@ -276,7 +278,7 @@ int main(int argc,char * const argv[]){
       sp->channels = 2;
       samples = size / 4;  // # 32-bit word samples
       pthread_mutex_lock(&Buffer_mutex);
-      if(!write_is_ahead(sp->write_ptr,Read_ptr)){
+      if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
 	// Past deadline, skip forward
 	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
 	sp->underruns++;
@@ -287,25 +289,26 @@ int main(int argc,char * const argv[]){
 	  sp->write_ptr -= Aud_bufsize;
       }
       sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
+      sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
       pthread_mutex_unlock(&Buffer_mutex);
       break;
     case 11: // Mono; send to both stereo channels
       sp->channels = 1;
       samples = size / 2;
       pthread_mutex_lock(&Buffer_mutex);
-      if(!write_is_ahead(sp->write_ptr,Read_ptr)){
+      if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
 	// Past deadline, skip forward
 	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
 	sp->underruns++;
       }
       for(int i=0;i<samples;i++){
-	assert(sp->write_ptr <= Aud_bufsize -2);
 	Audio_buffer[sp->write_ptr++] += ntohs(data[i]);
 	Audio_buffer[sp->write_ptr++] += ntohs(data[i]);
 	if(sp->write_ptr >= Aud_bufsize)
 	  sp->write_ptr -= Aud_bufsize;
       }
       sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
+      sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
       pthread_mutex_unlock(&Buffer_mutex);
       break;
     case 20: // Opus codec decode - arbitrary choice
@@ -331,19 +334,19 @@ int main(int argc,char * const argv[]){
 	}
 	samples = opus_decode_float(sp->opus,(unsigned char *)data,size,outsamps,Bufsize,0);
 	pthread_mutex_lock(&Buffer_mutex);
-	if(!write_is_ahead(sp->write_ptr,Read_ptr)){
+	if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
 	  // Past deadline, skip forward
 	  sp->underruns++;
 	  sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
 	}
 	for(int i=0; i < samples; i++){
-	  assert(sp->write_ptr <= Aud_bufsize -2);
 	  Audio_buffer[sp->write_ptr++] += outsamps[2*i];
 	  Audio_buffer[sp->write_ptr++] += outsamps[2*i+1];
 	  if(sp->write_ptr >= Aud_bufsize)
 	    sp->write_ptr -= Aud_bufsize;
 	}
 	sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
+	sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
 	pthread_mutex_unlock(&Buffer_mutex);
       }
       break;
@@ -519,13 +522,30 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       PaStreamCallbackFlags statusFlags,
 		       void *userData){
   float *op = outputBuffer;
-
   if(op == NULL)
-    return paAbort;
+    return paAbort; // can this happen??
   
+
+#if 1
   pthread_mutex_lock(&Buffer_mutex); // Protect Read_ptr
+#endif
+#if 1
+  int samples_left = 2 * framesPerBuffer; // A stereo frame is two samples
+  while(samples_left > 0){
+    // chunk is the smaller of the samples needed and the amount available before wrap
+    int chunk = Aud_bufsize - Read_ptr;
+    if(chunk > samples_left)
+      chunk = samples_left;
+    memcpy(op,&Audio_buffer[Read_ptr],chunk * sizeof(*op));
+    memset(&Audio_buffer[Read_ptr],0,chunk * sizeof(*op)); // Zero buffer just read
+    op += chunk;
+    samples_left -= chunk;
+    // Update the read pointer, try to do it atomically in case we can't lock
+    Read_ptr = (Read_ptr + chunk) & (Aud_bufsize - 1); // Assumes Aud_bufsize is power of 2!!
+  }
+#else
+  // Old slow code
   for(int i=0; i<framesPerBuffer; i++){
-    assert(Read_ptr <= Aud_bufsize-2); // should be true since buffer is even length and we always read pairs
     *op++ = Audio_buffer[Read_ptr];
     Audio_buffer[Read_ptr++] = 0;
     *op++ = Audio_buffer[Read_ptr];
@@ -533,11 +553,14 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     if(Read_ptr >= Aud_bufsize)
       Read_ptr -= Aud_bufsize;
   }
+#endif
+#if 1
   pthread_mutex_unlock(&Buffer_mutex);
+#endif
   return paContinue;
 }
 
-// Check for underrun
+// Check for underrunin
 int write_is_ahead(int write_ptr,int read_ptr){
   int n = (write_ptr - read_ptr + Aud_bufsize) % Aud_bufsize;
   if(n < Aud_bufsize/2)
