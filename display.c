@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.89 2017/09/28 22:03:21 karn Exp karn $
+// $Id: display.c,v 1.90 2017/10/01 23:26:22 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -290,13 +290,13 @@ void *display(void *arg){
 	if(intersect.classes & EXTRA_CLASS)
 	  wprintw(info,"Extra ");
 	if(intersect.classes & ADVANCED_CLASS)
-	  wprintw(info,"Advanced ");
+	  wprintw(info,"Adv ");
 	if(intersect.classes & GENERAL_CLASS)
-	  wprintw(info,"General ");
+	  wprintw(info,"Gen ");
 	if(intersect.classes & TECHNICIAN_CLASS)
-	  wprintw(info,"Technician ");
+	  wprintw(info,"Tech ");
 	if(intersect.classes & NOVICE_CLASS)
-	  wprintw(info,"Novice ");
+	  wprintw(info,"Nov ");
       }
     }
 
