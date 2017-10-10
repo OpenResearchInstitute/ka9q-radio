@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.40 2017/09/23 07:38:19 karn Exp karn $
+// $Id: fm.c,v 1.41 2017/09/26 09:32:09 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -25,6 +25,7 @@ void *demod_fm(void *arg){
   float const dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
   demod->pdeviation = 0;
   demod->foffset = 0;
+  demod->flags |= MONO; // Only mono for now
 
   // Create predetection filter, leaving response momentarily empty
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
