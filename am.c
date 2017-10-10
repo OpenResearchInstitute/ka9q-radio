@@ -1,12 +1,18 @@
-#define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
+// $Id$
+
+// New AM demodulator, stripped from linear.c
+// Oct 9 2017 Phil Karn, KA9Q
+
+#define _GNU_SOURCE 1
+#include <complex.h>
+#include <math.h>
 #include <assert.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <pthread.h>
-#include <math.h>
-#include <complex.h>
-#undef I
-#include <fftw3.h>
+#include <string.h>
+
 
 #include "dsp.h"
 #include "filter.h"
@@ -14,65 +20,72 @@
 #include "audio.h"
 
 
-
 void *demod_am(void *arg){
-  assert(arg != NULL);
   pthread_setname("am");
+  assert(arg != NULL);
   struct demod * const demod = arg;
-  demod->foffset = 0; // not used
-  demod->pdeviation = NAN;
 
-  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
-  demod->filter = filter;
-  set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
-
-  float average_average = 0;
+  // Set derived (and other) constants
+  float const samptime = demod->decimate / demod->samprate;  // Time between (decimated) samples
 
   // AGC
   int hangcount = 0;
-  float samptime = demod->decimate / demod->samprate;
-  static float const hangtime = 1.1;      // AGC Hang for 1.1 seconds after new peak
-  static float const recovery_rate = 6;   // AGC recovery rate 6 db/sec after hang finishes
-  static float const attack_rate = -30;    // Attack 30 dB/sec
+  float const recovery_factor = dB2voltage(demod->recovery_rate * samptime); // AGC ramp-up rate/sample
+  float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
+  int const hangmax = demod->hangtime / samptime; // samples before AGC increase
 
-  float const recovery_factor = dB2voltage(recovery_rate * samptime);
-  float const attack_factor = dB2voltage(attack_rate * samptime);
-  int const hangmax = hangtime / samptime; // 1.1 second hang before gain increase
+  // DC removal from envelope-detected AM and coherent AM
+  float DC_filter = 0;
+  float const DC_filter_coeff = .0001;
+
+  demod->flags |= MONO; // Implies mono
+
+  demod->snr = -INFINITY;
+
+  // Detection filter
+  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
+					       (demod->flags & CONJ) ? CROSS_CONJ : COMPLEX);
+  demod->filter = filter;
+  set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
   while(!demod->terminate){
+    // New samples
     fillbuf(demod,filter->input.c,filter->ilen);
-    demod->second_LO_phasor = spindown(demod,filter->input.c); // 2nd LO
+    spindown(demod,filter->input.c);
     demod->if_power = cpower(filter->input.c,filter->ilen);
     execute_filter(filter);
-    //    demod->bb_power = cpower(filter->output.c,filter->olen); // do this below to save time
-    if(isnan(demod->n0))
-      demod->n0 = compute_n0(demod);
+    if(!isnan(demod->n0))
+      demod->n0 += .001 * (compute_n0(demod) - demod->n0);
     else
-      demod->n0 += .01 * (compute_n0(demod) - demod->n0);
+      demod->n0 = compute_n0(demod); // Happens at startup
 
-    // Envelope detection & AGC
+    // Demodulation
+    float signal = 0;
+    float noise = 0;
+    // Envelope detected AM
     float audio[filter->olen];
-    demod->bb_power = 0;
-    for(int n=0; n < filter->olen; n++){
-      float const t = cnrmf(filter->output.c[n]);
-      float const mag = sqrtf(t);
+    for(int n=0; n<filter->olen; n++){
+      float const sampsq = cnrmf(filter->output.c[n]);
+      signal += sampsq;
+      float samp = sqrtf(sampsq);
       
-      demod->bb_power += t;
-      audio[n] = mag * demod->gain;
-      if(fabsf(audio[n]) > demod->headroom){
+      // Remove carrier DC, use for AGC
+      // DC_filter will always be positive since sqrtf() is positive
+      DC_filter += DC_filter_coeff * (samp - DC_filter);
+      
+      if(demod->gain * DC_filter > demod->headroom){
 	demod->gain *= attack_factor;
-	audio[n] = mag * demod->gain;
 	hangcount = hangmax;
       } else if(hangcount != 0){
 	hangcount--;
       } else {
 	demod->gain *= recovery_factor;
       }
+      audio[n] = (samp - DC_filter) * demod->gain;
     }
-    demod->bb_power /= filter->olen;
-    send_mono_audio(demod->audio,audio,filter->olen,1);
-
-  }
+    send_mono_audio(demod->audio,audio,filter->olen);
+    demod->bb_power = (signal + noise) / filter->olen;
+  } // terminate
   delete_filter(filter);
   demod->filter = NULL;
   pthread_exit(NULL);
