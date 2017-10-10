@@ -1,6 +1,7 @@
-// $Id: modes.c,v 1.19 2017/09/22 18:16:56 karn Exp karn $
+// $Id: modes.c,v 1.20 2017/09/23 07:38:35 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #if defined(linux)
 #include <bsd/string.h>
 #endif
@@ -10,7 +11,8 @@
 #include "dsp.h"
 
 
-struct modetab Modes[256];
+#define MAXMODES 256
+struct modetab Modes[MAXMODES];
 int Nmodes;
 
 extern char Libdir[];
@@ -20,10 +22,12 @@ struct demodtab {
   char name[16];
   void * (*demod)(void *);
 } Demodtab[] = {
+  {"am",     demod_am},  // AM evelope detection
   {"fm",     demod_fm},  // NBFM and noncoherent PM
   {"linear", demod_linear}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
 };
 #define NDEMOD (sizeof(Demodtab)/sizeof(struct demodtab))
+
 
 int readmodes(char *file){
   char pathname[PATH_MAX];
@@ -36,45 +40,85 @@ int readmodes(char *file){
   char line[PATH_MAX];
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
-    if(line[0] == '#' || line[0] == '*' || line[0] == '/')
-      continue; // comment
+    // Everything after # is a comment
+    char *cp = strchr(line,'#');
+    if(cp != NULL)
+      *cp = '\0';
 
-    char name[16],demod[16],options[16];
-    float low,high,shift;
-    if(sscanf(line,"%16s %16s %f %f %f %16s",name,demod,&low,&high,&shift,options) < 4)
-      continue; // Too short, or in wrong format
+    struct modetab *mp = &Modes[Nmodes];
 
+    // Parse line (C is pretty weak on text processing...)
+    char *name,*demod;
+    char *stringp = line;
+
+    do {
+      name = strsep(&stringp," \t");
+    } while (name != NULL && *name == '\0');
+    
+    do {
+      demod = strsep(&stringp," \t");
+    } while (demod != NULL && *demod == '\0');
+    
+    if(name == NULL || demod == NULL)
+      continue;
+    
     int i;
     for(i=0;i<NDEMOD;i++)
       if(strncasecmp(demod,Demodtab[i].name,strlen(Demodtab[i].name)) == 0)
 	break;
       
     if(i == NDEMOD)
-      continue; // Not found
-    
-    strlcpy(Modes[Nmodes].name,name,sizeof(Modes[Nmodes].name));
-    Modes[Nmodes].demod = Demodtab[i].demod;
-    Modes[Nmodes].low = low;
-    Modes[Nmodes].high = high;
-    Modes[Nmodes].shift = shift;
-    Modes[Nmodes].flags = 0;
-    if(strcasecmp(options,"conj") == 0){
-      Modes[Nmodes].flags |= CONJ;
-    } else if(strcasecmp(options,"flat") == 0){
-      Modes[Nmodes].flags |= FLAT;
-    } else if(strcasecmp(options,"cal") == 0){
-      Modes[Nmodes].flags |= CAL|COHERENT;
-    } else if(strcasecmp(options,"square") == 0){
-      Modes[Nmodes].flags |= SQUARE|COHERENT;
-    } else if(strcasecmp(options,"coherent") == 0){
-      Modes[Nmodes].flags |= COHERENT;
-    } else if(strcasecmp(options,"envelope") == 0){
-      Modes[Nmodes].flags |= ENVELOPE;
-    } else if(strcasecmp(options,"mono") == 0){
-      Modes[Nmodes].flags |= MONO;
-    }
+      continue; // Demod not found in list
 
+    strlcpy(mp->name, name, sizeof(mp->name));
+    strlcpy(mp->demod_name, Demodtab[i].name, sizeof(mp->demod_name));
+    mp->demod = Demodtab[i].demod;
+
+    double low,high;
+    low = strtod(stringp,&stringp);
+    high = strtod(stringp,&stringp);
+    if(high < low){ // Ensure high > low
+      mp->low = high;
+      mp->high = low;
+    } else {
+      mp->low = low;
+      mp->high = high;
+    }
+    mp->shift = strtod(stringp,&stringp);
+    mp->attack_rate = -fabs(strtod(stringp,&stringp));
+    mp->recovery_rate = fabs(strtod(stringp,&stringp));
+    mp->hangtime = fabs(strtod(stringp,&stringp)); // Must be positive
+
+    // Process options
+    mp->flags = 0;
+    for(int i=0;i<8;i++){
+      char *option;
+      // Skip leading space
+      do {
+	option = strsep(&stringp," \t");
+      } while (option != NULL && *option == '\0');
+      if(option == NULL)
+	break; // No more
+
+      if(strcasecmp(option,"conj") == 0){
+	mp->flags |= CONJ;         // For independent sideband: LSB on left, USB on right
+      } else if(strcasecmp(option,"flat") == 0){
+	mp->flags |= FLAT;         // FM only
+      } else if(strcasecmp(option,"cal") == 0){
+	mp->flags |= CAL|COHERENT; // Calibrate implies coherent
+      } else if(strcasecmp(option,"square") == 0){
+	mp->flags |= SQUARE|COHERENT; // Square implies coherent
+      } else if(strcasecmp(option,"coherent") == 0){
+	mp->flags |= COHERENT;
+      } else if(strcasecmp(option,"envelope") == 0){
+	mp->flags |= ENVELOPE | MONO; // Envelope detected AM implies mono
+      } else if(strcasecmp(option,"mono") == 0){
+	mp->flags |= MONO;  // E.g., if you don't want the hilbert transform of SSB on the right channel
+      }
+    }    
     Nmodes++;
+    if(Nmodes == MAXMODES)
+      break; // table full
   }
   return 0;
 }
