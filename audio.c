@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.48 2017/10/01 23:24:09 karn Exp karn $
+// $Id: audio.c,v 1.49 2017/10/01 23:43:56 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -50,17 +50,28 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       PaStreamCallbackFlags statusFlags,
 		       void *userData){
   complex float *op = outputBuffer;
-  struct audio *audio = userData;
+  struct audio * const audio = userData;
 
-  for(int i=0; i<framesPerBuffer; i++){
-    if(audio->read_ptr == audio->write_ptr){
-      *op++ = CMPLXF(0,0); // Send silence until something appears
-    } else {
-      *op++ = audio->audiobuffer[audio->read_ptr++];
-      if(audio->read_ptr >= AUD_BUFSIZE)
-	audio->read_ptr -= AUD_BUFSIZE;
-    }
+  int samples_left = framesPerBuffer; // A stereo frame is two samples
+  pthread_mutex_lock(&audio->buffer_mutex);
+  while(samples_left > 0){
+    // chunk is the smallest of the samples available, needed and the amount available before wrap
+    int chunk = (audio->write_ptr - audio->read_ptr) & (AUD_BUFSIZE - 1);
+    if(chunk > AUD_BUFSIZE - audio->read_ptr)
+       chunk = AUD_BUFSIZE - audio->read_ptr;
+    if(chunk > samples_left)
+      chunk = samples_left;
+    if(chunk == 0)
+      break; // Nothing to send!
+    memcpy(op,&audio->audiobuffer[audio->read_ptr],chunk * sizeof(*op));
+    //    memset(&audio->buffer[audio->read],0,chunk * sizeof(*op)); // Zero buffer just read
+    op += chunk;
+    samples_left -= chunk;
+    // Update the read pointer
+    audio->read_ptr = (audio->read_ptr + chunk) & (AUD_BUFSIZE - 1); // Assumes Aud_bufsize is power of 2!!
   }
+  pthread_mutex_unlock(&audio->buffer_mutex);
+  memset(op,0,samples_left * sizeof(*op)); // Pad with silence
   return 0;
 }
 
