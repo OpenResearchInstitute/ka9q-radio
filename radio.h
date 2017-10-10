@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.52 2017/09/28 22:04:27 karn Exp karn $
+// $Id: radio.h,v 1.53 2017/10/01 23:25:55 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -24,12 +24,16 @@
 
 struct modetab {
   char name[16];
+  char demod_name[16];
   void * (*demod)(void *); // Address of demodulator routine
   int flags;        // Special purpose flags, e.g., CONJ
   float shift;      // Audio frequency shift (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
   float low;        // Lower edge of IF passband
   float high;       // Upper edge of IF passband
+  float attack_rate;
+  float recovery_rate;
+  float hangtime;
 };
 
 // Sent in each RTP packet right after header
@@ -85,6 +89,7 @@ struct demod {
   pthread_t demod_thread;
   void * (*demod)(void *);        // Entry point to demodulator
   char mode[16];                  // printable mode name
+  char demod_name[16];
   int terminate;                  // set to 1 by set_mode() to request graceful termination
   int flags;                      // Special flags to demodulator
   double start_freq;              // Initial frequency to set at startup
@@ -146,7 +151,14 @@ struct demod {
   // 0 => rectangular window; increasing values widens main lobe and decreases ripple
   float kaiser_beta;
 
-  // Demodulator parameters
+  // Demodulator configuration settngs
+  float headroom;   // Audio level headroom
+  float hangtime;   // Linear AGC hang time, seconds
+  float recovery_rate; // Linear AGC recovery rate, dB/sec (must be positive)
+  float attack_rate;   // Linear AGC attack rate, dB/sec (must be negative)
+  float loop_bw;    // Loop bw (coherent modes)
+
+  // Demodulator status variables
   float if_power;   // Average power of signal before filter
   float bb_power;   // Average power of signal after filter
   float n0;         // Noise spectral density esimate (experimemtal)
@@ -156,10 +168,7 @@ struct demod {
   float pdeviation; // Peak frequency deviation (FM)
   float cphase;     // Carrier phase change (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
-  float headroom;   // Audio level headroom
-  float hangtime;   // Linear AGC hang time, seconds
-  float recovery_rate; // Linear AGC recovery rate, dB/sec (must be positive)
-  float attack_rate;   // Linear AGC attack rate, dB/sec (must be negative)
+  float spare;
 
   struct audio *audio; // Link to audio output system
 };

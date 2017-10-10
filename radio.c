@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.69 2017/09/26 09:32:44 karn Exp karn $
+// $Id: radio.c,v 1.70 2017/09/28 22:04:27 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -356,12 +356,20 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   if(demod->mode != mode)
     strlcpy(demod->mode,mode,sizeof(demod->mode));
 
-  if(defaults || isnan(demod->shift))
-    set_shift(demod,Modes[mindex].shift);
+  strlcpy(demod->demod_name, Modes[mindex].demod_name, sizeof(demod->demod_name));
+
 
   if(defaults || isnan(demod->low) || isnan(demod->high)){
     demod->low = Modes[mindex].low;
     demod->high = Modes[mindex].high;
+  }
+
+  if(defaults || isnan(demod->shift)){
+    if(demod->shift != Modes[mindex].shift){
+      // Adjust tuning for change in frequency shift
+      set_freq(demod,get_freq(demod) + Modes[mindex].shift - demod->shift,NAN);
+    }
+    set_shift(demod,Modes[mindex].shift);
   }
   // Ensure low < high
   if(demod->high < demod->low){
@@ -370,12 +378,16 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
     demod->high = tmp;
   }
   demod->flags = Modes[mindex].flags;
+  demod->attack_rate = Modes[mindex].attack_rate;
+  demod->recovery_rate = Modes[mindex].recovery_rate;
+  demod->hangtime = Modes[mindex].hangtime;
   
   // Suppress these in display unless they're used
   demod->snr = NAN;
   demod->pdeviation = NAN;
   demod->cphase = NAN;
   demod->plfreq = NAN;
+  demod->spare = NAN;
 
   // Wait until we know the sample rate
   pthread_mutex_lock(&demod->status_mutex);
@@ -385,6 +397,7 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
 
   // Load calibration file
   loadcal(demod);
+
 
   double lo2 = demod->second_LO;
   // Might now be out of range because of change in filter passband
