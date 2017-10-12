@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.91 2017/10/09 20:01:49 karn Exp karn $
+// $Id: display.c,v 1.92 2017/10/10 12:27:46 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -395,7 +395,7 @@ void *display(void *arg){
       mvwprintw(demodulator,row++,1,"phase%+14.1f deg",demod->cphase*DEGPRA);
 
     if(!isnan(demod->plfreq))
-      mvwprintw(demodulator,row++,1,"tone%14.1f Hz",demod->plfreq);
+      mvwprintw(demodulator,row++,1,"tone%15.1f Hz",demod->plfreq);
 
     if(!isnan(demod->spare))
       mvwprintw(demodulator,row++,1,"spare%14.1f   ",demod->spare);      
