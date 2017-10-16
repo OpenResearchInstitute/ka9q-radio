@@ -33,7 +33,8 @@ void *demod_am(void *arg){
   float const recovery_factor = dB2voltage(demod->recovery_rate * samptime); // AGC ramp-up rate/sample
   float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
   int const hangmax = demod->hangtime / samptime; // samples before AGC increase
-  demod->gain = dB2voltage(40.); 
+  if(isnan(demod->gain))
+    demod->gain = dB2voltage(20.);
 
   // DC removal from envelope-detected AM and coherent AM
   float DC_filter = 0;

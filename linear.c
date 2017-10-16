@@ -40,7 +40,8 @@ void *demod_linear(void *arg){
   float const recovery_factor = dB2voltage(demod->recovery_rate * samptime); // AGC ramp-up rate/sample
   float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
   int const hangmax = demod->hangtime / samptime; // samples before AGC increase
-  demod->gain = dB2voltage(35.0); // initial setting
+  if(isnan(demod->gain))
+    demod->gain = dB2voltage(20.0); // initial setting - a little quiet to avoid blasting
 
   // Coherent mode parameters
   float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
@@ -302,13 +303,10 @@ void *demod_linear(void *arg){
     demod->bb_power = (signal + noise) / filter->olen;
     // PLL loop SNR
     demod->snr = crealf(DC_filter) * crealf(DC_filter) / (cimagf(DC_filter) * cimagf(DC_filter));
-#if 0
-
     if(noise != 0 && (demod->flags & COHERENT))
       demod->snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
     else
       demod->snr = NAN;
-#endif
 
   } // terminate
   if(fftinbuf)
