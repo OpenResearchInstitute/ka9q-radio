@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.93 2017/10/12 21:32:12 karn Exp karn $
+// $Id: display.c,v 1.94 2017/10/16 13:22:29 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -272,6 +272,8 @@ void *display(void *arg){
     wclrtobot(info);
     row = 1;
 
+    mvwprintw(info,row++,1,"Receiver profile: %s",demod->mode);
+
     if(demod->doppler_command)
       mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
     struct bandplan const *bp_low,*bp_high;
@@ -360,24 +362,7 @@ void *display(void *arg){
     wmove(demodulator,0,0);
     wclrtobot(demodulator);
     row = 1;
-    mvwprintw(demodulator,row++,1,"Profile %15s",demod->mode);
-    mvwprintw(demodulator,row++,1,"Demod   %15s",demod->demod_name);
-    if(demod->flags & ENVELOPE)
-      mvwprintw(demodulator,row++,1,"envelope detection"); // arguably not linear
-    if(demod->flags & CAL)
-       mvwprintw(demodulator,row++,1,"%23s","calibrate"); 
-    if(demod->flags & CONJ) 
-      mvwprintw(demodulator,row++,1,"%23s","ISB"); 
-    if(demod->flags & FLAT) 
-      mvwprintw(demodulator,row++,1,"%23s","flat audio"); 
-    if(demod->flags & SQUARE) 
-      mvwprintw(demodulator,row++,1,"%23s","squaring loop"); 
-    if(demod->flags & COHERENT) 
-      mvwprintw(demodulator,row++,1,"%23s","carrier track"); 
-    if(demod->flags & MONO) 
-      mvwprintw(demodulator,row++,1,"%23s","mono"); 
-    else 
-      mvwprintw(demodulator,row++,1,"%23s","stereo");
+
 
     // Display these only if they're in use by the current mode
     if(!isnan(demod->snr))
@@ -400,9 +385,27 @@ void *display(void *arg){
     if(!isnan(demod->spare))
       mvwprintw(demodulator,row++,1,"spare%14.1f   ",demod->spare);      
 
+    wmove(demodulator,row,0);
+    if(demod->flags & ENVELOPE)
+      wprintw(demodulator,"Envelope"); // arguably not linear
+    if(demod->flags & CAL)
+      wprintw(demodulator,"%s"," Cal"); 
+    if(demod->flags & CONJ) 
+      wprintw(demodulator,"%s"," ISB"); 
+    if(demod->flags & FLAT) 
+      wprintw(demodulator,"%s"," Flat"); 
+    if(demod->flags & SQUARE) 
+      wprintw(demodulator,"%s"," Squaring"); 
+    if(demod->flags & COHERENT) 
+      wprintw(demodulator,"%s"," PLL"); 
+    if(demod->flags & MONO) 
+      wprintw(demodulator,"%s"," Mono"); 
+    else 
+      wprintw(demodulator,"%s"," Stereo");
+
 
     box(demodulator,0,0);
-    mvwprintw(demodulator,0,5,"Demodulator");
+    mvwprintw(demodulator,0,5,"%s demodulator",demod->demod_name);
     wnoutrefresh(demodulator);
     
 
