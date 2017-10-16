@@ -1,4 +1,4 @@
-// $Id$
+// $Id: am.c,v 1.26 2017/10/10 12:19:32 karn Exp karn $
 
 // New AM demodulator, stripped from linear.c
 // Oct 9 2017 Phil Karn, KA9Q
@@ -33,6 +33,7 @@ void *demod_am(void *arg){
   float const recovery_factor = dB2voltage(demod->recovery_rate * samptime); // AGC ramp-up rate/sample
   float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
   int const hangmax = demod->hangtime / samptime; // samples before AGC increase
+  demod->gain = dB2voltage(40.); 
 
   // DC removal from envelope-detected AM and coherent AM
   float DC_filter = 0;
@@ -73,7 +74,9 @@ void *demod_am(void *arg){
       // DC_filter will always be positive since sqrtf() is positive
       DC_filter += DC_filter_coeff * (samp - DC_filter);
       
-      if(demod->gain * DC_filter > demod->headroom){
+      if(isnan(demod->gain)){
+	demod->gain = demod->headroom / DC_filter;
+      } else if(demod->gain * DC_filter > demod->headroom){
 	demod->gain *= attack_factor;
 	hangcount = hangmax;
       } else if(hangcount != 0){

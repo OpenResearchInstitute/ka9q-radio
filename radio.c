@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.70 2017/09/28 22:04:27 karn Exp karn $
+// $Id: radio.c,v 1.71 2017/10/10 12:20:51 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -294,38 +294,34 @@ int LO2_in_range(struct demod * const demod,double const f,int const avoid_alias
   }
 }
 
+// The next two frequency setting functions depend on the sample rate
+// If it's not known (0) don't try to set the phasor step; let the input routine call us again
+
 // Set second local oscillator (the one in software)
 // the caller must avoid aliasing, e.g., with LO2_in_range()
 double set_second_LO(struct demod * const demod,double const second_LO){
   if(demod == NULL)
     return NAN;
 
-  // Wait until the sample rate is known
-  pthread_mutex_lock(&demod->status_mutex);
-  while(demod->samprate == 0)
-    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
-  pthread_mutex_unlock(&demod->status_mutex);
-    
-  pthread_mutex_lock(&demod->second_LO_mutex);
   if(!is_phasor_init(demod->second_LO_phasor)) // Initialized?
     demod->second_LO_phasor = 1;
 
   // When setting frequencies, assume TCXO also drives sample clock, so use same calibration
   // In case sample rate isn't set yet, just remember the frequency but don't divide by zero
-  demod->second_LO_phasor_step = csincos(2*M_PI*second_LO/demod->samprate);
+  if(demod->samprate != 0)
+    demod->second_LO_phasor_step = csincos(2*M_PI*second_LO/demod->samprate);
+
   demod->second_LO = second_LO;
-  pthread_mutex_unlock(&demod->second_LO_mutex);
   return second_LO;
 }
 
 // Set audio shift after downconversion and detection (linear modes only: SSB, IQ, DSB)
 double set_shift(struct demod * const demod,double const shift){
-  pthread_mutex_lock(&demod->shift_mutex);
   demod->shift = shift;
-  demod->shift_phasor_step = csincos(2*M_PI*shift*demod->decimate/demod->samprate);
+  if(demod->samprate != 0)
+    demod->shift_phasor_step = csincos(2*M_PI*shift*demod->decimate/demod->samprate);
   if(!is_phasor_init(demod->shift_phasor))
     demod->shift_phasor = 1;
-  pthread_mutex_unlock(&demod->shift_mutex);
   return shift;
 }
 
@@ -364,13 +360,6 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
     demod->high = Modes[mindex].high;
   }
 
-  if(defaults || isnan(demod->shift)){
-    if(demod->shift != Modes[mindex].shift){
-      // Adjust tuning for change in frequency shift
-      set_freq(demod,get_freq(demod) + Modes[mindex].shift - demod->shift,NAN);
-    }
-    set_shift(demod,Modes[mindex].shift);
-  }
   // Ensure low < high
   if(demod->high < demod->low){
     float const tmp = demod->low;
@@ -394,6 +383,14 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   while(demod->samprate == 0)
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
   pthread_mutex_unlock(&demod->status_mutex);
+
+  if(defaults || isnan(demod->shift)){
+    if(demod->shift != Modes[mindex].shift){
+      // Adjust tuning for change in frequency shift
+      set_freq(demod,get_freq(demod) + Modes[mindex].shift - demod->shift,NAN);
+    }
+    set_shift(demod,Modes[mindex].shift);
+  }
 
   // Load calibration file
   loadcal(demod);

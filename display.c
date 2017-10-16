@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.92 2017/10/10 12:27:46 karn Exp karn $
+// $Id: display.c,v 1.93 2017/10/12 21:32:12 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -199,8 +199,8 @@ void *display(void *arg){
   int row = 0;
   int col = 0;
 
-  WINDOW * const tuning = newwin(8,34,row,col);    // Frequency information
-  col += 34;
+  WINDOW * const tuning = newwin(8,35,row,col);    // Frequency information
+  col += 35;
   WINDOW * const info = newwin(8,42,row,col);     // Band information
 
   col = 0;

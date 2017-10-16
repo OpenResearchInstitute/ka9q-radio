@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.7 2017/10/01 23:25:32 karn Exp karn $
+// $Id: linear.c,v 1.8 2017/10/10 12:21:56 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -40,6 +40,7 @@ void *demod_linear(void *arg){
   float const recovery_factor = dB2voltage(demod->recovery_rate * samptime); // AGC ramp-up rate/sample
   float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
   int const hangmax = demod->hangtime / samptime; // samples before AGC increase
+  demod->gain = dB2voltage(35.0); // initial setting
 
   // Coherent mode parameters
   float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
@@ -242,7 +243,9 @@ void *demod_linear(void *arg){
 	// Remove carrier DC, use for AGC
 	// DC_filter will always be positive since sqrtf() is positive
 	DC_filter += DC_filter_coeff * (samp - crealf(DC_filter));
-	if(demod->gain * crealf(DC_filter) > demod->headroom){
+	if(isnan(demod->gain)){
+	  demod->gain = demod->headroom / crealf(DC_filter);
+	} else if(demod->gain * crealf(DC_filter) > demod->headroom){
 	  demod->gain *= attack_factor;
 	  hangcount = hangmax;
 	} else if(hangcount != 0){
@@ -259,15 +262,13 @@ void *demod_linear(void *arg){
 	signal += crealf(filter->output.c[n]) * crealf(filter->output.c[n]);
 	noise += cimagf(filter->output.c[n]) * cimagf(filter->output.c[n]);
 	float amplitude;
-	if((demod->flags & COHERENT)){
-	  // Drive AGC and loop lock indicator from carrier
-	  DC_filter += DC_filter_coeff * (filter->output.c[n] - DC_filter);
-	  amplitude = cabsf(DC_filter);
-	} else
-	  amplitude = cabsf(filter->output.c[n]);
+	DC_filter += DC_filter_coeff * (filter->output.c[n] - DC_filter);
+	amplitude = cabsf(filter->output.c[n]);
 	
 	// AGC
-	if(amplitude * demod->gain > demod->headroom){
+	if(isnan(demod->gain)){
+	  demod->gain = demod->headroom / amplitude; // Startup
+	} else if(amplitude * demod->gain > demod->headroom){
 	  demod->gain *= attack_factor;
 	  hangcount = hangmax;
 	} else if(hangcount != 0){
