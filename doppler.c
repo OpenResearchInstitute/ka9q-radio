@@ -1,4 +1,4 @@
-// $Id: doppler.c,v 1.3 2017/09/28 22:01:18 karn Exp karn $
+// $Id: doppler.c,v 1.4 2017/10/01 23:24:40 karn Exp karn $
 // Real-time doppler steering
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -58,7 +58,7 @@ void *doppler(void *arg){
       gettimeofday(&tv,NULL);
       rt = tv.tv_sec + tv.tv_usec * 1e-6;
       if(t < rt){
-	fprintf(stderr,"skip %lf\n",t);
+	//	fprintf(stderr,"skip %lf\n",t);
 	continue;
       }
       if(t > rt){
