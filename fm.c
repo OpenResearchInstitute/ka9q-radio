@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.41 2017/09/26 09:32:09 karn Exp karn $
+// $Id: fm.c,v 1.42 2017/10/10 12:26:41 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -26,6 +26,7 @@ void *demod_fm(void *arg){
   demod->pdeviation = 0;
   demod->foffset = 0;
   demod->flags |= MONO; // Only mono for now
+  demod->gain = NAN; // We don't use this, turn it off on the display
 
   // Create predetection filter, leaving response momentarily empty
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
@@ -113,6 +114,8 @@ void *demod_fm(void *arg){
     avg_amp /= filter->olen;         // Average magnitude
     float const fm_variance = demod->bb_power - avg_amp*avg_amp;
     demod->snr = avg_amp*avg_amp/(2*fm_variance) - 1;
+    if(demod->snr < 0)
+      demod->snr = 0; // Force to -infinity dB
 
     if(demod->snr > 2){
       // Threshold extension by comparing sample amplitude to threshold
@@ -217,6 +220,13 @@ void *demod_fm(void *arg){
     delete_filter(afilter);
   delete_filter(filter);
   demod->filter = NULL;
+
+  // Clear these to keep them from showing up with other demods
+  demod->foffset = NAN;
+  demod->pdeviation = NAN;
+  demod->plfreq = NAN;
+  demod->flags = 0;
+
   pthread_exit(NULL);
 }
 
