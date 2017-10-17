@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.8 2017/10/10 12:21:56 karn Exp karn $
+// $Id: linear.c,v 1.10 2017/10/16 23:28:22 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -75,7 +75,7 @@ void *demod_linear(void *arg){
   complex float DC_filter = 0;
   float const DC_filter_coeff = .0001;
 
-  demod->snr = -INFINITY;
+  demod->snr = 0;
 
   // Detection filter
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
@@ -303,9 +303,11 @@ void *demod_linear(void *arg){
     demod->bb_power = (signal + noise) / filter->olen;
     // PLL loop SNR
     demod->snr = crealf(DC_filter) * crealf(DC_filter) / (cimagf(DC_filter) * cimagf(DC_filter));
-    if(noise != 0 && (demod->flags & COHERENT))
+    if(noise != 0 && (demod->flags & COHERENT)){
       demod->snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
-    else
+      if(demod->snr < 0)
+	demod->snr = 0; // Clamp to 0 so it'll show as -Inf dB
+    } else
       demod->snr = NAN;
 
   } // terminate
