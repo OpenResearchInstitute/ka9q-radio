@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.71 2017/10/10 12:20:51 karn Exp karn $
+// $Id: radio.c,v 1.72 2017/10/16 13:22:29 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -260,7 +260,7 @@ double set_first_LO(struct demod * const demod,double const first_LO){
 	// If we know the sender, send it a tuning request
 	struct sockaddr_in sdraddr;
 	memcpy(&sdraddr,&demod->input_source_address,sizeof(sdraddr));
-	sdraddr.sin_port = htons(CTLPORT);
+	sdraddr.sin_port = htons(ntohs(sdraddr.sin_port)+1);
 	if(sendto(demod->ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&sdraddr,sizeof(sdraddr)) == -1)
 	  perror("sendto control socket");
 	if(pthread_cond_timedwait(&demod->status_cond,&demod->status_mutex,&ts) == -1)

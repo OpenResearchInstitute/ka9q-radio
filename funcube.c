@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.21 2017/08/12 08:49:40 karn Exp karn $
+// $Id: funcube.c,v 1.22 2017/09/19 12:58:12 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -106,16 +106,23 @@ int main(int argc,char *argv[]){
   // Set up RTP output socket
   Rtp_sock = setup_mcast(dest,1);
   if(Rtp_sock == -1){
-    fprintf(stderr,"Can't create multicast socket\n");
+    perror("Can't create multicast socket");
     exit(1);
   }
     
   // Set up control socket
   Ctl_sock = socket(AF_INET,SOCK_DGRAM,0);
 
+  // bind control socket to next sequential port after our multicast source port
+  struct sockaddr_in ctl_sockaddr;
+  socklen_t siz = sizeof(ctl_sockaddr);
+  if(getsockname(Rtp_sock,&ctl_sockaddr,&siz) == -1){
+    perror("getsockname on ctl port");
+    exit(1);
+  }
   struct sockaddr_in locsock;
   locsock.sin_family = AF_INET;
-  locsock.sin_port = htons(CTLPORT);
+  locsock.sin_port = htons(ntohs(ctl_sockaddr.sin_port)+1);
   locsock.sin_addr.s_addr = INADDR_ANY;
   bind(Ctl_sock,&locsock,sizeof(locsock));
 
