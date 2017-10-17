@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.72 2017/10/16 13:22:29 karn Exp karn $
+// $Id: radio.c,v 1.73 2017/10/17 03:06:10 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -462,7 +462,6 @@ int spindown(struct demod * const demod,complex float const * const data){
 // Then recompute the average, tossing bins > 3 dB above the previous average
 // Hopefully this will get rid of any signals from the noise estimate
 float const compute_n0(struct demod const * const demod){
-  assert(demod != NULL  && demod->filter != NULL);
   if(demod == NULL || demod->filter == NULL)
     return NAN;
   

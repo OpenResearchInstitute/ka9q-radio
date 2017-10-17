@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.26 2017/10/10 12:19:32 karn Exp karn $
+// $Id: am.c,v 1.28 2017/10/16 23:28:22 karn Exp karn $
 
 // New AM demodulator, stripped from linear.c
 // Oct 9 2017 Phil Karn, KA9Q
@@ -42,7 +42,7 @@ void *demod_am(void *arg){
 
   demod->flags |= MONO; // Implies mono
 
-  demod->snr = -INFINITY;
+  demod->snr = -INFINITY; // Not used
 
   // Detection filter
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
