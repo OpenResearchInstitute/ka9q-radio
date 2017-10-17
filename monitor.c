@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.21 2017/09/28 22:02:37 karn Exp karn $
+// $Id: monitor.c,v 1.22 2017/10/09 20:02:23 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -18,6 +18,7 @@
 #include <portaudio.h>
 #include <ncurses.h>
 #include <locale.h>
+#include <errno.h>
 
 #include "rtp.h"
 #include "dsp.h"
@@ -70,6 +71,7 @@ struct audio {
 
   unsigned long packets;    // RTP packets for this session
   unsigned long drops;      // Apparent rtp packet drops
+  unsigned long empties;    // RTP but no data
   int age;                  // Display cycles since last active
   unsigned long underruns;  // Callback count of underruns (stereo samples) replaced with silence
   int hw_delay;             // Estimated playout delay in samples
@@ -91,7 +93,7 @@ int write_is_ahead(int write_ptr,int read_ptr);
 int main(int argc,char * const argv[]){
   // Try to improve our priority
   int prio = getpriority(PRIO_PROCESS,0);
-  prio = setpriority(PRIO_PROCESS,0,prio - 5);
+  prio = setpriority(PRIO_PROCESS,0,prio - 20);
 
   // Drop root if we have it
   seteuid(getuid());
@@ -231,9 +233,17 @@ int main(int argc,char * const argv[]){
 
 
   while(1){
-    ssize_t size;
+    int size;
 
-    if((size = recvmsg(Input_fd,&message,0)) < sizeof(rtp)){
+    size = recvmsg(Input_fd,&message,0);
+    if(size == -1){
+      if(errno != EINTR){ // Happens routinely
+	perror("recvmsg");
+	usleep(1000);
+      }
+      continue;
+    }
+    if(size < sizeof(rtp)){
       usleep(500); // Avoid tight loop
       continue; // Too small to be valid RTP
     }
@@ -267,11 +277,14 @@ int main(int argc,char * const argv[]){
       sp->drops += abs(drop);
     }
     sp->eseq = (rtp.seq + 1) & 0xffff;
-    size -= sizeof(rtp); // Bytes in payload
     sp->packets++;
-
-    int samples = 0;
     sp->type = rtp.mpt;
+    size -= sizeof(rtp); // Bytes in payload
+    if(size <= 0){
+      sp->empties++;
+      goto endloop; // empty?!
+    }
+    int samples = 0;
 
     switch(rtp.mpt){
     case 10: // Stereo
@@ -323,7 +336,6 @@ int main(int argc,char * const argv[]){
       sp->opus_bandwidth = opus_packet_get_bandwidth((unsigned char *)data);
       int nb_frames = opus_packet_get_nb_frames((unsigned char *)data,size);
       sp->opus_frame_size = nb_frames * opus_packet_get_samples_per_frame((unsigned char *)data,Samprate);
-
       {
 	float outsamps[2*Bufsize];
 	if(drop != 0){
@@ -351,9 +363,9 @@ int main(int argc,char * const argv[]){
       }
       break;
     default:
+      samples = 0;
       break; // ignore
     }
-
     sp->etime = rtp.timestamp + samples;
 
   endloop:;
