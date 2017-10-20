@@ -227,8 +227,9 @@ void *demod_linear(void *arg){
 	// Apply this to calibration estimate below
 	calibrate_offset += .01 * (feedback + delta_f - calibrate_offset);
       }
-      demod->foffset += .1 * (feedback + delta_f - demod->foffset);
-    }
+      demod->foffset += 0.1 * (feedback + delta_f - demod->foffset);
+    } else
+      demod->foffset = NAN; // Not used in non-coherent modes
     
     if((demod->flags & CAL) && pll_lock){
       // In calibrate mode, apply and clear the current measured offset
