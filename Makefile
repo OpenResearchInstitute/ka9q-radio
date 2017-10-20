@@ -1,9 +1,8 @@
-# $Id: Makefile,v 1.70 2017/09/28 22:07:00 karn Exp karn $
+# $Id: Makefile,v 1.71 2017/10/10 12:29:34 karn Exp karn $
 #CC=g++
 INCLUDES=
-#COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -34,7 +33,7 @@ modulate: modulate.o misc.o filter.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread
 
 monitor: monitor.o multicast.o
-	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lncurses -lm -lpthread
+<	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lncurses -lm -lpthread
 
 radio: main.o radio.o doppler.o fm.o am.o linear.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lopus -lbsd -lportaudio -lm -lpthread
