@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.10 2017/10/16 23:28:22 karn Exp karn $
+// $Id: linear.c,v 1.11 2017/10/17 07:04:07 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -20,9 +20,6 @@
 #include "filter.h"
 #include "radio.h"
 #include "audio.h"
-
-// Configurable parameters
-
 
 
 void *demod_linear(void *arg){
@@ -47,8 +44,6 @@ void *demod_linear(void *arg){
   float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
   int   const fftsize = 1 << 16;   // search FFT bin size = 64K = 1.37 sec @ 48 kHz
   float const damping = M_SQRT1_2; // PLL loop damping factor; 1/sqrt(2) is "critical" damping
-  float const searchhigh = 300;    // FFT search and PLL sweep limits
-  float const searchlow = -300;
   float const lock_time = 1;       // hysteresis parameter: 2*locktime seconds of good signal -> lock, 2*locktime sec of bad signal -> unlock
   int   const fft_enable = 1;
 
@@ -57,6 +52,8 @@ void *demod_linear(void *arg){
   int   const lock_limit = round(lock_time / samptime);            // Stop sweeping after locked for this amount of time
   float const binsize = 1. / (fftsize * samptime);          // FFT bin size, Hz
   // FFT bin indices for search limits. Squaring doubles frequency, so double the search range
+  float const searchhigh = 300;    // FFT search limits, in Hz
+  float const searchlow =  -300;
   int   const lowlimit =  round(((demod->flags & SQUARE) ? 2 : 1) * searchlow / binsize);
   int   const highlimit = round(((demod->flags & SQUARE) ? 2 : 1) * searchhigh / binsize);
 
@@ -69,7 +66,8 @@ void *demod_linear(void *arg){
   float const integrator_gain = 1 / tau1;                  // 2pi
   float const tau2 = 2 * damping / natfreq;                // sqrt(2) / 2pi = 1/ (pi*sqrt(2))
   float const prop_gain = tau2 / tau1;                     // sqrt(2)/2
-  float const ramprate = demod->loop_bw * samptime / integrator_gain;   // sweep at one loop bw/sec
+  //  float const ramprate = demod->loop_bw * samptime / integrator_gain;   // sweep at one loop bw/sec
+  float const ramprate = 0; // temp disable
 
   // DC removal from envelope-detected AM and coherent AM
   complex float DC_filter = 0;
@@ -83,7 +81,7 @@ void *demod_linear(void *arg){
   demod->filter = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
-  // Search FFT
+  // Carrier search FFT
   complex float * fftinbuf = NULL;
   complex float *fftoutbuf = NULL;
   fftwf_plan fft_plan = NULL;
@@ -155,6 +153,7 @@ void *demod_linear(void *arg){
       if(!pll_lock){
 	if(fft_enable){
 	  // Run FFT, look for peak bin
+	  // Do this every time??
 	  fftwf_execute(fft_plan);
 	  
 	  // Search limited range of FFT buffer for peak energy
@@ -167,11 +166,15 @@ void *demod_linear(void *arg){
 	      maxbin = n;
 	    }
 	  }
-	  delta_f = binsize * maxbin; // cycles per second	
+	  double new_delta_f = binsize * maxbin;
 	  if(demod->flags & SQUARE)
-	    delta_f /= 2; // Squaring loop provides 2x frequency
+	    new_delta_f /= 2; // Squaring loop provides 2x frequency
 	  
-	  coarse_phasor_step = csincos(-phase_scale * delta_f);
+	  if(new_delta_f != delta_f){
+	    delta_f = new_delta_f;
+	    integrator = 0; // reset integrator
+	    coarse_phasor_step = csincos(-phase_scale * delta_f);
+	  }
 	}
 	if(ramp == 0) // not already sweeping
 	  ramp = ramprate;
@@ -201,9 +204,9 @@ void *demod_linear(void *arg){
 	  fine_phasor_step = csincosf(-phase_scale * feedback); 
 
 	// Acquisition frequency sweep
-	if((feedback >= searchhigh) && (ramp > 0))
+	if((feedback >= binsize) && (ramp > 0))
 	  ramp = -ramprate; // reached upward sweep limit, sweep down
-	else if((feedback <= searchlow) && (ramp < 0))
+	else if((feedback <= binsize) && (ramp < 0))
 	  ramp = ramprate;  // Reached downward sweep limit, sweep up
 	
 	if((demod->flags & CAL) && pll_lock){
@@ -221,6 +224,7 @@ void *demod_linear(void *arg){
       else
 	demod->cphase = cargf(accum);
       
+      // Renormalize
       fine_phasor /= cabsf(fine_phasor);
       coarse_phasor /= cabsf(coarse_phasor);
       if((demod->flags & CAL) && pll_lock){
