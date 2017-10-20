@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.96 2017/10/17 07:03:21 karn Exp karn $
+// $Id: display.c,v 1.97 2017/10/20 04:15:52 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -135,8 +135,8 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
       break; // First LO can't make steps < 1  Hz
     
     if(demod->frequency_lock){
-      // Keep frequency but lower LO2, which will increase LO1
-      double new_lo2 = demod->second_LO - tunestep;
+      // Keep frequency but move LO2 in opposite direction, which will move LO1
+      double new_lo2 = demod->second_LO + tunestep;
       if(LO2_in_range(demod,new_lo2,0))
 	set_freq(demod,get_freq(demod),new_lo2);
     } else {
@@ -319,12 +319,10 @@ void *display(void *arg){
     }
 #endif
     mvwprintw(tuning,row++,col,"%'19.3f Hz",-demod->second_LO);
-    {
-      double d = get_doppler(demod);
-      if(d != 0){
-	mvwprintw(tuning,row++,col,"%'19.3f Hz",d);
-	mvwprintw(tuning,row++,col,"%'19.3f Hz/s",get_doppler_rate(demod));
-      }
+    double dopp = get_doppler(demod);
+    if(dopp != 0){
+      mvwprintw(tuning,row++,col,"%'19.3f Hz",dopp);
+      mvwprintw(tuning,row++,col,"%'19.3f Hz/s",get_doppler_rate(demod));
     }
     // Write labels down left side
     row = 1;
@@ -333,8 +331,12 @@ void *display(void *arg){
     mvwprintw(tuning,row++,col,"Center");
     mvwprintw(tuning,row++,col,"First LO");
     mvwprintw(tuning,row++,col,"IF");
-    mvwprintw(tuning,row++,col,"Doppler");
-    mvwprintw(tuning,row++,col,"Dop rate");
+    if(dopp != 0){
+      mvwprintw(tuning,row++,col,"Doppler");
+      mvwprintw(tuning,row++,col,"Dop rate");
+    }
+    wmove(tuning,row,0);
+    wclrtobot(tuning);
 
     box(tuning,0,0);
     mvwprintw(tuning,0,15,"Tuning");
@@ -385,6 +387,8 @@ void *display(void *arg){
 	  wprintw(info,"Nov ");
       }
     }
+    wmove(info,row,0);
+    wclrtobot(info);
     box(info,0,0);
     mvwprintw(info,0,17,"Info");
     wnoutrefresh(info);
@@ -480,6 +484,7 @@ void *display(void *arg){
     if(demod->flags & CAL)
       wprintw(demodulator," Cal"); 
 
+    wclrtobot(demodulator);
     box(demodulator,0,0);
     mvwprintw(demodulator,0,5,"%s demodulator",demod->demod_name);
     wnoutrefresh(demodulator);
