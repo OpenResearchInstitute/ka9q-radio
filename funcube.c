@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.22 2017/09/19 12:58:12 karn Exp karn $
+// $Id: funcube.c,v 1.23 2017/10/17 03:06:10 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -68,6 +68,15 @@ int Rtp_sock; // Socket handle for sending real time stream *and* receiving comm
 int Ctl_sock;
 
 int main(int argc,char *argv[]){
+  // if we have root, up our priority and drop privileges
+  int prio = getpriority(PRIO_PROCESS,0);
+  prio = setpriority(PRIO_PROCESS,0,prio - 10);
+
+  // Quickly drop root if we have it
+  // The sooner we do this, the fewer options there are for abuse
+  seteuid(getuid());
+
+
   struct rtp_header rtp;
   char *dest = "239.1.2.1"; // Default for testing
 
