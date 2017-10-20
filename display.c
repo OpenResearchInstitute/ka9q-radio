@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.99 2017/10/20 18:08:39 karn Exp karn $
+// $Id: display.c,v 1.100 2017/10/20 21:25:12 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/time.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -180,6 +181,10 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
 // Uses the ancient ncurses text windowing library
 // Also services keyboard and tuning knob, if present
 void *display(void *arg){
+  // Drop priority back to normal; the display isn't as critical as the stuff handling signals
+  // (Remember Apollo 11's 1201/1202 alarms!)
+  setpriority(PRIO_PROCESS,0,0);
+
   pthread_setname("display");
   assert(arg != NULL);
   struct demod * const demod = arg;
@@ -541,15 +546,18 @@ void *display(void *arg){
     col = 1;
     extern int Delayed,Skips;
     wmove(network,0,0);
-    mvwprintw(network,row++,col,"Source %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
-    mvwprintw(network,row++,col,"IQ pkts %'llu; late %'d; skips %'d",demod->iq_packets,
+    mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
+    mvwprintw(network,row++,col,"IQ pkts: %'llu; late %'d; skips %'d",demod->iq_packets,
 	      Delayed,Skips);
     if(audio->filename != NULL)
-      mvwprintw(network,row++,col,"PCM stream %s",audio->filename);
+      mvwprintw(network,row++,col,"PCM stream: %s",audio->filename);
+
+    if(strlen(audio->localdev) > 0)
+      mvwprintw(network,row++,col,"Audio device: %s",audio->localdev);
 
     if(audio->opus_bitrate != 0 || audio->rtp_pcm != 0) 
       // Audio output dest address (usually multicast)
-      mvwprintw(network,row++,col,"Sink %s",audio->audio_mcast_address_text);
+      mvwprintw(network,row++,col,"Sink: %s",audio->audio_mcast_address_text);
 
     if(audio->opus_bitrate > 0)
       mvwprintw(network,row++,col,"Opus %.1fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
@@ -561,7 +569,7 @@ void *display(void *arg){
 		audio->audio_packets);
 
     box(network,0,0);
-    mvwaddstr(network,0,35,"Network");
+    mvwaddstr(network,0,35,"I/O");
     wnoutrefresh(network);
 
     // Highlight cursor for tuning step
