@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.23 2017/10/17 03:06:10 karn Exp karn $
+// $Id: funcube.c,v 1.24 2017/10/20 22:38:14 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -18,6 +18,8 @@
 #include <signal.h>
 #include <locale.h>
 #include <sys/select.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include "fcd.h"
 #include "sdr.h"
