@@ -33,7 +33,7 @@ modulate: modulate.o misc.o filter.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread
 
 monitor: monitor.o multicast.o
-<	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lncurses -lm -lpthread
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lncurses -lm -lpthread
 
 radio: main.o radio.o doppler.o fm.o am.o linear.o filter.o display.o modes.o audio.o multicast.o bandplan.o misc.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lopus -lbsd -lportaudio -lm -lpthread
