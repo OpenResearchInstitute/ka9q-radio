@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.88 2017/10/16 13:22:29 karn Exp karn $
+// $Id: main.c,v 1.89 2017/10/17 07:02:45 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -66,9 +66,10 @@ int IF_EXCLUDE = 16000; // Hardwired for UK Funcube Dongle Pro+, make this more 
 int main(int argc,char *argv[]){
   // if we have root, up our priority and drop privileges
   int prio = getpriority(PRIO_PROCESS,0);
-  prio = setpriority(PRIO_PROCESS,0,prio - 5);
+  prio = setpriority(PRIO_PROCESS,0,prio - 10);
 
-  // Drop root if we have it
+  // Quickly drop root if we have it
+  // The sooner we do this, the fewer options there are for abuse
   seteuid(getuid());
 
   // Set up program defaults
@@ -172,22 +173,37 @@ int main(int argc,char *argv[]){
       Audio.opus_bitrate = strtol(optarg,NULL,0);
       if(Audio.opus_bitrate < 1000)
 	Audio.opus_bitrate *= 1000;	// Interpret as kilobits/sec
+      // By default, disable local audio when outputting elsewhere
+      if(strlen(Audio.localdev) == 0)
+	strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
       break;
     case 'p':
       Audio.rtp_pcm = 1;
+      // By default, disable local audio when outputting elsewhere
+      if(strlen(Audio.localdev) == 0)
+	strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
       break;
     case 'q':
       Quiet++;  // Suppress display
       break;
-    case 'R':   // Set audio multicast address
-      if((strncmp(optarg,"/",1) == 0) || (strncmp(optarg,"./",2) == 0)){
+    case 'R':   // Set audio target (IP multicast address, local file or local command)
+      if(optarg[0] == '/' || (strncmp(optarg,"./",2) == 0)){
 	Audio.filename = optarg;
 	if((Audio.stream = fopen(Audio.filename,"w")) == NULL){
 	  fprintf(stderr,"Can't stream to %s\n",Audio.filename);
 	  exit(1);
 	}
+      } else if(optarg[0] == '|'){
+	Audio.filename = optarg;
+	if((Audio.stream = popen(Audio.filename+1,"w")) == NULL){
+	  fprintf(stderr,"Can't open pipe to %s\n",Audio.filename);
+	  exit(1);
+	}
       } else 
 	strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
+      // By default, disable local audio when outputting elsewhere
+      if(strlen(Audio.localdev) == 0)
+	strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
       break;
     case 's':
       {
