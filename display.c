@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.97 2017/10/20 04:15:52 karn Exp karn $
+// $Id: display.c,v 1.98 2017/10/20 07:14:06 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -74,7 +74,7 @@ void popup(const char *filename){
   int row = 1; // Start inside box
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
-    mvwprintw(pop,row++,1,line);
+    mvwaddstr(pop,row++,1,line);
   }
   fclose(fp);
   wnoutrefresh(pop);
@@ -92,7 +92,7 @@ void popup(const char *filename){
 void getentry(char const *prompt,char *response,int len){
   WINDOW *pwin = newwin(5,90,15,0);
   box(pwin,0,0);
-  mvwprintw(pwin,1,1,prompt);
+  mvwaddstr(pwin,1,1,prompt);
   wrefresh(pwin);
   echo();
   timeout(-1);
@@ -168,10 +168,10 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     set_shift(demod,demod->shift + tunestep);
     break;
   case 7: // Kaiser window beta parameter for filter
-    if(demod->kaiser_beta + tunestep >= 0.0){
-      demod->kaiser_beta += tunestep;
-      set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
-    }
+    demod->kaiser_beta += tunestep;
+    if(demod->kaiser_beta < 0)
+      demod->kaiser_beta = 0;
+    set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
   }
 }
@@ -295,17 +295,22 @@ void *display(void *arg){
     // using the keyboard or tuning knob, so be careful with formatting
     wmove(tuning,0,0);
     int row = 1;
-    int col = 10;
-    mvwprintw(tuning,row,col,"%'19.3f Hz",get_freq(demod));
+    int col = 1;
+    mvwprintw(tuning,row,col,"%'28.3f Hz",get_freq(demod));
+    mvwaddstr(tuning,row,col,"Carrier");
 
     if(demod->frequency_lock)
       mvwchgat(tuning,row,col,100,A_UNDERLINE,0,NULL);
-
     row++;
-    mvwprintw(tuning,row++,col,"%'19.3f Hz",get_freq(demod) + (demod->high + demod->low)/2);
+
+    mvwprintw(tuning,row,col,"%'28.3f Hz",get_freq(demod) + (demod->high + demod->low)/2);
+    mvwaddstr(tuning,row++,col,"Center");
+
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
-    mvwprintw(tuning,row++,col,"%'19.3f Hz",get_first_LO(demod));
+    mvwprintw(tuning,row,col,"%'28.3f Hz",get_first_LO(demod));
+    mvwaddstr(tuning,row++,col,"First LO");
+
 #if 0
     if(!LO2_in_range(demod,demod->second_LO,1)){
       // LO2 is near its edges where signals from the opposite edge
@@ -318,28 +323,21 @@ void *display(void *arg){
       wprintw(tuning," alias %'.3f Hz",alias);
     }
 #endif
-    mvwprintw(tuning,row++,col,"%'19.3f Hz",-demod->second_LO);
+    mvwprintw(tuning,row,col,"%'28.3f Hz",-demod->second_LO);
+    mvwaddstr(tuning,row++,col,"IF");
+
     double dopp = get_doppler(demod);
     if(dopp != 0){
-      mvwprintw(tuning,row++,col,"%'19.3f Hz",dopp);
-      mvwprintw(tuning,row++,col,"%'19.3f Hz/s",get_doppler_rate(demod));
-    }
-    // Write labels down left side
-    row = 1;
-    col = 1;
-    mvwprintw(tuning,row++,col,"Carrier");
-    mvwprintw(tuning,row++,col,"Center");
-    mvwprintw(tuning,row++,col,"First LO");
-    mvwprintw(tuning,row++,col,"IF");
-    if(dopp != 0){
-      mvwprintw(tuning,row++,col,"Doppler");
-      mvwprintw(tuning,row++,col,"Dop rate");
+      mvwprintw(tuning,row,col,"%'28.3f Hz",dopp);
+      mvwaddstr(tuning,row++,col,"Doppler");
+      mvwprintw(tuning,row,col,"%'28.3f Hz/s",get_doppler_rate(demod));
+      mvwaddstr(tuning,row++,col,"Dop rate");
     }
     wmove(tuning,row,0);
     wclrtobot(tuning);
 
     box(tuning,0,0);
-    mvwprintw(tuning,0,15,"Tuning");
+    mvwaddstr(tuning,0,15,"Tuning");
     wnoutrefresh(tuning);
 
     // Display ham band emission data, if available
@@ -363,67 +361,63 @@ void *display(void *arg){
       mvwprintw(info,row++,1,"Band: %s",bp_low->name);
 
       if(r.modes){
-	mvwprintw(info,row++,1,"Emissions: ");
+	mvwaddstr(info,row++,1,"Emissions: ");
 	if(r.modes & CW)
-	  wprintw(info,"CW ");
+	  waddstr(info,"CW ");
 	if(r.modes & DATA)
-	  wprintw(info,"Data ");
+	  waddstr(info,"Data ");
 	if(r.modes & VOICE)
-	  wprintw(info,"Voice ");
+	  waddstr(info,"Voice ");
 	if(r.modes & IMAGE)
-	  wprintw(info,"Image");
+	  waddstr(info,"Image");
       }
+      wclrtoeol(info);
       if(r.classes){
-	mvwprintw(info,row++,1,"Privs: ");
+	mvwaddstr(info,row++,1,"Privs: ");
 	if(r.classes & EXTRA_CLASS)
-	  wprintw(info,"Extra ");
+	  waddstr(info,"Extra ");
 	if(r.classes & ADVANCED_CLASS)
-	  wprintw(info,"Adv ");
+	  waddstr(info,"Adv ");
 	if(r.classes & GENERAL_CLASS)
-	  wprintw(info,"Gen ");
+	  waddstr(info,"Gen ");
 	if(r.classes & TECHNICIAN_CLASS)
-	  wprintw(info,"Tech ");
+	  waddstr(info,"Tech ");
 	if(r.classes & NOVICE_CLASS)
-	  wprintw(info,"Nov ");
+	  waddstr(info,"Nov ");
       }
     }
-    wmove(info,row,0);
     wclrtobot(info);
     box(info,0,0);
-    mvwprintw(info,0,17,"Info");
+    mvwaddstr(info,0,17,"Info");
     wnoutrefresh(info);
 
     int const N = demod->L + demod->M - 1;
     // Filter window values
     row = 1;
-    col = 8;
-    mvwprintw(filtering,row++,col,"%'+10.3f Hz",demod->low);
-    mvwprintw(filtering,row++,col,"%'+10.3f Hz",demod->high);
-    mvwprintw(filtering,row++,col,"%'+10.3f Hz",demod->shift);
-    mvwprintw(filtering,row++,col,"%'10.3f",demod->kaiser_beta);
-    mvwprintw(filtering,row++,col,"%'10d",demod->L);
-    mvwprintw(filtering,row++,col,"%'10d",demod->M);
-    mvwprintw(filtering,row++,col,"%'10.3f Hz",demod->samprate / N);
-    mvwprintw(filtering,row++,col,"%'10.3f s",(N - (demod->M - 1)/2)/demod->samprate);
-    mvwprintw(filtering,row++,col,"%10d",demod->interpolate);
-    mvwprintw(filtering,row++,col,"%10d",demod->decimate);
-
-    // Filter window labels
-    row = 1;
     col = 1;
-    mvwprintw(filtering,row++,col,"Low");
-    mvwprintw(filtering,row++,col,"High");    
-    mvwprintw(filtering,row++,col,"Shift");
-    mvwprintw(filtering,row++,col,"Beta");    
-    mvwprintw(filtering,row++,col,"Blocksize");
-    mvwprintw(filtering,row++,col,"FIR");
-    mvwprintw(filtering,row++,col,"Freq bin");
-    mvwprintw(filtering,row++,col,"Delay");
-    mvwprintw(filtering,row++,col,"Interpolate");
-    mvwprintw(filtering,row++,col,"Decimate");
+    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->low);
+    mvwaddstr(filtering,row++,col,"Low");
+    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->high);
+    mvwaddstr(filtering,row++,col,"High");    
+    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->shift);
+    mvwaddstr(filtering,row++,col,"Shift");
+    mvwprintw(filtering,row,col,"%'17.3f",demod->kaiser_beta);
+    mvwaddstr(filtering,row++,col,"Beta");    
+    mvwprintw(filtering,row,col,"%'17d",demod->L);
+    mvwaddstr(filtering,row++,col,"Blocksize");
+    mvwprintw(filtering,row,col,"%'17d",demod->M);
+    mvwaddstr(filtering,row++,col,"FIR");
+    mvwprintw(filtering,row,col,"%'17.3f Hz",demod->samprate / N);
+    mvwaddstr(filtering,row++,col,"Freq bin");
+    mvwprintw(filtering,row,col,"%'17.3f s",(N - (demod->M - 1)/2)/demod->samprate);
+    mvwaddstr(filtering,row++,col,"Delay");
+    mvwprintw(filtering,row,col,"%17d",demod->interpolate);
+    mvwaddstr(filtering,row++,col,"Interpolate");
+    mvwprintw(filtering,row,col,"%17d",demod->decimate);
+    mvwaddstr(filtering,row++,col,"Decimate");
 
     box(filtering,0,0);
-    mvwprintw(filtering,0,6,"Filtering");
+    mvwaddstr(filtering,0,6,"Filtering");
     wnoutrefresh(filtering);
 
     // Signal data window
@@ -435,39 +429,58 @@ void *display(void *arg){
       sn0 = 0; // Force to 0 so it'll show as -Inf dB
 
     row = 1;
-    mvwprintw(sig,row++,1,"IF%13.1f dBFS",power2dB(demod->if_power));
-    mvwprintw(sig,row++,1,"Baseband%7.1f dBFS",power2dB(demod->bb_power));
-    mvwprintw(sig,row++,1,"N0      %7.1f dBFS/Hz",power2dB(demod->n0));
-    mvwprintw(sig,row++,1,"S/N0    %7.1f dBHz",10*log10f(sn0));
-    mvwprintw(sig,row++,1,"NBW     %7.1f dBHz",10*log10f(bw));
-    mvwprintw(sig,row++,1,"SNR     %7.1f dB",10*log10f(sn0/bw));
+    col = 1;
+    mvwprintw(sig,row,col,"%15.1f dBFS",power2dB(demod->if_power));
+    mvwaddstr(sig,row++,col,"IF");
+    mvwprintw(sig,row,col,"%15.1f dBFS",power2dB(demod->bb_power));
+    mvwaddstr(sig,row++,col,"Baseband");
+    mvwprintw(sig,row,col,"%15.1f dBFS/Hz",power2dB(demod->n0));
+    mvwaddstr(sig,row++,col,"N0");
+    mvwprintw(sig,row,col,"%15.1f dBHz",10*log10f(sn0));
+    mvwaddstr(sig,row++,col,"S/N0");
+    mvwprintw(sig,row,col,"%15.1f dBHz",10*log10f(bw));
+    mvwaddstr(sig,row++,col,"NBW");
+    mvwprintw(sig,row,col,"%15.1f dB",10*log10f(sn0/bw));
+    mvwaddstr(sig,row++,col,"SNR");
     box(sig,0,0);
-    mvwprintw(sig,0,9,"Signal");
+    mvwaddstr(sig,0,9,"Signal");
     wnoutrefresh(sig);
 
     // Demodulator info
+    wmove(demodulator,0,0);
+    wclrtobot(demodulator);    
     row = 1;
+    int rcol = 9;
+    int lcol = 1;
     // Display these only if they're in use by the current mode
-    if(demod->snr >= 0)
-      mvwprintw(demodulator,row++,1,"Loop SNR%11.1f dB",power2dB(demod->snr));
-
-    if(demod->gain >= 0)
-      mvwprintw(demodulator,row++,1,"AF Gain%12.1f dB",voltage2dB(demod->gain));
-    
-    if(!isnan(demod->foffset))
-      mvwprintw(demodulator,row++,1,"Offset%'+13.1f Hz",demod->foffset);
-
-    if(!isnan(demod->pdeviation))
-      mvwprintw(demodulator,row++,1,"Deviation%10.1f Hz",demod->pdeviation);
-
-    if(!isnan(demod->cphase))
-      mvwprintw(demodulator,row++,1,"Phase%+14.1f deg",demod->cphase*DEGPRA);
-
-    if(!isnan(demod->plfreq))
-      mvwprintw(demodulator,row++,1,"Tone%15.1f Hz",demod->plfreq);
-
-    if(!isnan(demod->spare))
-      mvwprintw(demodulator,row++,1,"Spare%14.1f   ",demod->spare);      
+    if(demod->snr >= 0){
+      mvwprintw(demodulator,row,rcol,"%11.1f dB",power2dB(demod->snr));
+      mvwaddstr(demodulator,row++,lcol,"Loop SNR");
+    }
+    if(demod->gain >= 0){
+      mvwprintw(demodulator,row,rcol,"%11.1f dB",voltage2dB(demod->gain));
+      mvwaddstr(demodulator,row++,lcol,"AF Gain");
+    }    
+    if(!isnan(demod->foffset)){
+      mvwprintw(demodulator,row,rcol,"%'+11.1f Hz",demod->foffset);
+      mvwaddstr(demodulator,row++,lcol,"Offset");
+    }
+    if(!isnan(demod->pdeviation)){
+      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->pdeviation);
+      mvwaddstr(demodulator,row++,lcol,"Deviation");
+    }
+    if(!isnan(demod->cphase)){
+      mvwprintw(demodulator,row,rcol,"%+11.1f deg",demod->cphase*DEGPRA);
+      mvwaddstr(demodulator,row++,lcol,"Phase");
+    }
+    if(!isnan(demod->plfreq)){
+      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->plfreq);
+      mvwaddstr(demodulator,row++,lcol,"Tone");
+    }
+    if(!isnan(demod->spare)){
+      mvwprintw(demodulator,row,rcol,"%11.1f",demod->spare);      
+      mvwaddstr(demodulator,row++,lcol,"Spare");
+    }
 
     wmove(demodulator,row,0); // leading space of first option will be overwritten with box
     wprintw(demodulator,"%s",demod->flags & MONO ? " Mono" : " Stereo"); 
@@ -478,13 +491,12 @@ void *display(void *arg){
     if(demod->flags & FLAT) 
       wprintw(demodulator," Flat"); 
     if(demod->flags & SQUARE) 
-      wprintw(demodulator," Squaring"); 
+      wprintw(demodulator," Square"); 
     if(demod->flags & COHERENT) 
       wprintw(demodulator," PLL"); 
     if(demod->flags & CAL)
       wprintw(demodulator," Cal"); 
 
-    wclrtobot(demodulator);
     box(demodulator,0,0);
     mvwprintw(demodulator,0,5,"%s demodulator",demod->demod_name);
     wnoutrefresh(demodulator);
@@ -492,18 +504,29 @@ void *display(void *arg){
 
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 1;
-    mvwprintw(sdr,row++,1,"Samprate%'10d Hz",demod->status.samprate); // Nominal
-    mvwprintw(sdr,row++,1,"LO%'16.0f Hz",demod->status.frequency); // Integer for now (SDR dependent)
-    mvwprintw(sdr,row++,1,"TCXO cal%'+10.3f ppm",demod->calibrate *1e6);
-    mvwprintw(sdr,row++,1,"I offset%+10.6f",demod->DC_i);  // Scaled to +/-1
-    mvwprintw(sdr,row++,1,"Q offset%+10.6f",demod->DC_q);
-    mvwprintw(sdr,row++,1,"I/Q imbal%+9.3f dB",power2dB(demod->imbalance));
-    mvwprintw(sdr,row++,1,"I/Q phi%+11.1f deg",demod->sinphi*DEGPRA);
-    mvwprintw(sdr,row++,1,"LNA%15u",demod->status.lna_gain);   // SDR dependent
-    mvwprintw(sdr,row++,1,"Mix gain%10u",demod->status.mixer_gain); // SDR dependent
-    mvwprintw(sdr,row++,1,"IF gain%11u dB",demod->status.if_gain); // SDR dependent
+    col = 1;
+    mvwprintw(sdr,row,col,"%'18d Hz",demod->status.samprate); // Nominal
+    mvwaddstr(sdr,row++,col,"Samprate");
+    mvwprintw(sdr,row,col,"%'18.0f Hz",demod->status.frequency); // Integer for now (SDR dependent)
+    mvwaddstr(sdr,row++,col,"LO");
+    mvwprintw(sdr,row,col,"%'+18.3f ppm",demod->calibrate *1e6);
+    mvwaddstr(sdr,row++,col,"TCXO cal");
+    mvwprintw(sdr,row,col,"%+18.6f",demod->DC_i);  // Scaled to +/-1
+    mvwaddstr(sdr,row++,col,"I offset");
+    mvwprintw(sdr,row,col,"%+18.6f",demod->DC_q);
+    mvwaddstr(sdr,row++,col,"Q offset");
+    mvwprintw(sdr,row,col,"%+18.3f dB",power2dB(demod->imbalance));
+    mvwaddstr(sdr,row++,col,"I/Q imbal");
+    mvwprintw(sdr,row,col,"%+18.1f deg",demod->sinphi*DEGPRA);
+    mvwaddstr(sdr,row++,col,"I/Q phi");
+    mvwprintw(sdr,row,col,"%18u",demod->status.lna_gain);   // SDR dependent
+    mvwaddstr(sdr,row++,col,"LNA");
+    mvwprintw(sdr,row,col,"%18u",demod->status.mixer_gain); // SDR dependent
+    mvwaddstr(sdr,row++,col,"Mix gain");
+    mvwprintw(sdr,row,col,"%18u dB",demod->status.if_gain); // SDR dependent    
+    mvwaddstr(sdr,row++,col,"IF gain");
     box(sdr,0,0);
-    mvwprintw(sdr,0,6,"SDR Hardware");
+    mvwaddstr(sdr,0,6,"SDR Hardware");
     wnoutrefresh(sdr);
 
     // Network status window
@@ -515,29 +538,30 @@ void *display(void *arg){
 		  sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
     }
     row = 1;
+    col = 1;
     extern int Delayed,Skips;
     wmove(network,0,0);
-    mvwprintw(network,row++,1,"Source %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
-    mvwprintw(network,row++,1,"IQ pkts %'llu; late %'d; skips %'d",demod->iq_packets,
+    mvwprintw(network,row++,col,"Source %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
+    mvwprintw(network,row++,col,"IQ pkts %'llu; late %'d; skips %'d",demod->iq_packets,
 	      Delayed,Skips);
     if(audio->filename != NULL)
-      mvwprintw(network,row++,1,"PCM stream %s",audio->filename);
+      mvwprintw(network,row++,col,"PCM stream %s",audio->filename);
 
     if(audio->opus_bitrate != 0 || audio->rtp_pcm != 0) 
       // Audio output dest address (usually multicast)
-      mvwprintw(network,row++,1,"Sink %s",audio->audio_mcast_address_text);
+      mvwprintw(network,row++,col,"Sink %s",audio->audio_mcast_address_text);
 
     if(audio->opus_bitrate > 0)
-      mvwprintw(network,row++,1,"Opus %.1fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
+      mvwprintw(network,row++,col,"Opus %.1fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
 		audio->opus_blocktime,audio->opus_dtx ? " dtx":"",
 		audio->opus_bitrate/1000.,audio->bitrate/1000.,audio->audio_packets);
 
     if(audio->rtp_pcm)
-      mvwprintw(network,row++,1,"PCM %'d Hz; %'.1f kb/s; pkts %'llu",audio->samprate,audio->bitrate/1000.,
+      mvwprintw(network,row++,col,"PCM %'d Hz; %'.1f kb/s; pkts %'llu",audio->samprate,audio->bitrate/1000.,
 		audio->audio_packets);
 
     box(network,0,0);
-    mvwprintw(network,0,35,"Network");
+    mvwaddstr(network,0,35,"Network");
     wnoutrefresh(network);
 
     // Highlight cursor for tuning step
@@ -679,11 +703,10 @@ void *display(void *arg){
 	set_cal(demod,f * 1e-6);
       }
       break;
-    case 'M':   // Select demod mode from list. Note: overwrites filters
-    case 'm':   // keep filters the same when changing modes
+    case 'm':
       {
 	char str[1024];
-	snprintf(str,sizeof(str),"Enter mode %s [ ",c == 'M' ? "(filter reset)": "");
+	snprintf(str,sizeof(str),"Enter mode [ ");
 	for(int i=0;i < Nmodes;i++){
 	  strlcat(str,Modes[i].name,sizeof(str) - strlen(str) - 1);
 	  strlcat(str," ",sizeof(str) - strlen(str) - 1);
@@ -692,7 +715,7 @@ void *display(void *arg){
 	getentry(str,str,sizeof(str));
 	if(strlen(str) <= 0)
 	  break;
-	set_mode(demod,str,c == 'M');
+	set_mode(demod,str,1);
       }
       break;
     case 'f':   // Tune to new frequency
@@ -751,6 +774,39 @@ void *display(void *arg){
 	if(b != demod->kaiser_beta){
 	  demod->kaiser_beta = b;
 	  set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+	}
+      }
+      break;
+    case 'o': // Set/clear option flags
+      {
+	char str[160];
+	getentry("Enter option [isb pll cal flat square stereo mono], '!' prefix disables: ",str,sizeof(str));
+	if(strcasecmp(str,"mono") == 0){
+	  demod->flags |= MONO;
+	} else if(strcasecmp(str,"!mono") == 0){
+	  demod->flags &= ~MONO;
+	} else if(strcasecmp(str,"stereo") == 0){
+	  demod->flags &= ~MONO;	  
+	} else if(strcasecmp(str,"isb") == 0){
+	  demod->flags |= CONJ;
+	} else if(strcasecmp(str,"!isb") == 0){
+	  demod->flags &= ~CONJ;
+	} else if(strcasecmp(str,"pll") == 0){
+	  demod->flags |= COHERENT;
+	} else if(strcasecmp(str,"!pll") == 0){
+	  demod->flags &= ~(COHERENT|SQUARE|CAL);
+	} else if(strcasecmp(str,"square") == 0){
+	  demod->flags |= SQUARE|COHERENT;
+	} else if(strcasecmp(str,"!square") == 0){	  
+	  demod->flags &= ~SQUARE;
+	} else if(strcasecmp(str,"cal") == 0){
+	  demod->flags |= CAL|COHERENT;
+	} else if(strcasecmp(str,"!cal") == 0){
+	  demod->flags &= ~CAL;
+	} else if(strcasecmp(str,"flat") == 0){
+	  demod->flags |= FLAT;
+	} else if(strcasecmp(str,"!flat") == 0){
+	  demod->flags &= ~FLAT;
 	}
       }
       break;
