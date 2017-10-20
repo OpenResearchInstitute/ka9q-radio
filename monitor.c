@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.22 2017/10/09 20:02:23 karn Exp karn $
+// $Id: monitor.c,v 1.23 2017/10/17 07:05:04 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -398,7 +398,7 @@ void *display(void *arg){
 	  close_session(sp);
 	  continue;
 	}
-	int bw; // Audio bandwidth (not bitrate) in kHz
+	int bw = 0; // Audio bandwidth (not bitrate) in kHz
 	char *type,typebuf[30];
 	switch(sp->type){
 	case 10:
