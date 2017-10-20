@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.49 2017/10/01 23:43:56 karn Exp karn $
+// $Id: audio.c,v 1.50 2017/10/10 12:18:55 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -351,6 +351,8 @@ static int setup_portaudio(struct audio *const audio){
   if(strlen(audio->localdev) == 0){
     // not specified; use default
     inDevNum = Pa_GetDefaultOutputDevice();
+    const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
+    strncpy(audio->localdev,deviceInfo->name,sizeof(audio->localdev));
   } else {
     // Find requested audio device in the list
     int numDevices = Pa_GetDeviceCount();
