@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.71 2017/10/10 12:29:34 karn Exp karn $
+# $Id: Makefile,v 1.73 2017/10/20 18:18:24 karn Exp karn $
 #CC=g++
 INCLUDES=
 COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -10,7 +10,7 @@ LIBDIR=/usr/local/share/ka9q-radio
 all: funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt
 
 install: all
-	install -D --target-directory=$(BINDIR) radio funcube monitor iqrecord iqplay modulate
+	install -o root -m 04755 -D --target-directory=$(BINDIR) radio funcube monitor iqrecord iqplay modulate
 	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt modes.txt
 
 clean:

@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.22 2017/09/28 04:59:37 karn Exp karn $
+# $Id: Makefile.osx,v 1.23 2017/10/10 12:28:24 karn Exp karn $
 #CC=g++
 INCLUDES=-I /opt/local/include
 COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -13,7 +13,7 @@ all: iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt
 install: all
 	install -d $(LIBDIR)
 	install -d $(BINDIR)
-	install radio monitor iqrecord iqplay modulate $(BINDIR)
+	install -o root -m 04755 radio monitor iqrecord iqplay modulate $(BINDIR)
 	install bandplan.txt help.txt modes.txt $(LIBDIR)
 
 clean:
