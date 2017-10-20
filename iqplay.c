@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.15 2017/09/19 12:58:31 karn Exp karn $
+// $Id: iqplay.c,v 1.16 2017/09/21 00:14:14 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -19,6 +19,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/resource.h>
 
 #include "radio.h"
 #include "rtp.h"
@@ -120,6 +121,15 @@ int playfile(int sock,int fd,int blocksize){
 
 
 int main(int argc,char *argv[]){
+  // if we have root, up our priority and drop privileges
+  int prio = getpriority(PRIO_PROCESS,0);
+  prio = setpriority(PRIO_PROCESS,0,prio - 10);
+
+  // Quickly drop root if we have it
+  // The sooner we do this, the fewer options there are for abuse
+  seteuid(getuid());
+
+
   char *locale;
   int c;
 

@@ -1,4 +1,4 @@
-// $Id: modulate.c,v 1.5 2017/08/10 10:48:04 karn Exp karn $ AM modulator - will eventually support other modes
+// $Id: modulate.c,v 1.6 2017/09/19 12:58:52 karn Exp karn $ AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
 #include <stdio.h>
 #include <unistd.h>
@@ -9,6 +9,8 @@
 #include <fftw3.h>
 #include <string.h>
 #include <pthread.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include "filter.h"
 #include "dsp.h"
@@ -23,6 +25,15 @@ int Samprate = 192000;
 int Verbose = 0;
 
 int main(int argc,char *argv[]){
+  // if we have root, up our priority and drop privileges
+  int prio = getpriority(PRIO_PROCESS,0);
+  prio = setpriority(PRIO_PROCESS,0,prio - 10);
+
+  // Quickly drop root if we have it
+  // The sooner we do this, the fewer options there are for abuse
+  seteuid(getuid());
+
+
   int c;
 
   // Set defaults

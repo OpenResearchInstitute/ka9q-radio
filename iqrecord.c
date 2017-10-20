@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.9 2017/08/25 19:48:34 karn Exp $
+// $Id: iqrecord.c,v 1.9 2017/09/02 05:48:30 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -24,6 +24,7 @@
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/resource.h>
 
 #include "radio.h"
 #include "rtp.h"
@@ -64,6 +65,14 @@ char IQ_mcast_address_text[256] = "239.1.2.3"; // Default for testing
 
 
 int main(int argc,char *argv[]){
+  // if we have root, up our priority and drop privileges
+  int prio = getpriority(PRIO_PROCESS,0);
+  prio = setpriority(PRIO_PROCESS,0,prio - 10);
+
+  // Quickly drop root if we have it
+  // The sooner we do this, the fewer options there are for abuse
+  seteuid(getuid());
+
   int c;
   char *locale;
 
