@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.98 2017/10/20 07:14:06 karn Exp karn $
+// $Id: display.c,v 1.99 2017/10/20 18:08:39 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -409,7 +409,7 @@ void *display(void *arg){
     mvwaddstr(filtering,row++,col,"FIR");
     mvwprintw(filtering,row,col,"%'17.3f Hz",demod->samprate / N);
     mvwaddstr(filtering,row++,col,"Freq bin");
-    mvwprintw(filtering,row,col,"%'17.3f s",(N - (demod->M - 1)/2)/demod->samprate);
+    mvwprintw(filtering,row,col,"%'17.3f ms",1000*(N - (demod->M - 1)/2)/demod->samprate);
     mvwaddstr(filtering,row++,col,"Delay");
     mvwprintw(filtering,row,col,"%17d",demod->interpolate);
     mvwaddstr(filtering,row++,col,"Interpolate");
@@ -462,7 +462,7 @@ void *display(void *arg){
       mvwaddstr(demodulator,row++,lcol,"AF Gain");
     }    
     if(!isnan(demod->foffset)){
-      mvwprintw(demodulator,row,rcol,"%'+11.1f Hz",demod->foffset);
+      mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->foffset);
       mvwaddstr(demodulator,row++,lcol,"Offset");
     }
     if(!isnan(demod->pdeviation)){
