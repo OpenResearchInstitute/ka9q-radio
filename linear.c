@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.12 2017/10/20 03:32:36 karn Exp karn $
+// $Id: linear.c,v 1.14 2017/10/20 07:15:07 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -111,6 +111,12 @@ void *demod_linear(void *arg){
     fillbuf(demod,filter->input.c,filter->ilen);
     spindown(demod,filter->input.c);
     demod->if_power = cpower(filter->input.c,filter->ilen);
+    // Copy ISB flag to filter
+    if(demod->flags & CONJ)
+      filter->out_type = CROSS_CONJ;
+    else
+      filter->out_type = COMPLEX;
+
     execute_filter(filter);
     if(!isnan(demod->n0))
       demod->n0 += .001 * (compute_n0(demod) - demod->n0);
@@ -227,10 +233,17 @@ void *demod_linear(void *arg){
 	// Apply this to calibration estimate below
 	calibrate_offset += .01 * (feedback + delta_f - calibrate_offset);
       }
-      demod->foffset += 0.1 * (feedback + delta_f - demod->foffset);
-    } else
-      demod->foffset = NAN; // Not used in non-coherent modes
-    
+      if(isnan(demod->foffset)){
+	demod->foffset = feedback + delta_f;
+      } else {
+	demod->foffset += 0.1 * (feedback + delta_f - demod->foffset);
+      }
+    } else {
+      // Not used in non-coherent modes
+      demod->cphase = NAN;
+      demod->foffset = NAN;
+      demod->spare = NAN;
+    }
     if((demod->flags & CAL) && pll_lock){
       // In calibrate mode, apply and clear the current measured offset
       set_cal(demod,demod->calibrate - calibrate_offset/get_freq(demod));
