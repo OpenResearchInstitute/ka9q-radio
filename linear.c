@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.11 2017/10/17 07:04:07 karn Exp karn $
+// $Id: linear.c,v 1.12 2017/10/20 03:32:36 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -31,6 +31,7 @@ void *demod_linear(void *arg){
 
   // Set derived (and other) constants
   float const samptime = demod->decimate / demod->samprate;  // Time between (decimated) samples
+  float const blocktime = samptime * demod->L; // Update rate of fine PLL (once/block)
 
   // AGC
   int hangcount = 0;
@@ -66,7 +67,7 @@ void *demod_linear(void *arg){
   float const integrator_gain = 1 / tau1;                  // 2pi
   float const tau2 = 2 * damping / natfreq;                // sqrt(2) / 2pi = 1/ (pi*sqrt(2))
   float const prop_gain = tau2 / tau1;                     // sqrt(2)/2
-  //  float const ramprate = demod->loop_bw * samptime / integrator_gain;   // sweep at one loop bw/sec
+  //  float const ramprate = demod->loop_bw * blocktime / integrator_gain;   // sweep at one loop bw/sec
   float const ramprate = 0; // temp disable
 
   // DC removal from envelope-detected AM and coherent AM
@@ -95,6 +96,7 @@ void *demod_linear(void *arg){
 
   // Initialize PLL
   complex float fine_phasor = 1;        // fine offset LO, controlled by PLL
+  complex float fine_phasor_step = 1;
   complex float coarse_phasor = 1;      // FFT-controlled offset LO
   complex float coarse_phasor_step = 1; // 0 Hz to start
   float integrator = 0;                 // 2nd order loop integrator
@@ -181,57 +183,57 @@ void *demod_linear(void *arg){
       } else { // !pll_lock
 	ramp = 0;
       }
-      // Apply coarse offset, track fine frequency adjustment with PLL
+      // Apply coarse and fine offsets, gather DC phase information
       complex float accum = 0;
       for(int n=0;n<filter->olen;n++){
 	filter->output.c[n] *= coarse_phasor * fine_phasor;
-	float carrier_phase;
-	if(demod->flags & SQUARE){
-	  complex float const ss = filter->output.c[n] * filter->output.c[n];
-	  accum += ss;
-	  carrier_phase = cargf(ss)/2;
-	} else {
-	  accum += filter->output.c[n];
-	  carrier_phase = cargf(filter->output.c[n]);
-	}	
-	// Lag-lead (integral plus proportional)
-	integrator += carrier_phase * samptime + ramp;
-	float const feedback = integrator_gain * integrator + prop_gain * carrier_phase; // units of Hz
-	complex float fine_phasor_step;
-	if(fabsf(feedback * phase_scale) < .01)
-	  fine_phasor_step = CMPLXF(1,-phase_scale * feedback);  // Small angle approximation
-	else
-	  fine_phasor_step = csincosf(-phase_scale * feedback); 
-
-	// Acquisition frequency sweep
-	if((feedback >= binsize) && (ramp > 0))
-	  ramp = -ramprate; // reached upward sweep limit, sweep down
-	else if((feedback <= binsize) && (ramp < 0))
-	  ramp = ramprate;  // Reached downward sweep limit, sweep up
-	
-	if((demod->flags & CAL) && pll_lock){
-	  // In calibrate mode, keep highly smoothed estimate of frequency offset
-	  // Apply this to calibration estimate below
-	  calibrate_offset += .00001 * (feedback + delta_f - calibrate_offset);
-	}
-	demod->foffset += .001 * (feedback + delta_f - demod->foffset);
-	
 	coarse_phasor *= coarse_phasor_step;
 	fine_phasor *= fine_phasor_step;
+
+	complex float ss = filter->output.c[n];
+	if(demod->flags & SQUARE)
+	  ss *= ss;
+	
+	accum += ss;
       }
+      // Renormalize
+      fine_phasor /= cabs(fine_phasor);
+      coarse_phasor /= cabs(coarse_phasor);
+
       if(demod->flags & SQUARE)
 	demod->cphase = cargf(accum)/2;
       else
 	demod->cphase = cargf(accum);
+
+      // fine PLL on block basis
+      float carrier_phase = demod->cphase;
+
+      // Lag-lead (integral plus proportional) 
+      integrator += carrier_phase * blocktime + ramp;
+      float const feedback = integrator_gain * integrator + prop_gain * carrier_phase; // units of Hz
+      if(fabsf(feedback * phase_scale) < .01)
+	fine_phasor_step = CMPLXF(1,-phase_scale * feedback);  // Small angle approximation
+      else
+	fine_phasor_step = csincosf(-phase_scale * feedback); 
       
-      // Renormalize
-      fine_phasor /= cabsf(fine_phasor);
-      coarse_phasor /= cabsf(coarse_phasor);
+      // Acquisition frequency sweep
+      if((feedback >= binsize) && (ramp > 0))
+	ramp = -ramprate; // reached upward sweep limit, sweep down
+      else if((feedback <= binsize) && (ramp < 0))
+	ramp = ramprate;  // Reached downward sweep limit, sweep up
+      
       if((demod->flags & CAL) && pll_lock){
-	// In calibrate mode, apply and clear the current measured offset
-	set_cal(demod,demod->calibrate - calibrate_offset/get_freq(demod));
-	calibrate_offset = 0;
+	// In calibrate mode, keep highly smoothed estimate of frequency offset
+	// Apply this to calibration estimate below
+	calibrate_offset += .01 * (feedback + delta_f - calibrate_offset);
       }
+      demod->foffset += .1 * (feedback + delta_f - demod->foffset);
+    }
+    
+    if((demod->flags & CAL) && pll_lock){
+      // In calibrate mode, apply and clear the current measured offset
+      set_cal(demod,demod->calibrate - calibrate_offset/get_freq(demod));
+      calibrate_offset = 0;
     }
 
     // Demodulation
@@ -266,9 +268,7 @@ void *demod_linear(void *arg){
       for(int n=0; n<filter->olen; n++){
 	signal += crealf(filter->output.c[n]) * crealf(filter->output.c[n]);
 	noise += cimagf(filter->output.c[n]) * cimagf(filter->output.c[n]);
-	float amplitude;
-	DC_filter += DC_filter_coeff * (filter->output.c[n] - DC_filter);
-	amplitude = cabsf(filter->output.c[n]);
+	float amplitude = cabsf(filter->output.c[n]);
 	
 	// AGC
 	if(isnan(demod->gain)){
@@ -306,7 +306,6 @@ void *demod_linear(void *arg){
     } // not envelope detection
     demod->bb_power = (signal + noise) / filter->olen;
     // PLL loop SNR
-    demod->snr = crealf(DC_filter) * crealf(DC_filter) / (cimagf(DC_filter) * cimagf(DC_filter));
     if(noise != 0 && (demod->flags & COHERENT)){
       demod->snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
       if(demod->snr < 0)
