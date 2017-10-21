@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.73 2017/10/17 03:06:10 karn Exp karn $
+// $Id: radio.c,v 1.74 2017/10/17 07:03:58 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -234,6 +234,11 @@ double set_first_LO(struct demod * const demod,double const first_LO){
   if(first_LO == get_first_LO(demod))
     return first_LO;
 
+  if(demod->tuner_lock){
+    // Just return actual frequency, don't touch anything
+    return get_first_LO(demod);
+  }
+
   if(first_LO > 0){
     // Set tuner to integer nearest requested frequency after decalibration
     demod->requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
@@ -269,7 +274,7 @@ double set_first_LO(struct demod * const demod,double const first_LO){
     }
     pthread_mutex_unlock(&demod->status_mutex);
   }
-  return demod->status.frequency * (1 + demod->calibrate);
+  return get_first_LO(demod);
 }
 
 // If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
