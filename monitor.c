@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.23 2017/10/17 07:05:04 karn Exp karn $
+// $Id: monitor.c,v 1.24 2017/10/20 18:10:30 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -33,13 +33,11 @@ const int Bufsize = 8192;     // Maximum samples/words per RTP packet - must be 
 const int Samprate = 48000;   // Too hard to handle other sample rates right now
 int List_audio;               // List audio output devices and exit
 int Verbose;                  // Verbosity flag (currently unused)
-#define Hashchains 16         // Make this a power of 2 for efficiency
-int Update_interval = 1000000; // Time in usec between display updates
-int Clear_interval = 20;      // Time in sec until inactive entry is cleared
+int Update_interval = 100;    // Time in ms between display updates
 
 pthread_t Display_thread;     // Display thread descriptor
 int Input_fd = -1;            // Multicast receive socket
-struct audio *Audio[Hashchains];     // Hash chains for session structures
+struct audio *Audio;          // Link to head of session structure chain
 PaStream *Pa_Stream;          // Portaudio stream handle
 int inDevNum;                 // Portaudio's audio output device index
 
@@ -58,6 +56,8 @@ struct audio {
   int etime;                // Next expected RTP timestamp
   int type;                 // RTP type (10,11,20)
   
+  float gain;               // Gain for this channel; 1 -> 0 db (nominal)
+
   struct sockaddr sender;
   char addr[NI_MAXHOST];    // RTP Sender IP address
   char port[NI_MAXSERV];    // RTP Sender source port
@@ -207,7 +207,9 @@ int main(int argc,char * const argv[]){
   pthread_mutex_init(&Audio_mutex,NULL);
   pthread_create(&Display_thread,NULL,display,NULL);
 
-  // Create and start portaudio stream
+  // Create and start portaudio stream.
+  // Runs continuously, playing silence until audio arrives.
+  // This allows multiple streams to be played on hosts that only support one
   PaStreamParameters outputParameters;
   memset(&outputParameters,0,sizeof(outputParameters));
   outputParameters.channelCount = 2;
@@ -264,7 +266,7 @@ int main(int argc,char * const argv[]){
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
       sp->write_ptr = Read_ptr;
-
+      sp->gain = 1; // 0 dB by default
     }
     sp->age = 0;
     int drop = 0;
@@ -297,7 +299,7 @@ int main(int argc,char * const argv[]){
 	sp->underruns++;
       }
       for(int i=0;i<2*samples;i++){
-	Audio_buffer[sp->write_ptr++] += ntohs(data[i]); // RTP profile specifies big-endian samples
+	Audio_buffer[sp->write_ptr++] += sp->gain * ntohs(data[i]); // RTP profile specifies big-endian samples
 	if(sp->write_ptr >= Aud_bufsize)
 	  sp->write_ptr -= Aud_bufsize;
       }
@@ -315,8 +317,8 @@ int main(int argc,char * const argv[]){
 	sp->underruns++;
       }
       for(int i=0;i<samples;i++){
-	Audio_buffer[sp->write_ptr++] += ntohs(data[i]);
-	Audio_buffer[sp->write_ptr++] += ntohs(data[i]);
+	Audio_buffer[sp->write_ptr++] += sp->gain * ntohs(data[i]);
+	Audio_buffer[sp->write_ptr++] += sp->gain * ntohs(data[i]);
 	if(sp->write_ptr >= Aud_bufsize)
 	  sp->write_ptr -= Aud_bufsize;
       }
@@ -352,8 +354,8 @@ int main(int argc,char * const argv[]){
 	  sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
 	}
 	for(int i=0; i < samples; i++){
-	  Audio_buffer[sp->write_ptr++] += outsamps[2*i];
-	  Audio_buffer[sp->write_ptr++] += outsamps[2*i+1];
+	  Audio_buffer[sp->write_ptr++] += sp->gain * outsamps[2*i];
+	  Audio_buffer[sp->write_ptr++] += sp->gain * outsamps[2*i+1];
 	  if(sp->write_ptr >= Aud_bufsize)
 	    sp->write_ptr -= Aud_bufsize;
 	}
@@ -372,6 +374,8 @@ int main(int argc,char * const argv[]){
     pthread_mutex_unlock(&Audio_mutex); // Give display thread a chance
   }
   pthread_cancel(Display_thread);
+  echo();
+  nocbreak();
   endwin();
   exit(0);
 }
@@ -379,87 +383,136 @@ int main(int argc,char * const argv[]){
 // Use ncurses to display streams; age out unused ones
 void *display(void *arg){
   initscr();
+  keypad(stdscr,TRUE);
+  timeout(Update_interval);
+  cbreak();
+  noecho();
+
   // WINDOW * const mainscr = newwin(25,110,0,0);
   WINDOW * const mainscr = stdscr;
-  int const agelimit = Clear_interval * 1000000 / Update_interval;
+
+  struct audio *current = NULL;
 
   while(1){
     int row = 1;
     wmove(mainscr,row,0);
     wclrtobot(mainscr);
-    mvwprintw(mainscr,row++,1,"Type        channels   BW      SSRC     Packets     Drops   Underruns   Delay   Source");
+    mvwprintw(mainscr,row++,1,"Type        channels   BW   Gain      SSRC     Packets     Drops   Underruns   Delay   Source");
     pthread_mutex_lock(&Audio_mutex);
-    for(int i=0;i<Hashchains;i++){
-      struct audio *nextsp; // Save in case we close the current one
-      for(struct audio *sp = Audio[i]; sp != NULL; sp = nextsp){
-	nextsp = sp->next;
-	if(++sp->age > agelimit){
-	  // Age out old session
-	  close_session(sp);
-	  continue;
-	}
-	int bw = 0; // Audio bandwidth (not bitrate) in kHz
-	char *type,typebuf[30];
-	switch(sp->type){
-	case 10:
-	case 11:
-	  type = "PCM";
-	  bw = Samprate / 2000;
-	  break;
-	case 20:
-	  switch(sp->opus_bandwidth){
-	  case OPUS_BANDWIDTH_NARROWBAND:
-	    bw = 4;
-	    break;
-	  case OPUS_BANDWIDTH_MEDIUMBAND:
-	    bw = 6;
-	    break;
-	  case OPUS_BANDWIDTH_WIDEBAND:
-	    bw = 8;
-	    break;
-	  case OPUS_BANDWIDTH_SUPERWIDEBAND:
-	    bw = 12;
-	    break;
-	  case OPUS_BANDWIDTH_FULLBAND:
-	    bw = 20;
-	    break;
-	  case OPUS_INVALID_PACKET:
-	    bw = 0;
-	    break;
-	  }
-	  snprintf(typebuf,sizeof(typebuf),"Opus %.1lf ms",1000.*sp->opus_frame_size/Samprate);
-	  type = typebuf;
-	  break;
-	default:
-	  snprintf(typebuf,sizeof(typebuf),"%d",sp->type);
-	  bw = 0; // Unknown
-	  type = typebuf;
-	  break;
-	}
-	if(sp->age < 5)
-	  wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
-       	mvwprintw(mainscr,row++,1,"%-15s%5d%5d%10lx%'12lu%'10u%'12lu%'8.3lf   %s:%s",
-		  type,sp->channels,bw,sp->ssrc,sp->packets,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
-	wattr_off(mainscr,A_BOLD,NULL);
+    struct audio *nextsp; // Save in case we close the current one
+    for(struct audio *sp = Audio; sp != NULL; sp = nextsp){
+      nextsp = sp->next;
+      ++sp->age;
+#if 0
+      if(sp->age > agelimit){
+	// Age out old session
+	close_session(sp);
+	continue;
       }
+#endif
+      int bw = 0; // Audio bandwidth (not bitrate) in kHz
+      char *type,typebuf[30];
+      switch(sp->type){
+      case 10:
+      case 11:
+	type = "PCM";
+	bw = Samprate / 2000;
+	break;
+      case 20:
+	switch(sp->opus_bandwidth){
+	case OPUS_BANDWIDTH_NARROWBAND:
+	  bw = 4;
+	  break;
+	case OPUS_BANDWIDTH_MEDIUMBAND:
+	  bw = 6;
+	  break;
+	case OPUS_BANDWIDTH_WIDEBAND:
+	  bw = 8;
+	  break;
+	case OPUS_BANDWIDTH_SUPERWIDEBAND:
+	  bw = 12;
+	  break;
+	case OPUS_BANDWIDTH_FULLBAND:
+	  bw = 20;
+	  break;
+	case OPUS_INVALID_PACKET:
+	  bw = 0;
+	  break;
+	}
+	snprintf(typebuf,sizeof(typebuf),"Opus %.1lf ms",1000.*sp->opus_frame_size/Samprate);
+	type = typebuf;
+	break;
+      default:
+	snprintf(typebuf,sizeof(typebuf),"%d",sp->type);
+	bw = 0; // Unknown
+	type = typebuf;
+	break;
+      }
+      move(row,1);
+      clrtoeol();
+      if(sp->age < 5)
+	wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
+      mvwprintw(mainscr,row,1,"%-15s%5d%5d%7.1lf%10lx%'12lu%'10u%'12lu%'8.3lf   %s:%s",
+		type,sp->channels,bw,20*log10(sp->gain),sp->ssrc,sp->packets,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
+      wattr_off(mainscr,A_BOLD,NULL);
+      if(current == NULL)
+	current = sp;
+      if(sp == current){
+	mvchgat(row,28,5,A_STANDOUT,0,NULL);
+      }
+      row++;
+      move(row,1);
     }
     pthread_mutex_unlock(&Audio_mutex);
     // Draw the box and banner last, to avoid the wclrtobot() calls
     //    box(mainscr,0,0);
+    clrtobot();
     mvwprintw(mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
     wnoutrefresh(mainscr);
     doupdate();
-    usleep(Update_interval);
+    int c = getch();
+    switch(c){
+    case EOF:
+      break;
+    case KEY_NPAGE:
+    case '\t':
+      if(current->next != NULL)
+	current = current->next;
+      else if(Audio != NULL)
+	current = Audio; // Wrap around to top
+      break;
+    case KEY_BTAB:
+    case KEY_PPAGE:
+      if(current->prev != NULL)
+	current = current->prev;
+      break;
+    case KEY_UP:
+      current->gain *= 1.122018454; // 1 dB
+      break;
+    case KEY_DOWN:
+      current->gain /= 1.122018454; // 1 dB
+      break;
+    case 'd':
+      pthread_mutex_lock(&Audio_mutex);
+      if(current != NULL){
+	struct audio *next = current->next;
+	close_session(current);
+	current = next;
+      }
+      pthread_mutex_unlock(&Audio_mutex);
+      break;
+    default:
+      break;
+    }
+
   }
 }
 
 struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
-  // Walk hash chain
   struct audio *sp;
-  for(sp = Audio[ssrc % Hashchains]; sp != NULL; sp = sp->next){
+  for(sp = Audio; sp != NULL; sp = sp->next){
     if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
       // Found it
-#if 0
       if(sp->prev != NULL){
 	// Not at top of bucket chain; move it there
 	if(sp->next != NULL)
@@ -467,16 +520,15 @@ struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
 
 	sp->prev->next = sp->next;
 	sp->prev = NULL;
-	sp->next = Audio[ssrc % Hashchains];
-	Audio[ssrc % Hashchains] = sp;
+	sp->next = Audio;
+	Audio = sp;
       }
-#endif
       return sp;
     }
   }
   return NULL;
 }
-// Create a new session, partly initialize; ssrc is used as hash key
+// Create a new session, partly initialize
 struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t seq,uint32_t timestamp){
   struct audio *sp;
 
@@ -490,10 +542,10 @@ struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t 
   sp->etime = timestamp;
 
   // Put at head of bucket chain
-  sp->next = Audio[ssrc % Hashchains];
+  sp->next = Audio;
   if(sp->next != NULL)
     sp->next->prev = sp;
-  Audio[ssrc % Hashchains] = sp;
+  Audio = sp;
   return sp;
 }
 
@@ -511,15 +563,14 @@ int close_session(struct audio *sp){
   if(sp->prev != NULL)
     sp->prev->next = sp->next;
   else
-    Audio[sp->ssrc % Hashchains] = sp->next;
+    Audio = sp->next;
   free(sp);
   return 0;
 }
 void closedown(int s){
-  for(int i=0; i < Hashchains; i++){
-    while(Audio[i] != NULL)
-      close_session(Audio[i]);
-  }
+  while(Audio != NULL)
+    close_session(Audio);
+
   Pa_Terminate();
   endwin();
 
