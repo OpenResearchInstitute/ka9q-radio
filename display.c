@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.100 2017/10/20 21:25:12 karn Exp karn $
+// $Id: display.c,v 1.101 2017/10/20 22:32:42 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -123,19 +123,22 @@ void display_cleanup(void *arg){
     fclose(Tty);
 }
 
+int Frequency_lock;
+
+
 // Adjust the selected item up or down one step
 static void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
   switch(tuneitem){
   case 0: // Carrier frequency
   case 1: // Center frequency - treat the same
-    if(!demod->frequency_lock) // Ignore if locked
+    if(!Frequency_lock) // Ignore if locked
       set_freq(demod,get_freq(demod) + tunestep,NAN);
     break;
   case 2: // First LO
     if(fabs(tunestep) < 1)
       break; // First LO can't make steps < 1  Hz
     
-    if(demod->frequency_lock){
+    if(Frequency_lock){
       // Keep frequency but move LO2 in opposite direction, which will move LO1
       double new_lo2 = demod->second_LO + tunestep;
       if(LO2_in_range(demod,new_lo2,0))
@@ -149,7 +152,7 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     ; // needed because next line is declaration
     double new_lo2 = demod->second_LO - tunestep;
     if(LO2_in_range(demod,new_lo2,0)){ // Ignore if out of range
-      if(demod->frequency_lock){
+      if(Frequency_lock){
 	set_freq(demod,get_freq(demod),new_lo2);
       } else {
 	// Vary RF and IF together to keep LO1 the same
@@ -291,7 +294,7 @@ void *display(void *arg){
       } else if(event.type == EV_KEY){
 	if(event.code == BTN_MISC)
 	  if(event.value)
-	    demod->frequency_lock = !demod->frequency_lock; // Toggle frequency tuning lock
+	    Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
       }
     }
     // Update display
@@ -301,20 +304,23 @@ void *display(void *arg){
     wmove(tuning,0,0);
     int row = 1;
     int col = 1;
+    if(Frequency_lock)
+      wattron(tuning,A_UNDERLINE);
     mvwprintw(tuning,row,col,"%'28.3f Hz",get_freq(demod));
     mvwaddstr(tuning,row,col,"Carrier");
-
-    if(demod->frequency_lock)
-      mvwchgat(tuning,row,col,100,A_UNDERLINE,0,NULL);
     row++;
 
     mvwprintw(tuning,row,col,"%'28.3f Hz",get_freq(demod) + (demod->high + demod->low)/2);
     mvwaddstr(tuning,row++,col,"Center");
 
+    if(demod->tuner_lock)
+      wattron(tuning,A_UNDERLINE);      
+
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
     mvwprintw(tuning,row,col,"%'28.3f Hz",get_first_LO(demod));
     mvwaddstr(tuning,row++,col,"First LO");
+    wattroff(tuning,A_UNDERLINE);
 
 #if 0
     if(!LO2_in_range(demod,demod->second_LO,1)){
@@ -346,11 +352,15 @@ void *display(void *arg){
     wnoutrefresh(tuning);
 
     // Display ham band emission data, if available
+    // Lines are variable length, so clear window before starting
+
+    wclrtobot(info);  // Output 
     row = 1;
     mvwprintw(info,row++,1,"Receiver profile: %s",demod->mode);
 
-    if(demod->doppler_command)
+    if(demod->doppler_command){
       mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
+    }
     struct bandplan const *bp_low,*bp_high;
     bp_low = lookup_frequency(get_freq(demod)+demod->low);
     bp_high = lookup_frequency(get_freq(demod)+demod->high);
@@ -376,7 +386,6 @@ void *display(void *arg){
 	if(r.modes & IMAGE)
 	  waddstr(info,"Image");
       }
-      wclrtoeol(info);
       if(r.classes){
 	mvwaddstr(info,row++,1,"Privs: ");
 	if(r.classes & EXTRA_CLASS)
@@ -391,7 +400,7 @@ void *display(void *arg){
 	  waddstr(info,"Nov ");
       }
     }
-    wclrtobot(info);
+
     box(info,0,0);
     mvwaddstr(info,0,17,"Info");
     wnoutrefresh(info);
@@ -645,8 +654,11 @@ void *display(void *arg){
 	Skips = Delayed = 0;
       }
       break;
-    case 'l': // Toggle RF tuning lock; affects how adjustments to LO and IF behave
-      demod->frequency_lock = !demod->frequency_lock;
+    case 'l': // Toggle RF or first LO lock; affects how adjustments to LO and IF behave
+      if(tuneitem == 0 || tuneitem == 1)
+	Frequency_lock = !Frequency_lock;	 // Lock RF frequency
+      else if(tuneitem == 2)
+	demod->tuner_lock = !demod->tuner_lock;
       break;
     case KEY_NPAGE: // Page Down/tab key
     case '\t':      // go to next tuning item
