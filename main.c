@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.90 2017/10/20 22:34:18 karn Exp karn $
+// $Id: main.c,v 1.91 2017/10/21 01:55:44 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -191,16 +191,19 @@ int main(int argc,char *argv[]){
       Quiet++;  // Suppress display
       break;
     case 'R':   // Set audio target (IP multicast address, local file or local command)
-      if(optarg[0] == '/' || (strncmp(optarg,"./",2) == 0)){
+      if(optarg[0] == '/' || (strncmp(optarg,"./",2) == 0) || optarg[0] == '>'){
 	Audio.filename = optarg;
-	if((Audio.stream = fopen(Audio.filename,"w")) == NULL){
-	  fprintf(stderr,"Can't stream to %s\n",Audio.filename);
+	char *name = optarg;
+	if(name[0] == '>')
+	  name++;
+	if((Audio.stream = fopen(name,"w")) == NULL){
+	  fprintf(stderr,"File write fail: %s\n",Audio.filename);
 	  exit(1);
 	}
       } else if(optarg[0] == '|'){
 	Audio.filename = optarg;
 	if((Audio.stream = popen(Audio.filename+1,"w")) == NULL){
-	  fprintf(stderr,"Can't open pipe to %s\n",Audio.filename);
+	  fprintf(stderr,"Pipe open fail: %s\n",Audio.filename);
 	  exit(1);
 	}
       } else 

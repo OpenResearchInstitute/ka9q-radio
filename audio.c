@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.50 2017/10/10 12:18:55 karn Exp karn $
+// $Id: audio.c,v 1.51 2017/10/20 22:31:09 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -184,6 +184,7 @@ void *stereo_opus_audio(void *arg){
   int read_ptr = 0;
   while(1){
     complex float opusbuf[sizeof(complex float) * opus_blocksize];
+    int is_stereo = 0;
     for(int i = 0; i < opus_blocksize;){
       pthread_mutex_lock(&audio->buffer_mutex);
       while(audio->write_ptr == read_ptr)
@@ -197,8 +198,15 @@ void *stereo_opus_audio(void *arg){
 	opusbuf[i] = audio->audiobuffer[read_ptr++];
 	if(read_ptr >= AUD_BUFSIZE)
 	  read_ptr -= AUD_BUFSIZE;
+	// Detect if this is mono in both channels and tell encoder
+	if(crealf(opusbuf[i]) != cimagf(opusbuf[i]))
+	  is_stereo = 1;
       }
     }
+    if(!is_stereo)
+      opus_encoder_ctl(audio->opus,OPUS_SET_FORCE_CHANNELS(1));
+    else
+      opus_encoder_ctl(audio->opus,OPUS_SET_FORCE_CHANNELS(OPUS_AUTO));	
     // Encoder accepts stereo, which we represent as complex, but it wants an array of floats
     int const dlen = opus_encode_float(audio->opus,(float *)opusbuf,opus_blocksize,data,sizeof(data));
     if(dlen < 0){

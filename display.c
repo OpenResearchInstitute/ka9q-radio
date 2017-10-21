@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.101 2017/10/20 22:32:42 karn Exp karn $
+// $Id: display.c,v 1.102 2017/10/21 01:56:45 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -558,10 +558,8 @@ void *display(void *arg){
     mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
     mvwprintw(network,row++,col,"IQ pkts: %'llu; late %'d; skips %'d",demod->iq_packets,
 	      Delayed,Skips);
-    if(audio->filename != NULL)
-      mvwprintw(network,row++,col,"PCM stream: %s",audio->filename);
 
-    if(strlen(audio->localdev) > 0)
+    if(strlen(audio->localdev) > 0 && strcmp(audio->localdev,"none") != 0)
       mvwprintw(network,row++,col,"Audio device: %s",audio->localdev);
 
     if(audio->opus_bitrate != 0 || audio->rtp_pcm != 0) 
@@ -576,6 +574,9 @@ void *display(void *arg){
     if(audio->rtp_pcm)
       mvwprintw(network,row++,col,"PCM %'d Hz; %'.1f kb/s; pkts %'llu",audio->samprate,audio->bitrate/1000.,
 		audio->audio_packets);
+
+    if(audio->filename != NULL)
+      mvwprintw(network,row++,col,"Stream: %s",audio->filename);
 
     box(network,0,0);
     mvwaddstr(network,0,35,"I/O");
