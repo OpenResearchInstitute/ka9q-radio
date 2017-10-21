@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.89 2017/10/17 07:02:45 karn Exp karn $
+// $Id: main.c,v 1.90 2017/10/20 22:34:18 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -122,7 +122,7 @@ int main(int argc,char *argv[]){
   set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "a:B:c:d:f:I:k:l:L:m:M:pr:R:qo:s:t:u:vx";
+  char optstring[] = "a:B:c:d:f:I:k:l:L:m:M:pr:R:qo:s:t:Tu:vx";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -170,12 +170,16 @@ int main(int argc,char *argv[]){
       demod->M = strtol(optarg,NULL,0);
       break;
     case 'o':   // Opus codec compressed bit rate target
-      Audio.opus_bitrate = strtol(optarg,NULL,0);
-      if(Audio.opus_bitrate < 1000)
-	Audio.opus_bitrate *= 1000;	// Interpret as kilobits/sec
-      // By default, disable local audio when outputting elsewhere
-      if(strlen(Audio.localdev) == 0)
-	strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
+      {
+	Audio.opus_bitrate = strtol(optarg,NULL,0);
+	if(Audio.opus_bitrate == 0) // No argument given?
+	  Audio.opus_bitrate = 32000; // Default 32 kb/s
+	else if(Audio.opus_bitrate < 500) // Opus says this is min value, but it seems to be 6 kb/s in reality
+	  Audio.opus_bitrate *= 1000;	// Interpret as kilobits/sec
+	// By default, disable local audio when outputting elsewhere
+	if(strlen(Audio.localdev) == 0)
+	  strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
+      }
       break;
     case 'p':
       Audio.rtp_pcm = 1;
@@ -210,6 +214,9 @@ int main(int argc,char *argv[]){
 	double shift = strtod(optarg,NULL);
 	set_shift(demod,shift);
       }
+      break;
+    case 'T': // Tuner lock
+      demod->tuner_lock = 1;
       break;
     case 't':   // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);
