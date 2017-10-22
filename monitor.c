@@ -46,6 +46,8 @@ int inDevNum;                 // Portaudio's audio output device index
 float Audio_buffer[Aud_bufsize]; // Audio playout buffer
 volatile int Read_ptr;           // read_pointer, modified in callback (hence volatile)
 pthread_mutex_t Buffer_mutex;
+float const SCALE = 1./SHRT_MAX;
+
 
 
 struct audio {
@@ -71,7 +73,9 @@ struct audio {
 
   unsigned long packets;    // RTP packets for this session
   unsigned long drops;      // Apparent rtp packet drops
+  unsigned long invalids;   // Unknown RTP type
   unsigned long empties;    // RTP but no data
+  unsigned long dupes;      // Duplicate or old serial numbers
   int age;                  // Display cycles since last active
   unsigned long underruns;  // Callback count of underruns (stereo samples) replaced with silence
   int hw_delay;             // Estimated playout delay in samples
@@ -164,7 +168,8 @@ int main(int argc,char * const argv[]){
   }
   struct iovec iovec[2];
   struct rtp_header rtp;
-  int16_t data[Bufsize];
+  //  int16_t data[Bufsize];
+  signed short data[Bufsize];
   
   iovec[0].iov_base = &rtp;
   iovec[0].iov_len = sizeof(rtp);
@@ -256,6 +261,10 @@ int main(int argc,char * const argv[]){
 
     pthread_mutex_lock(&Audio_mutex); // Keep display thread from modifying the table
 
+    if(rtp.mpt != 10 && rtp.mpt != 20 && rtp.mpt != 11) // 1 byte, no need to byte swap
+      goto endloop; // Discard unknown RTP types to avoid polluting session table
+
+
     struct audio *sp = lookup_session(&sender,rtp.ssrc);
     if(sp == NULL){
       // Not found
@@ -267,19 +276,24 @@ int main(int argc,char * const argv[]){
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
       sp->write_ptr = Read_ptr;
       sp->gain = 1; // 0 dB by default
+      sp->dupes = 0;
     }
     sp->age = 0;
     int drop = 0;
+
+    sp->packets++;
     if(rtp.seq != sp->eseq){
       int const diff = (int)(rtp.seq - sp->eseq);
-      //      fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
-      if(diff < 0 && diff > -10)
+      //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
+      if(diff < 0 && diff > -10){
+	sp->dupes++;
 	goto endloop;	// Drop probable duplicate
+      }
       drop = diff; // Apparent # packets dropped
       sp->drops += abs(drop);
     }
     sp->eseq = (rtp.seq + 1) & 0xffff;
-    sp->packets++;
+
     sp->type = rtp.mpt;
     size -= sizeof(rtp); // Bytes in payload
     if(size <= 0){
@@ -299,9 +313,8 @@ int main(int argc,char * const argv[]){
 	sp->underruns++;
       }
       for(int i=0;i<2*samples;i++){
-	Audio_buffer[sp->write_ptr++] += sp->gain * ntohs(data[i]); // RTP profile specifies big-endian samples
-	if(sp->write_ptr >= Aud_bufsize)
-	  sp->write_ptr -= Aud_bufsize;
+	Audio_buffer[sp->write_ptr++] += sp->gain * SCALE * (signed short)ntohs(data[i]); // RTP profile specifies big-endian samples; back to floating point
+	sp->write_ptr %= Aud_bufsize;
       }
       sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
       sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
@@ -317,10 +330,9 @@ int main(int argc,char * const argv[]){
 	sp->underruns++;
       }
       for(int i=0;i<samples;i++){
-	Audio_buffer[sp->write_ptr++] += sp->gain * ntohs(data[i]);
-	Audio_buffer[sp->write_ptr++] += sp->gain * ntohs(data[i]);
-	if(sp->write_ptr >= Aud_bufsize)
-	  sp->write_ptr -= Aud_bufsize;
+	Audio_buffer[sp->write_ptr++] += sp->gain * SCALE * (signed short)ntohs(data[i]); // Back to floating point range -1 to +1
+	Audio_buffer[sp->write_ptr++] += sp->gain * SCALE * (signed short)ntohs(data[i]);
+	sp->write_ptr %= Aud_bufsize;
       }
       sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
       sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
@@ -353,11 +365,9 @@ int main(int argc,char * const argv[]){
 	  sp->underruns++;
 	  sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
 	}
-	for(int i=0; i < samples; i++){
-	  Audio_buffer[sp->write_ptr++] += sp->gain * outsamps[2*i];
-	  Audio_buffer[sp->write_ptr++] += sp->gain * outsamps[2*i+1];
-	  if(sp->write_ptr >= Aud_bufsize)
-	    sp->write_ptr -= Aud_bufsize;
+	for(int i=0; i < 2*samples; i++){
+	  Audio_buffer[sp->write_ptr++] += sp->gain * outsamps[i];
+	  sp->write_ptr %= Aud_bufsize;
 	}
 	sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
 	sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
@@ -382,6 +392,8 @@ int main(int argc,char * const argv[]){
 
 // Use ncurses to display streams; age out unused ones
 void *display(void *arg){
+  setpriority(PRIO_PROCESS,0,0); // We don't need it
+
   initscr();
   keypad(stdscr,TRUE);
   timeout(Update_interval);
@@ -397,7 +409,7 @@ void *display(void *arg){
     int row = 1;
     wmove(mainscr,row,0);
     wclrtobot(mainscr);
-    mvwprintw(mainscr,row++,1,"Type        channels   BW   Gain      SSRC     Packets     Drops   Underruns   Delay   Source");
+    mvwprintw(mainscr,row++,1,"Type        channels   BW   Gain      SSRC     Packets     Dupes       Drops   Underruns   Delay   Source");
     pthread_mutex_lock(&Audio_mutex);
     struct audio *nextsp; // Save in case we close the current one
     for(struct audio *sp = Audio; sp != NULL; sp = nextsp){
@@ -448,24 +460,23 @@ void *display(void *arg){
 	type = typebuf;
 	break;
       }
-      move(row,1);
-      clrtoeol();
+      wmove(mainscr,row,1);
+      wclrtoeol(mainscr);
       if(sp->age < 5)
 	wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
-      mvwprintw(mainscr,row,1,"%-15s%5d%5d%7.1lf%10lx%'12lu%'10u%'12lu%'8.3lf   %s:%s",
-		type,sp->channels,bw,20*log10(sp->gain),sp->ssrc,sp->packets,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
+      mvwprintw(mainscr,row,1,"%-15s%5d%5d%7.1lf%10lx%'12lu%'10lu%'12lu%'12lu%'8.3lf   %s:%s",
+		type,sp->channels,bw,20*log10(sp->gain),sp->ssrc,sp->packets,sp->dupes,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
       wattr_off(mainscr,A_BOLD,NULL);
       if(current == NULL)
 	current = sp;
-      if(sp == current){
-	mvchgat(row,28,5,A_STANDOUT,0,NULL);
-      }
+      if(sp == current)
+	mvwchgat(mainscr,row,28,5,A_STANDOUT,0,NULL);
+
       row++;
-      move(row,1);
+
     }
     pthread_mutex_unlock(&Audio_mutex);
-    // Draw the box and banner last, to avoid the wclrtobot() calls
-    //    box(mainscr,0,0);
+    move(row,1);
     clrtobot();
     mvwprintw(mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
     wnoutrefresh(mainscr);
@@ -604,7 +615,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     op += chunk;
     samples_left -= chunk;
     // Update the read pointer, try to do it atomically in case we can't lock
-    Read_ptr = (Read_ptr + chunk) & (Aud_bufsize - 1); // Assumes Aud_bufsize is power of 2!!
+    Read_ptr = (Read_ptr + chunk) % Aud_bufsize;
   }
 #else
   // Old slow code
@@ -613,8 +624,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     Audio_buffer[Read_ptr++] = 0;
     *op++ = Audio_buffer[Read_ptr];
     Audio_buffer[Read_ptr++] = 0;      // zero out data just read
-    if(Read_ptr >= Aud_bufsize)
-      Read_ptr -= Aud_bufsize;
+    Read_ptr %= Aud_bufsize;
   }
 #endif
 #if 1
