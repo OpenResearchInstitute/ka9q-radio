@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.42 2017/10/10 12:26:41 karn Exp karn $
+// $Id: fm.c,v 1.43 2017/10/17 07:02:04 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -47,7 +47,9 @@ void *demod_fm(void *arg){
   int const PL_M = (AM - 1) / PL_decimate + 1;
   int const PL_N = PL_L + PL_M - 1;
   complex float * const plresponse = fftwf_alloc_complex(PL_N/2+1);
-  float const filter_gain = 1./AN;  // Filter gain is 1./AN for both filters
+  // Filter gain for both filters
+  // the '3' was set empirically, to make the audio levels sound comparable
+  float const filter_gain = 3./AN;
   {
     memset(plresponse,0,(PL_N/2+1)*sizeof(*plresponse));
     // Positive frequencies only
