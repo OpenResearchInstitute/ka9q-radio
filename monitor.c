@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.24 2017/10/20 18:10:30 karn Exp karn $
+// $Id: monitor.c,v 1.26 2017/10/22 06:26:44 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -97,7 +97,7 @@ int write_is_ahead(int write_ptr,int read_ptr);
 int main(int argc,char * const argv[]){
   // Try to improve our priority
   int prio = getpriority(PRIO_PROCESS,0);
-  prio = setpriority(PRIO_PROCESS,0,prio - 20);
+  prio = setpriority(PRIO_PROCESS,0,prio - 15);
 
   // Drop root if we have it
   seteuid(getuid());

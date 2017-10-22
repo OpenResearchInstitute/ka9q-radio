@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.74 2017/10/17 07:03:58 karn Exp karn $
+// $Id: radio.c,v 1.75 2017/10/21 01:56:31 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -244,9 +244,9 @@ double set_first_LO(struct demod * const demod,double const first_LO){
     demod->requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
     // These need a way to set
     demod->requested_status.samprate = ADC_samprate; // Preferred samprate; ignored by funcube
-    demod->requested_status.lna_gain = 1;
-    demod->requested_status.mixer_gain = 1;
-    demod->requested_status.if_gain = 0;
+    demod->requested_status.lna_gain = 0xff;    // 0xff means "don't change"
+    demod->requested_status.mixer_gain = 0xff;
+    demod->requested_status.if_gain = 0xff;
     
     // Wait up to 1 sec for the frequency to actually change
     // Tries are limited to keep two or more receivers from continually fighting, or if it's a recording
