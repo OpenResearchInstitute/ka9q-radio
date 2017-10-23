@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.102 2017/10/21 01:56:45 karn Exp karn $
+// $Id: display.c,v 1.103 2017/10/21 05:00:37 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -138,6 +138,9 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     if(fabs(tunestep) < 1)
       break; // First LO can't make steps < 1  Hz
     
+    if(demod->tuner_lock) // Tuner is locked
+      break;
+
     if(Frequency_lock){
       // Keep frequency but move LO2 in opposite direction, which will move LO1
       double new_lo2 = demod->second_LO + tunestep;
@@ -221,8 +224,9 @@ void *display(void *arg){
   col = 0;
   row += 12;
   WINDOW * const info = newwin(8,42,row,col);     // Band information
-  row += 8;
+  col += 42;
   WINDOW * const network = newwin(8,78,row,col); // Network status information
+  col = 0;
   row += 8;
   WINDOW * const debug = newwin(8,78,row,col);
   scrollok(debug,1);
@@ -268,33 +272,36 @@ void *display(void *arg){
 	dial_retry = t;
       }
     }
-    while(dial_fd != -1){
+    if(dial_fd != -1){
       struct input_event event;
-      int len = read(dial_fd,&event,sizeof(event));
+      int len;
+      while((len = read(dial_fd,&event,sizeof(event))) > 0){
+	// Got something from the powermate knob
+	// ignore event.type == EV_SYN
+	if(event.type == EV_REL){
+	  if(event.code == REL_DIAL){
+	    // Dial has been turned. Simulate up/down arrow tuning commands
+	    if(event.value > 0){
+	      adjust_item(demod,tuneitem,tunestep10);
+	    } else if(event.value < 0)
+	      adjust_item(demod,tuneitem,-tunestep10);
+	  }
+	} else if(event.type == EV_KEY){
+	  if(event.code == BTN_MISC)
+	    if(event.value){
+	      if(tuneitem == 0 || tuneitem == 1)
+		Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
+	      else if(tuneitem == 2)
+		demod->tuner_lock = !demod->tuner_lock;
+	    }
+	}
+	continue;
+      }
       if(len == -1 && errno != EAGAIN){
 	// We're non-blocking so error returns with EAGAIN are routine
 	// otherwise, close and re-open
 	close(dial_fd);
 	dial_fd = -1; // cause another open attempt on next iteration
-	break;
-      }
-      if(len < sizeof(event))
-	continue; // Ignore it
-
-      // Got something from the powermate knob
-      // ignore event.type == EV_SYN
-      if(event.type == EV_REL){
-	if(event.code == REL_DIAL){
-	  // Dial has been turned. Simulate up/down arrow tuning commands
-	  if(event.value > 0){
-	    adjust_item(demod,tuneitem,tunestep10);
-	  } else if(event.value < 0)
-	    adjust_item(demod,tuneitem,-tunestep10);
-	}
-      } else if(event.type == EV_KEY){
-	if(event.code == BTN_MISC)
-	  if(event.value)
-	    Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
       }
     }
     // Update display
@@ -313,8 +320,9 @@ void *display(void *arg){
     mvwprintw(tuning,row,col,"%'28.3f Hz",get_freq(demod) + (demod->high + demod->low)/2);
     mvwaddstr(tuning,row++,col,"Center");
 
+    wattroff(tuning,A_UNDERLINE);
     if(demod->tuner_lock)
-      wattron(tuning,A_UNDERLINE);      
+      wattron(tuning,A_UNDERLINE);    
 
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
