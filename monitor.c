@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.26 2017/10/22 06:26:44 karn Exp karn $
+// $Id: monitor.c,v 1.27 2017/10/22 07:37:14 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -464,7 +464,7 @@ void *display(void *arg){
       wclrtoeol(mainscr);
       if(sp->age < 5)
 	wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
-      mvwprintw(mainscr,row,1,"%-15s%5d%5d%7.1lf%10lx%'12lu%'10lu%'12lu%'12lu%'8.3lf   %s:%s",
+      mvwprintw(mainscr,row,1,"%-15s%5d%5d%+7.0lf%10lx%'12lu%'10lu%'12lu%'12lu%'8.3lf   %s:%s",
 		type,sp->channels,bw,20*log10(sp->gain),sp->ssrc,sp->packets,sp->dupes,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
       wattr_off(mainscr,A_BOLD,NULL);
       if(current == NULL)
