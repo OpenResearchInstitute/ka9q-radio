@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.14 2017/10/20 07:15:07 karn Exp karn $
+// $Id: linear.c,v 1.15 2017/10/20 18:09:28 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -259,7 +259,7 @@ void *demod_linear(void *arg){
       for(int n=0; n<filter->olen; n++){
 	float const sampsq = cnrmf(filter->output.c[n]);
 	signal += sampsq;
-	float samp = sqrtf(sampsq);
+	float const samp = sqrtf(sampsq);
 
 	// Remove carrier DC, use for AGC
 	// DC_filter will always be positive since sqrtf() is positive
@@ -315,7 +315,7 @@ void *demod_linear(void *arg){
 	  audio[n] = crealf(filter->output.c[n]);
 	send_mono_audio(demod->audio,audio,filter->olen);
       } else {
-	send_stereo_audio(demod->audio,filter->output.c,filter->olen);
+	send_stereo_audio(demod->audio,(float *)filter->output.c,filter->olen);
       }
     } // not envelope detection
     demod->bb_power = (signal + noise) / filter->olen;
