@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.52 2017/10/21 05:00:52 karn Exp karn $
+// $Id: audio.c,v 1.53 2017/10/22 06:28:22 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -11,11 +11,9 @@
 #include <unistd.h>
 #include <limits.h>
 #include <string.h>
-#include <complex.h>
 #include <stdint.h>
 #include <time.h>
 #include <math.h>
-#include <complex.h>
 #undef I
 #include <sys/select.h>
 #include <sys/types.h>
@@ -49,37 +47,65 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       const PaStreamCallbackTimeInfo* timeInfo,
 		       PaStreamCallbackFlags statusFlags,
 		       void *userData){
-  complex float *op = outputBuffer;
+  float *op = outputBuffer;
   struct audio * const audio = userData;
 
-  int samples_left = framesPerBuffer; // A stereo frame is two samples
+  unsigned long samples_left = framesPerBuffer; // A stereo frame is two samples
   pthread_mutex_lock(&audio->buffer_mutex);
-  while(samples_left > 0){
-    // chunk is the smallest of the samples available, needed and the amount available before wrap
-    int chunk = (audio->write_ptr - audio->read_ptr) % AUD_BUFSIZE;
+  while(samples_left != 0){
+    // chunk is the smallest of the samples needed and the amount available before wrap
+    // Note: should be *unsigned* for wraparound to work properly
+    unsigned long chunk = samples_left;
     if(chunk > AUD_BUFSIZE - audio->read_ptr)
-       chunk = AUD_BUFSIZE - audio->read_ptr;
-    if(chunk > samples_left)
-      chunk = samples_left;
+      chunk = AUD_BUFSIZE - audio->read_ptr; // Will wrap before done
+
     if(chunk == 0)
       break; // Nothing to send!
-    memcpy(op,&audio->audiobuffer[audio->read_ptr],chunk * sizeof(*op));
-    //    memset(&audio->buffer[audio->read],0,chunk * sizeof(*op)); // Zero buffer just read
+    memcpy(op, audio->audiobuffer + audio->read_ptr, chunk * sizeof(*op));
     op += chunk;
-    samples_left -= chunk;
-    // Update the read pointer
     audio->read_ptr = (audio->read_ptr + chunk) % AUD_BUFSIZE;
+    samples_left -= chunk;
   }
   pthread_mutex_unlock(&audio->buffer_mutex);
   memset(op,0,samples_left * sizeof(*op)); // Pad with silence
   return 0;
 }
 
-// Send 'size' stereo samples, each in a complex float
-int send_stereo_audio(struct audio * const audio,complex float const * const buffer,int const size){
+// Send 'size' stereo samples, each in a pair of floats
+int send_stereo_audio(struct audio * const audio,float const * buffer,int const size){
   // Write to circular buffer for Opus, PCM and/or portaudio
   pthread_mutex_lock(&audio->buffer_mutex);
+  int samples_left = 2*size;
+  while(samples_left != 0){
+    unsigned chunk = samples_left;
+    if(chunk > AUD_BUFSIZE - audio->write_ptr)
+      chunk = AUD_BUFSIZE - audio->write_ptr;
+    memcpy(audio->audiobuffer + audio->write_ptr, buffer, chunk * sizeof(*buffer));
+    audio->write_ptr = (audio->write_ptr + chunk) % AUD_BUFSIZE;
+    buffer += chunk;
+    samples_left -= chunk;
+  }
+  pthread_cond_broadcast(&audio->buffer_cond);
+  pthread_mutex_unlock(&audio->buffer_mutex);
+
+  if(audio->stream){
+    // Write PCM to file stream
+    int16_t samples[2*size];
+    for(int i=0;i<2*size;i++)
+      samples[i] = scaleclip(buffer[i]);
+
+    fwrite(samples,sizeof(samples[0]),2*size,audio->stream);
+  }
+  return 0;
+}
+
+// Send 'size' mono samples, each in a float
+// Converted to "stereo" for consistency
+int send_mono_audio(struct audio * const audio,float const * const buffer,int const size){
+  // Write doubled floats to circular buffer for Opus, PCM and/or portaudio
+  pthread_mutex_lock(&audio->buffer_mutex);
   for(int i=0; i < size; i++){
+    audio->audiobuffer[audio->write_ptr++] = buffer[i];
     audio->audiobuffer[audio->write_ptr++] = buffer[i];
     audio->write_ptr %= AUD_BUFSIZE;
   }
@@ -87,36 +113,10 @@ int send_stereo_audio(struct audio * const audio,complex float const * const buf
   pthread_mutex_unlock(&audio->buffer_mutex);
 
   if(audio->stream){
-    // Write to file stream
-    for(int i=0;i<size;i++){
-      int16_t samples[2];
-
-      samples[0] = scaleclip(crealf(buffer[i]));
-      samples[1] = scaleclip(cimagf(buffer[i]));
-      fwrite(&samples,sizeof(samples[0]),2,audio->stream);
-    }
-  }
-  return 0;
-}
-
-// Send 'size' mono samples, each in a float
-int send_mono_audio(struct audio * const audio,float const * const buffer,int const size){
-  // Write to circular buffer for Opus, PCM and/or portaudio
-  pthread_mutex_lock(&audio->buffer_mutex);
-  for(int i=0; i < size; i++){
-    audio->audiobuffer[audio->write_ptr++] = CMPLXF(buffer[i],buffer[i]);
-    audio->write_ptr %= AUD_BUFSIZE;
-  }
-  pthread_cond_broadcast(&audio->buffer_cond);
-  pthread_mutex_unlock(&audio->buffer_mutex);
-
-  if(audio->stream){
-    // Stream in stereo for consistency
-    for(int i=0;i<size;i++){
-      int16_t samples[2];
-      samples[1] = samples[0] = scaleclip(buffer[i]);
-      fwrite(&samples,sizeof(samples[0]),2,audio->stream);
-    }
+    int16_t samples[2*size];
+    for(int i=0;i<size;i++)
+      samples[2*i] = samples[2*i+1] = scaleclip(buffer[i]);
+    fwrite(samples,sizeof(samples[0]),2*size,audio->stream);
   }
   return 0;
 }
@@ -144,7 +144,8 @@ void *stereo_opus_audio(void *arg){
     fprintf(stderr,"80/100/120 supported only on opus 1.2 and later\n");
     return NULL;
   }
-  int const opus_blocksize = round(audio->opus_blocktime * audio->samprate / 1000.);
+  // Number of samples (note: twice number of stereo frames) in an Opus block
+  int const opus_blocksize = round(2 *audio->opus_blocktime * audio->samprate / 1000.);
   int error;
   audio->opus = opus_encoder_create(audio->samprate,2,OPUS_APPLICATION_AUDIO,&error);
   if(audio->opus == NULL){
@@ -192,38 +193,22 @@ void *stereo_opus_audio(void *arg){
     }
     pthread_mutex_unlock(&audio->buffer_mutex);   // No more need for locking; only write_ptr changes asynchronously
 
+    int dlen = 0;
     // Is what we want contiguous in the buffer?
-    float *opusdata;
-    complex float opusbuf[sizeof(complex float) * opus_blocksize]; // Only if a copy is needed
-    int is_stereo = 0;
-    
     if(read_ptr + opus_blocksize <= AUD_BUFSIZE){
-      // Yes; avoid copy. Just see if it's stereo
-      for(int i=0; i < opus_blocksize; i++)
-	is_stereo |= (crealf(audio->audiobuffer[read_ptr+i]) != cimagf(audio->audiobuffer[read_ptr+i]));
-
-      opusdata = (float *)(audio->audiobuffer + read_ptr); // Tell opus to get it direct from the queue
-      read_ptr += opus_blocksize;
-      read_ptr %= AUD_BUFSIZE;
+      // Yes; avoid copy
+      dlen = opus_encode_float(audio->opus, audio->audiobuffer + read_ptr, opus_blocksize/2, data,sizeof(data));
+      read_ptr = (read_ptr + opus_blocksize) % AUD_BUFSIZE;
     } else {
       // Copy to contiguous bounce buffer
-      for(int i=0; i < opus_blocksize; i++){
-	complex float samp = audio->audiobuffer[read_ptr++];
-	read_ptr %= AUD_BUFSIZE;
-	
-	opusbuf[i] = samp;
-	// Stereo will be non-zero iff any of the pairs don't match
-	is_stereo |= (crealf(samp) != cimagf(samp));
-      }
-      opusdata = (float *)opusbuf;
+      float opusbuf[sizeof(float) * opus_blocksize]; // Only if a copy is needed	
+      int chunk = AUD_BUFSIZE - read_ptr;
+      memcpy(opusbuf,audio->audiobuffer + read_ptr,sizeof(float) * chunk);
+      int remainder = opus_blocksize - chunk;
+      memcpy(opusbuf+chunk,audio->audiobuffer,sizeof(float) * remainder);
+      read_ptr = remainder;
+      dlen = opus_encode_float(audio->opus,opusbuf,opus_blocksize/2,data,sizeof(data));
     }
-    if(!is_stereo)
-      opus_encoder_ctl(audio->opus,OPUS_SET_FORCE_CHANNELS(1));
-    else
-      opus_encoder_ctl(audio->opus,OPUS_SET_FORCE_CHANNELS(OPUS_AUTO));	
-    int dlen = opus_encode_float(audio->opus,opusdata,opus_blocksize,data,sizeof(data));
-
-
     if(dlen < 0){
       fprintf(stderr,"opus encode error %d\n",dlen);
       continue;
@@ -294,20 +279,21 @@ void *pcm_audio(void *arg){
       avail = audio->write_ptr - read_ptr; // How much is available
       if(avail < 0)
 	avail += AUD_BUFSIZE; // write has wrapped around behind read
-      if(avail >= PCM_BUFSIZE/2)
+      if(avail >= PCM_BUFSIZE)
 	break;
       pthread_cond_wait(&audio->buffer_cond,&audio->buffer_mutex); // Block until enough available
     }
     pthread_mutex_unlock(&audio->buffer_mutex);   // No more need for locking; only write_ptr changes asynchronously
-    for(int i=0; i < PCM_BUFSIZE/2; i++){
-      complex float samp = audio->audiobuffer[read_ptr++];
+    for(int i=0; i < PCM_BUFSIZE; i++){
+      float samp = audio->audiobuffer[read_ptr++];
       read_ptr %= AUD_BUFSIZE;
 
-      PCM_buf[2*i] = htons(scaleclip(crealf(samp)));
-      PCM_buf[2*i+1] = htons(scaleclip(cimagf(samp)));
+      PCM_buf[i] = htons(scaleclip(samp));
 
-      // Stereo will be non-zero iff any of the pairs don't match
-      stereo |= PCM_buf[2*i] ^ PCM_buf[2*i+1];
+      if(i & 1){
+	// Stereo will be non-zero iff any of the pairs don't match
+	stereo |= PCM_buf[i] ^ PCM_buf[i-1];
+      }
     }
     audio->audio_packets++;
     rtp.seq = htons(seq++);

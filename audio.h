@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.27 2017/09/26 16:08:14 karn Exp karn $
+// $Id: audio.h,v 1.28 2017/09/26 18:12:12 karn Exp karn $
 // Variables and structures for KA9Q SDR receiver audio subsystem
 // Copyright 2017 Phil Karn, KA9Q
 
@@ -17,8 +17,8 @@ struct audio {
   // Audio buffer written to by demodulator, read by audio output routines
   pthread_mutex_t buffer_mutex;
   pthread_cond_t buffer_cond;
-#define AUD_BUFSIZE 65536
-  complex float audiobuffer[AUD_BUFSIZE];
+#define AUD_BUFSIZE (1<<17)
+  float audiobuffer[AUD_BUFSIZE];
   int write_ptr;
   int read_ptr;       // for portaudio
 
@@ -51,7 +51,7 @@ struct audio {
 extern struct audio Audio;
 
 int send_mono_audio(struct audio *,float const *,int);
-int send_stereo_audio(struct audio *,complex float const *,int);
+int send_stereo_audio(struct audio *,float const *,int);
 int setup_audio(struct audio *);
 void audio_cleanup(void *);
 
