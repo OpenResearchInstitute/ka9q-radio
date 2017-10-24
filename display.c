@@ -1,3 +1,4 @@
+
 // $Id: display.c,v 1.103 2017/10/21 05:00:37 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
@@ -28,11 +29,6 @@
 #include <ctype.h>
 #include <sys/socket.h>
 #include <netdb.h>
-// We need some of these definitions for the Griffin dial, but some conflict
-// with definitions in ncurses.h !!arrrrggggh!!
-// So we'll declare ourselves the small parts we need later
-//#include <linux/input.h>
-
 #include "rtp.h"
 #include "radio.h"
 #include "audio.h"
@@ -41,11 +37,14 @@
 #include "multicast.h"
 #include "bandplan.h"
 
-#define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
-
 float Spare; // General purpose knob for experiments
 
+int touch_x,touch_y;
+
 extern int Update_interval;
+
+double Tunestep10;
+int mod_x,mod_y;
 
 // Pop up a temporary window with the contents of a file in the
 // library directory (usually /usr/local/share/ka9q-radio/)
@@ -109,8 +108,8 @@ void getentry(char const *prompt,char *response,int len){
   delwin(pwin);
 }
 
-FILE *Tty;
-SCREEN *Term;
+static FILE *Tty;
+static SCREEN *Term;
 
 
 void display_cleanup(void *arg){
@@ -123,11 +122,11 @@ void display_cleanup(void *arg){
     fclose(Tty);
 }
 
-int Frequency_lock;
-
+static int Frequency_lock;
+static int tuneitem;
 
 // Adjust the selected item up or down one step
-static void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
+void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
   switch(tuneitem){
   case 0: // Carrier frequency
   case 1: // Center frequency - treat the same
@@ -182,6 +181,107 @@ static void adjust_item(struct demod *demod,const int tuneitem,const double tune
     break;
   }
 }
+#if 0 // highly incomplete
+
+
+double scrape_number(WINDOW *win, int y, int x, double **increment){
+  char c;
+  int i = 0;
+  char buf[100];
+  int max_y = 0,max_x = 0;
+  int right_end = -1;
+  int left_end = -1;
+  getmaxyx(win,max_y,max_x);
+
+  // Look for right end
+  int multiplier = -1;
+  int i;
+  for(i=x; i < max_x; i++){
+    c = mvwinch(win,y,x) & A_CHARTEXT;
+    if(c == ',')
+      continue;
+    else if(isdigit(c))
+      multiplier++;
+    else
+      break;
+  }
+  right_end = i-1;
+
+  if(c != '.'){
+    // Not found to right, look left
+    multiplier = 0;
+    for(i=x; i >= 0; i--){
+    c = mvwinch(win,y,x) & A_CHARTEXT;
+    if(c == ',')
+      continue;
+    else if(isdigit(c))
+      multiplier--;
+    else
+      break;
+    }
+  }
+  left_end = i;
+  if(c != '.'){
+    // No decimal point found
+  }
+
+
+  // look left for first element of field
+  while(x > 0){
+    c = mvwinch(win,y,x-1) & A_CHARTEXT;    
+    if(!isdigit(c) && c != ',' && c != '.' && c != '-' && c != '+')
+      break;
+    x--;
+  }
+
+
+  while(x < max_x && i < sizeof(buf)){
+    // To end of line
+    c = mvwinch(win,y,x++) & A_CHARTEXT;
+    if(isdigit(c) || c == '.' || c == '-' || c == '+')
+      buf[i++] = c;
+  }
+  buf[i] = '\0';
+  if(strlen(buf) == 0){
+    if(increment)
+      *increment = NULL; 
+    return NAN;
+  }
+  return strtod(buf,NULL);
+}
+
+
+
+
+
+void increment(void){
+  int c;
+
+  c = mvinch(mod_y,mod_x) & A_CHARTEXT;
+  if(!isdigit(c))
+    return;
+
+  while(1){
+    if(c != '9'){
+      c++;
+      return;
+    }
+    c = '0';
+    for(x = mod_x - 1; x >= 0; x--){
+      c = mvinch(mod_y,x) & A_CHARTEXT;
+      if(isdigit(c))
+	break;
+      if(
+    }
+    
+
+  }
+}
+void decrement(void){
+}
+
+#endif
+
 
 // Thread to display receiver state, updated at 10Hz by default
 // Uses the ancient ncurses text windowing library
@@ -195,8 +295,19 @@ void *display(void *arg){
   assert(arg != NULL);
   struct demod * const demod = arg;
   struct audio * const audio = demod->audio;
-  double tunestep10 = pow(10.,demod->tunestep);
-  int tuneitem = 0;
+
+#ifdef linux
+  extern void *knob(void *);
+  pthread_t pthread_knob;
+  pthread_create(&pthread_knob,NULL,knob,demod);
+
+  extern void *touch(void *);
+  pthread_t pthread_touch;
+  //  pthread_create(&pthread_touch,NULL,touch,demod);   // Disable for now
+#endif
+
+
+  Tunestep10 = pow(10.,demod->tunestep);
 
   // talk directly to the terminal
   Tty = fopen("/dev/tty","r+");
@@ -236,75 +347,19 @@ void *display(void *arg){
   wprintw(debug,"Compiled on %s at %s\n",__DATE__,__TIME__);
   wnoutrefresh(debug);
 
-  int dial_fd = -1;
-  time_t dial_retry = 0; // Try immediately the first time
-
   struct sockaddr old_input_source_address;
   char source[NI_MAXHOST];
   char sport[NI_MAXSERV];
   memset(source,0,sizeof(source));
   memset(sport,0,sizeof(sport));
 
+  //  mmask_t mask = ALL_MOUSE_EVENTS;
+  mmask_t mask = 0; // Off for now
+  mousemask(mask,NULL);
+  MEVENT mouse_event;
+
   for(;;){
-    // Poll Griffin Powermate knob, if present
-
-    // Redefine stuff we need from linux/input.h
-    // We can't include it because it conflicts with ncurses.h!
-#define EV_SYN 0
-#define EV_KEY 1
-#define EV_REL 2
-#define REL_DIAL 7    
-#define BTN_MISC 0x100
-    struct input_event {
-      struct timeval time;
-      uint16_t type;
-      uint16_t code;
-      int32_t value;
-    };
-    // End of redefined input stuff
-
-    // Look for a powermate tuning knob
-    if(dial_fd == -1){
-      time_t t;
-      time(&t);
-      if(t >= dial_retry + 1){ // Max retry rate 1/sec
-	dial_fd = open(DIAL,O_RDONLY|O_NDELAY);
-	dial_retry = t;
-      }
-    }
-    if(dial_fd != -1){
-      struct input_event event;
-      int len;
-      while((len = read(dial_fd,&event,sizeof(event))) > 0){
-	// Got something from the powermate knob
-	// ignore event.type == EV_SYN
-	if(event.type == EV_REL){
-	  if(event.code == REL_DIAL){
-	    // Dial has been turned. Simulate up/down arrow tuning commands
-	    if(event.value > 0){
-	      adjust_item(demod,tuneitem,tunestep10);
-	    } else if(event.value < 0)
-	      adjust_item(demod,tuneitem,-tunestep10);
-	  }
-	} else if(event.type == EV_KEY){
-	  if(event.code == BTN_MISC)
-	    if(event.value){
-	      if(tuneitem == 0 || tuneitem == 1)
-		Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
-	      else if(tuneitem == 2)
-		demod->tuner_lock = !demod->tuner_lock;
-	    }
-	}
-	continue;
-      }
-      if(len == -1 && errno != EAGAIN){
-	// We're non-blocking so error returns with EAGAIN are routine
-	// otherwise, close and re-open
-	close(dial_fd);
-	dial_fd = -1; // cause another open attempt on next iteration
-      }
-    }
-    // Update display
+    // Scrape and update display
 
     // Tuning control window - these can be adjusted by the user
     // using the keyboard or tuning knob, so be careful with formatting
@@ -590,6 +645,9 @@ void *display(void *arg){
     mvwaddstr(network,0,35,"I/O");
     wnoutrefresh(network);
 
+    touchwin(debug); // since we're not redrawing it every cycle
+    wnoutrefresh(debug);
+  
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
     // They come from the ' option in the printf formats
@@ -606,23 +664,28 @@ void *display(void *arg){
       hcol = - demod->tunestep - 3; // 1,000,000,000
     } else
       hcol = 0; // can't happen, but shuts up compiler
-    // Highlight digit
+    // Highlight digit - these wmoves must be last right before doupdate()
     if(tuneitem >= 0 && tuneitem <= 3){
-      mvwchgat(tuning,tuneitem+1,hcol+24,1,A_STANDOUT,0,NULL);
-      wnoutrefresh(tuning);
+      mod_y = tuneitem+1;
+      mod_x = hcol+24;
+      wmouse_trafo(tuning,&mod_y,&mod_x,TRUE);
     }
     else if(tuneitem >= 4 && tuneitem <= 7){
-      mvwchgat(filtering,tuneitem+1-4,hcol+13,1,A_STANDOUT,0,NULL);
-      wnoutrefresh(filtering);
+      mod_y = tuneitem+1-4;
+      mod_x = hcol+13;
+      wmouse_trafo(filtering,&mod_y,&mod_x,TRUE);
     }
-    touchwin(debug); // since we're not redrawing it every cycle
-    wnoutrefresh(debug);
+
+    move(mod_y,mod_x);
     doupdate();      // Right before we pause
     
     // Scan and process keyboard commands
     int c = getch(); // read keyboard with timeout; controls refresh rate
 
     switch(c){
+    case KEY_MOUSE: // Mouse event
+      getmouse(&mouse_event);
+      break;
     case ERR:   // no key; timed out. Do nothing.
       break;
     case 'q':   // Exit entire radio program
@@ -680,7 +743,7 @@ void *display(void *arg){
     case KEY_HOME: // Go back to item 0
       tuneitem = 0;
       demod->tunestep = 0;
-      tunestep10 = 1;
+      Tunestep10 = 1;
       break;
     case KEY_BACKSPACE: // Cursor left: increase tuning step 10x
     case KEY_LEFT:
@@ -689,7 +752,7 @@ void *display(void *arg){
 	break;
       }
       demod->tunestep++;
-      tunestep10 *= 10;
+      Tunestep10 *= 10;
       break;
     case KEY_RIGHT:     // Cursor right: decrease tuning step /10
       if(demod->tunestep <= -3){
@@ -697,13 +760,13 @@ void *display(void *arg){
 	break;
       }
       demod->tunestep--;
-      tunestep10 /= 10;
+      Tunestep10 /= 10;
       break;
     case KEY_UP:        // Increase whatever digit we're tuning
-      adjust_item(demod,tuneitem,tunestep10);
+      adjust_item(demod,tuneitem,Tunestep10);
       break;
     case KEY_DOWN:      // Decrease whatever we're tuning
-      adjust_item(demod,tuneitem,-tunestep10);
+      adjust_item(demod,tuneitem,-Tunestep10);
       break;
     case '\f':  // Screen repaint (formfeed, aka control-L)
       clearok(curscr,TRUE);
@@ -843,6 +906,14 @@ void *display(void *arg){
       beep();
       break;
     }
+    int mx,my;
+    mx = mouse_event.x;
+    my = mouse_event.y;
+    mouse_event.y = mouse_event.x = mouse_event.z = 0;
+    if(mx != 0 && my != 0){
+      mod_x = mx;
+      mod_y = my;
+    }
   }
  done:;
   endwin();
@@ -857,3 +928,27 @@ void *display(void *arg){
   audio_cleanup(demod->audio);
   exit(0);
 }
+
+// Hooks for knob.c
+void adjust_up(void *arg){
+  struct demod *demod = arg;
+  adjust_item(demod,tuneitem,Tunestep10);
+}
+void adjust_down(void *arg){
+  struct demod *demod = arg;
+  adjust_item(demod,tuneitem,-Tunestep10);
+}
+void toggle_lock(void *arg){
+  struct demod *demod = arg;
+  if(tuneitem == 0 || tuneitem == 1)
+    Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
+  else if(tuneitem == 2)
+    demod->tuner_lock = !demod->tuner_lock;
+}
+
+// character size 16 pix high x 9 wide??
+void touchitem(void *arg,int x,int y,int ev){
+  touch_x = x /8;
+  touch_y = y / 16;
+}
+
