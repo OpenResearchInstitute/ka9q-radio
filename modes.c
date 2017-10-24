@@ -1,4 +1,4 @@
-// $Id: Modes.c,v 1.21 2017/10/10 12:19:59 karn Exp karn $
+// $Id: modes.c,v 1.22 2017/10/16 23:24:24 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,16 +100,16 @@ int readmodes(char *file){
       if(option == NULL)
 	break; // No more
 
-      if(strcasecmp(option,"conj") == 0){
-	mp->flags |= CONJ;         // For independent sideband: LSB on left, USB on right
+      if(strcasecmp(option,"isb") == 0 || strcasecmp(option,"conj") == 0){
+	mp->flags |= ISB;         // For independent sideband: LSB on left, USB on right
       } else if(strcasecmp(option,"flat") == 0){
 	mp->flags |= FLAT;         // FM only
       } else if(strcasecmp(option,"cal") == 0){
-	mp->flags |= CAL|COHERENT; // Calibrate implies coherent
+	mp->flags |= CAL|PLL; // Calibrate implies PLL
       } else if(strcasecmp(option,"square") == 0){
-	mp->flags |= SQUARE|COHERENT; // Square implies coherent
-      } else if(strcasecmp(option,"coherent") == 0){
-	mp->flags |= COHERENT;
+	mp->flags |= SQUARE|PLL; // Square implies PLL
+      } else if(strcasecmp(option,"coherent") == 0 || strcasecmp(option,"pll") == 0){
+	mp->flags |= PLL;
       } else if(strcasecmp(option,"envelope") == 0){
 	mp->flags |= ENVELOPE | MONO; // Envelope detected AM implies mono
       } else if(strcasecmp(option,"mono") == 0){

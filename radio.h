@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.54 2017/10/10 12:20:51 karn Exp karn $
+// $Id: radio.h,v 1.55 2017/10/21 01:56:18 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -15,7 +15,7 @@ struct modetab {
   char name[16];
   char demod_name[16];
   void * (*demod)(void *); // Address of demodulator routine
-  int flags;        // Special purpose flags, e.g., CONJ
+  int flags;        // Special purpose flags, e.g., ISB
   float shift;      // Audio frequency shift (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
   float low;        // Lower edge of IF passband
@@ -83,9 +83,9 @@ struct demod {
   int terminate;                  // set to 1 by set_mode() to request graceful termination
   int flags;                      // Special flags to demodulator
 // Modetab flags
-#define CONJ 1      // Cross-conjugation of positive and negative frequencies, for ISB
+#define ISB 1      // Cross-conjugation of positive and negative frequencies, for ISB
 #define FLAT 2      // No baseband filtering for FM
-#define COHERENT 4  // Coherent carrier tracking
+#define PLL 4  // Coherent carrier tracking
 #define CAL 8       // Calibrate mode in coherent demod; adjust calibrate rather than frequency
 #define SQUARE   16 // Square carrier in coherent loop (BPSK/suppressed carrier AM)
 #define ENVELOPE 32 // Envelope detection of AM
@@ -131,7 +131,8 @@ struct demod {
   complex double shift_phasor;
   complex double shift_phasor_step;
 
-  int tunestep;       // User interface cursor location, log10(); e.g., 3 -> thousands
+  int tunestep;       // Tuning column, log10(); e.g., 3 -> thousands
+  int tuneitem;       // Tuning entry index
 
   // Experimental notch filter
   struct notchfilter *nf;

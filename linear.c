@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.15 2017/10/20 18:09:28 karn Exp karn $
+// $Id: linear.c,v 1.16 2017/10/23 09:02:18 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -78,7 +78,7 @@ void *demod_linear(void *arg){
 
   // Detection filter
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
-					       (demod->flags & CONJ) ? CROSS_CONJ : COMPLEX);
+					       (demod->flags & ISB) ? CROSS_CONJ : COMPLEX);
   demod->filter = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
@@ -112,7 +112,7 @@ void *demod_linear(void *arg){
     spindown(demod,filter->input.c);
     demod->if_power = cpower(filter->input.c,filter->ilen);
     // Copy ISB flag to filter
-    if(demod->flags & CONJ)
+    if(demod->flags & ISB)
       filter->out_type = CROSS_CONJ;
     else
       filter->out_type = COMPLEX;
@@ -124,7 +124,7 @@ void *demod_linear(void *arg){
       demod->n0 = compute_n0(demod); // Happens at startup
 
     // Carrier (or regenerated carrier) tracking in coherent mode
-    if(demod->flags & COHERENT){
+    if(demod->flags & PLL){
       // Copy into circular input buffer for FFT in case we need it
       if(fft_enable){
 	if(demod->flags & SQUARE){
@@ -320,7 +320,7 @@ void *demod_linear(void *arg){
     } // not envelope detection
     demod->bb_power = (signal + noise) / filter->olen;
     // PLL loop SNR
-    if(noise != 0 && (demod->flags & COHERENT)){
+    if(noise != 0 && (demod->flags & PLL)){
       demod->snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
       if(demod->snr < 0)
 	demod->snr = 0; // Clamp to 0 so it'll show as -Inf dB

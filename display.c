@@ -1,5 +1,5 @@
 
-// $Id: display.c,v 1.103 2017/10/21 05:00:37 karn Exp karn $
+// $Id: display.c,v 1.105 2017/10/24 01:26:42 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -43,7 +43,6 @@ int touch_x,touch_y;
 
 extern int Update_interval;
 
-double Tunestep10;
 int mod_x,mod_y;
 
 // Pop up a temporary window with the contents of a file in the
@@ -123,11 +122,17 @@ void display_cleanup(void *arg){
 }
 
 static int Frequency_lock;
-static int tuneitem;
 
 // Adjust the selected item up or down one step
-void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
-  switch(tuneitem){
+void adjust_item(struct demod *demod,int direction){
+  double tunestep;
+  
+  tunestep = pow(10., (double)demod->tunestep);
+
+  if(!direction)
+    tunestep = - tunestep;
+
+  switch(demod->tuneitem){
   case 0: // Carrier frequency
   case 1: // Center frequency - treat the same
     if(!Frequency_lock) // Ignore if locked
@@ -181,7 +186,30 @@ void adjust_item(struct demod *demod,const int tuneitem,const double tunestep){
     break;
   }
 }
-#if 0 // highly incomplete
+// Hooks for knob.c
+void adjust_up(void *arg){
+  struct demod *demod = arg;
+  adjust_item(demod,1);
+}
+void adjust_down(void *arg){
+  struct demod *demod = arg;
+  adjust_item(demod,0);
+}
+void toggle_lock(void *arg){
+  struct demod *demod = arg;
+  switch(demod->tuneitem){
+  case 0:
+  case 1:
+    Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
+    break;
+  case 2:
+    demod->tuner_lock = !demod->tuner_lock;
+  }
+}
+
+
+
+#if 0 // highly incomplete, won't compile yet
 
 
 double scrape_number(WINDOW *win, int y, int x, double **increment){
@@ -303,11 +331,8 @@ void *display(void *arg){
 
   extern void *touch(void *);
   pthread_t pthread_touch;
-  //  pthread_create(&pthread_touch,NULL,touch,demod);   // Disable for now
+  pthread_create(&pthread_touch,NULL,touch,demod);   // Disable for now
 #endif
-
-
-  Tunestep10 = pow(10.,demod->tunestep);
 
   // talk directly to the terminal
   Tty = fopen("/dev/tty","r+");
@@ -324,18 +349,24 @@ void *display(void *arg){
   WINDOW * const tuning = newwin(8,35,row,col);    // Frequency information
   col += 35;
   WINDOW * const sig = newwin(8,25,row,col); // Signal information
-  col = 0;
+  col += 25;
+  WINDOW * const info = newwin(8,42,row,col);     // Band information
   row += 8;
-
+  col = 0;
   WINDOW * const filtering = newwin(12,22,row,col);
   col += 22;
   WINDOW * const demodulator = newwin(12,25,row,col);
   col += 25;
+  WINDOW * const options = newwin(12,12,row,col); // Demod options
+  col += 12;
   WINDOW * const sdr = newwin(12,24,row,col); // SDR information
+  col += 24;
+
+  WINDOW * const modes = newwin(Nmodes+2,7,row,col);
+  col += Nmodes+2;
+
   col = 0;
   row += 12;
-  WINDOW * const info = newwin(8,42,row,col);     // Band information
-  col += 42;
   WINDOW * const network = newwin(8,78,row,col); // Network status information
   col = 0;
   row += 8;
@@ -353,13 +384,12 @@ void *display(void *arg){
   memset(source,0,sizeof(source));
   memset(sport,0,sizeof(sport));
 
-  //  mmask_t mask = ALL_MOUSE_EVENTS;
-  mmask_t mask = 0; // Off for now
+  mmask_t mask = ALL_MOUSE_EVENTS;
   mousemask(mask,NULL);
   MEVENT mouse_event;
 
   for(;;){
-    // Scrape and update display
+    // update display
 
     // Tuning control window - these can be adjusted by the user
     // using the keyboard or tuning knob, so be careful with formatting
@@ -558,26 +588,9 @@ void *display(void *arg){
       mvwprintw(demodulator,row,rcol,"%11.1f",demod->spare);      
       mvwaddstr(demodulator,row++,lcol,"Spare");
     }
-
-    wmove(demodulator,row,0); // leading space of first option will be overwritten with box
-    wprintw(demodulator,"%s",demod->flags & MONO ? " Mono" : " Stereo"); 
-    if(demod->flags & ENVELOPE)
-      wprintw(demodulator," Envel"); // arguably not linear
-    if(demod->flags & CONJ) 
-      wprintw(demodulator," ISB"); 
-    if(demod->flags & FLAT) 
-      wprintw(demodulator," Flat"); 
-    if(demod->flags & SQUARE) 
-      wprintw(demodulator," Square"); 
-    if(demod->flags & COHERENT) 
-      wprintw(demodulator," PLL"); 
-    if(demod->flags & CAL)
-      wprintw(demodulator," Cal"); 
-
     box(demodulator,0,0);
     mvwprintw(demodulator,0,5,"%s demodulator",demod->demod_name);
     wnoutrefresh(demodulator);
-    
 
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 1;
@@ -605,6 +618,56 @@ void *display(void *arg){
     box(sdr,0,0);
     mvwaddstr(sdr,0,6,"SDR Hardware");
     wnoutrefresh(sdr);
+
+    // Demodulator options, can be set with mouse
+    row = 1;
+    col = 1;
+    if(demod->flags & ISB)
+      wattron(options,A_UNDERLINE);
+    mvwprintw(options,row++,col,"ISB");
+    wattroff(options,A_UNDERLINE);
+
+    if(demod->flags & PLL)
+      wattron(options,A_UNDERLINE);      
+    mvwprintw(options,row++,col,"PLL");
+    wattroff(options,A_UNDERLINE);
+
+    if(demod->flags & CAL)
+      wattron(options,A_UNDERLINE);
+    mvwprintw(options,row++,col,"Calibrate");
+    wattroff(options,A_UNDERLINE);      
+
+    if(demod->flags & SQUARE)
+      wattron(options,A_UNDERLINE);            
+    mvwprintw(options,row++,col,"Square");
+    wattroff(options,A_UNDERLINE);
+
+    if(demod->flags & MONO)
+      wattron(options,A_UNDERLINE);
+    mvwprintw(options,row++,col,"Mono");    
+    wattroff(options,A_UNDERLINE);
+
+    if(!(demod->flags & MONO))
+      wattron(options,A_UNDERLINE);
+    mvwprintw(options,row++,col,"Stereo");    
+    wattroff(options,A_UNDERLINE);
+    
+    box(options,0,0);
+    mvwaddstr(options,0,2,"Options");
+    wnoutrefresh(options);
+
+    // Display list of modes, underlining the active one
+    // Can be selected with mouse
+    row = 1; col = 1;
+    for(int i=0;i<Nmodes;i++){
+      if(strcmp(demod->mode,Modes[i].name) == 0)
+	wattron(modes,A_UNDERLINE);
+      mvwaddstr(modes,row++,col,Modes[i].name);
+      wattroff(modes,A_UNDERLINE);
+    }
+    box(modes,0,0);
+    mvwaddstr(modes,0,1,"Modes");
+    wnoutrefresh(modes);
 
     // Network status window
     if(memcmp(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address)) != 0){
@@ -651,31 +714,36 @@ void *display(void *arg){
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
     // They come from the ' option in the printf formats
+    // tunestep is the log10 of the digit position (0 = units)
     int hcol;
-    if(demod->tunestep >= -3 && demod->tunestep <= -1){ // .001 or .01 or .1
-      hcol = - demod->tunestep + 1;
-    } else if(demod->tunestep >= 0 && demod->tunestep <= 2){
-      hcol = - demod->tunestep;  // 1, 10, 100
-    } else if(demod->tunestep >= 3 && demod->tunestep <= 5){
-      hcol = - demod->tunestep - 1; // 1,000; 10,000; 100,000
-    } else if(demod->tunestep >= 6 && demod->tunestep <= 8){
-      hcol = - demod->tunestep - 2; // 1,000,000; 10,000,000; 100,000,000
-    } else if(demod->tunestep >= 9 && demod->tunestep <= 9){
-      hcol = - demod->tunestep - 3; // 1,000,000,000
-    } else
-      hcol = 0; // can't happen, but shuts up compiler
-    // Highlight digit - these wmoves must be last right before doupdate()
-    if(tuneitem >= 0 && tuneitem <= 3){
-      mod_y = tuneitem+1;
-      mod_x = hcol+24;
+    if(demod->tunestep >= 0){
+      hcol = demod->tunestep + demod->tunestep/3;
+      hcol = -hcol;
+    } else {
+      hcol = -demod->tunestep;
+      hcol = 1 + hcol + (hcol-1)/3; // 1 for the decimal point, and extras if there were commas in more than 3 places
+    }
+    switch(demod->tuneitem){
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+      mod_y = demod->tuneitem + 1;
+      mod_x = 24 + hcol; // units in column 24
       wmouse_trafo(tuning,&mod_y,&mod_x,TRUE);
-    }
-    else if(tuneitem >= 4 && tuneitem <= 7){
-      mod_y = tuneitem+1-4;
-      mod_x = hcol+13;
+      break;
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+      mod_y = demod->tuneitem - 3;
+      mod_x = 13 + hcol; // units in column 13
       wmouse_trafo(filtering,&mod_y,&mod_x,TRUE);
+      break;
+    default:
+      ;
+      break;
     }
-
     move(mod_y,mod_x);
     doupdate();      // Right before we pause
     
@@ -727,23 +795,19 @@ void *display(void *arg){
       }
       break;
     case 'l': // Toggle RF or first LO lock; affects how adjustments to LO and IF behave
-      if(tuneitem == 0 || tuneitem == 1)
-	Frequency_lock = !Frequency_lock;	 // Lock RF frequency
-      else if(tuneitem == 2)
-	demod->tuner_lock = !demod->tuner_lock;
+      toggle_lock(demod);
       break;
     case KEY_NPAGE: // Page Down/tab key
     case '\t':      // go to next tuning item
-      tuneitem = (tuneitem + 1) % 8;
+      demod->tuneitem = (demod->tuneitem + 1) % 8;
       break;
     case KEY_BTAB:  // Page Up/Backtab, i.e., shifted tab:
     case KEY_PPAGE: // go to previous tuning item
-      tuneitem = (8 + tuneitem - 1) % 8;
+      demod->tuneitem = (8 + demod->tuneitem - 1) % 8;
       break;
     case KEY_HOME: // Go back to item 0
-      tuneitem = 0;
+      demod->tuneitem = 0;
       demod->tunestep = 0;
-      Tunestep10 = 1;
       break;
     case KEY_BACKSPACE: // Cursor left: increase tuning step 10x
     case KEY_LEFT:
@@ -752,7 +816,6 @@ void *display(void *arg){
 	break;
       }
       demod->tunestep++;
-      Tunestep10 *= 10;
       break;
     case KEY_RIGHT:     // Cursor right: decrease tuning step /10
       if(demod->tunestep <= -3){
@@ -760,13 +823,12 @@ void *display(void *arg){
 	break;
       }
       demod->tunestep--;
-      Tunestep10 /= 10;
       break;
     case KEY_UP:        // Increase whatever digit we're tuning
-      adjust_item(demod,tuneitem,Tunestep10);
+      adjust_up(demod);
       break;
     case KEY_DOWN:      // Decrease whatever we're tuning
-      adjust_item(demod,tuneitem,-Tunestep10);
+      adjust_down(demod);
       break;
     case '\f':  // Screen repaint (formfeed, aka control-L)
       clearok(curscr,TRUE);
@@ -880,19 +942,19 @@ void *display(void *arg){
 	} else if(strcasecmp(str,"stereo") == 0){
 	  demod->flags &= ~MONO;	  
 	} else if(strcasecmp(str,"isb") == 0){
-	  demod->flags |= CONJ;
+	  demod->flags |= ISB;
 	} else if(strcasecmp(str,"!isb") == 0){
-	  demod->flags &= ~CONJ;
+	  demod->flags &= ~ISB;
 	} else if(strcasecmp(str,"pll") == 0){
-	  demod->flags |= COHERENT;
+	  demod->flags |= PLL;
 	} else if(strcasecmp(str,"!pll") == 0){
-	  demod->flags &= ~(COHERENT|SQUARE|CAL);
+	  demod->flags &= ~(PLL|SQUARE|CAL);
 	} else if(strcasecmp(str,"square") == 0){
-	  demod->flags |= SQUARE|COHERENT;
+	  demod->flags |= SQUARE|PLL;
 	} else if(strcasecmp(str,"!square") == 0){	  
 	  demod->flags &= ~SQUARE;
 	} else if(strcasecmp(str,"cal") == 0){
-	  demod->flags |= CAL|COHERENT;
+	  demod->flags |= CAL|PLL;
 	} else if(strcasecmp(str,"!cal") == 0){
 	  demod->flags &= ~CAL;
 	} else if(strcasecmp(str,"flat") == 0){
@@ -906,13 +968,80 @@ void *display(void *arg){
       beep();
       break;
     }
+    // Process mouse events
     int mx,my;
     mx = mouse_event.x;
     my = mouse_event.y;
     mouse_event.y = mouse_event.x = mouse_event.z = 0;
     if(mx != 0 && my != 0){
-      mod_x = mx;
-      mod_y = my;
+      if(wmouse_trafo(tuning,&my,&mx,false)){
+	// Tuning window
+	demod->tuneitem = my-1;
+	demod->tunestep = 24-mx;
+	if(demod->tunestep < 0)
+	  demod->tunestep++;
+	if(demod->tunestep > 3)
+	  demod->tunestep--;
+	if(demod->tunestep > 6)
+	  demod->tunestep--;
+	if(demod->tunestep > 9)	
+	  demod->tunestep--;
+	// Clamp to range
+	if(demod->tunestep < -3)
+	  demod->tunestep = -3;
+	if(demod->tunestep > 9)
+	  demod->tunestep = 9;
+
+      } else if(wmouse_trafo(filtering,&my,&mx,false)){
+	// Filter window
+	demod->tuneitem = my + 3;
+	demod->tunestep = 13-mx;
+	if(demod->tunestep < 0)
+	  demod->tunestep++;
+	if(demod->tunestep > 3)
+	  demod->tunestep--;
+	if(demod->tunestep > 6)
+	  demod->tunestep--;
+	if(demod->tunestep > 9)	
+	  demod->tunestep--;
+	// Clamp to range
+	if(demod->tunestep < -3)
+	  demod->tunestep = -3;
+	if(demod->tunestep > 5)
+	  demod->tunestep = 5;
+      } else if(wmouse_trafo(modes,&my,&mx,false)){
+	// In the options window?
+	my--;
+	if(my >= 0 && my < Nmodes){
+	  set_mode(demod,Modes[my].name,1);
+	}
+      } else if(wmouse_trafo(options,&my,&mx,false)){
+	// In the modes window
+	switch(my){
+	case 1:
+	  demod->flags ^= ISB;
+	  break;
+	case 2:
+	  demod->flags ^= PLL;
+	  break;
+	case 3:
+	  demod->flags ^= CAL;
+	  if(demod->flags & CAL)
+	    demod->flags |= PLL;
+	  break;
+	case 4:
+	  demod->flags ^= SQUARE;
+	  if(demod->flags & SQUARE)
+	    demod->flags |= PLL;
+	  break;
+	case 5:
+	  demod->flags |= MONO;
+	  break;
+	case 6:
+	  demod->flags &= ~MONO;
+	  break;
+	}
+      }
     }
   }
  done:;
@@ -929,22 +1058,6 @@ void *display(void *arg){
   exit(0);
 }
 
-// Hooks for knob.c
-void adjust_up(void *arg){
-  struct demod *demod = arg;
-  adjust_item(demod,tuneitem,Tunestep10);
-}
-void adjust_down(void *arg){
-  struct demod *demod = arg;
-  adjust_item(demod,tuneitem,-Tunestep10);
-}
-void toggle_lock(void *arg){
-  struct demod *demod = arg;
-  if(tuneitem == 0 || tuneitem == 1)
-    Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
-  else if(tuneitem == 2)
-    demod->tuner_lock = !demod->tuner_lock;
-}
 
 // character size 16 pix high x 9 wide??
 void touchitem(void *arg,int x,int y,int ev){

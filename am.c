@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.28 2017/10/16 23:28:22 karn Exp karn $
+// $Id: am.c,v 1.29 2017/10/17 07:01:54 karn Exp karn $
 
 // New AM demodulator, stripped from linear.c
 // Oct 9 2017 Phil Karn, KA9Q
@@ -46,7 +46,7 @@ void *demod_am(void *arg){
 
   // Detection filter
   struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
-					       (demod->flags & CONJ) ? CROSS_CONJ : COMPLEX);
+					       (demod->flags & ISB) ? CROSS_CONJ : COMPLEX);
   demod->filter = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 

@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.91 2017/10/21 01:55:44 karn Exp karn $
+// $Id: main.c,v 1.92 2017/10/21 05:01:01 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -389,7 +389,7 @@ void *input_loop(void *arg){
       if(cnt == -1){
 	if(errno != EINTR) // probably happens routinely
 	  perror("recvfrom");
-	break;
+	continue;
       }
       if(cnt < sizeof(rtp) + sizeof(demod->status))
 	continue; // Too small, ignore
