@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.27 2017/10/22 07:37:14 karn Exp karn $
+// $Id: monitor.c,v 1.28 2017/10/23 09:02:51 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -220,6 +220,7 @@ int main(int argc,char * const argv[]){
   outputParameters.channelCount = 2;
   outputParameters.device = inDevNum;
   outputParameters.sampleFormat = paFloat32;
+  outputParameters.suggestedLatency = 0.010; // 0 doesn't seem to be a good value on OSX, lots of underruns and stutters
   
 #if 0
   r = Pa_OpenStream(&Pa_Stream,NULL,&outputParameters,Samprate,paFramesPerBufferUnspecified,
@@ -600,10 +601,6 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     return paAbort; // can this happen??
   
 
-#if 1
-  pthread_mutex_lock(&Buffer_mutex); // Protect Read_ptr
-#endif
-#if 1
   int samples_left = 2 * framesPerBuffer; // A stereo frame is two samples
   while(samples_left > 0){
     // chunk is the smaller of the samples needed and the amount available before wrap
@@ -612,28 +609,17 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
       chunk = samples_left;
     memcpy(op,&Audio_buffer[Read_ptr],chunk * sizeof(*op));
     memset(&Audio_buffer[Read_ptr],0,chunk * sizeof(*op)); // Zero buffer just read
+    // Atomic update of Read_ptr
+    pthread_mutex_lock(&Buffer_mutex);
+    Read_ptr = (Read_ptr + chunk) % Aud_bufsize;
+    pthread_mutex_unlock(&Buffer_mutex);
     op += chunk;
     samples_left -= chunk;
-    // Update the read pointer, try to do it atomically in case we can't lock
-    Read_ptr = (Read_ptr + chunk) % Aud_bufsize;
   }
-#else
-  // Old slow code
-  for(int i=0; i<framesPerBuffer; i++){
-    *op++ = Audio_buffer[Read_ptr];
-    Audio_buffer[Read_ptr++] = 0;
-    *op++ = Audio_buffer[Read_ptr];
-    Audio_buffer[Read_ptr++] = 0;      // zero out data just read
-    Read_ptr %= Aud_bufsize;
-  }
-#endif
-#if 1
-  pthread_mutex_unlock(&Buffer_mutex);
-#endif
   return paContinue;
 }
 
-// Check for underrunin
+// Check for underrun
 int write_is_ahead(int write_ptr,int read_ptr){
   int n = (write_ptr - read_ptr + Aud_bufsize) % Aud_bufsize;
   if(n < Aud_bufsize/2)

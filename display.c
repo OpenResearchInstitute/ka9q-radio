@@ -1,5 +1,5 @@
 
-// $Id: display.c,v 1.105 2017/10/24 01:26:42 karn Exp karn $
+// $Id: display.c,v 1.106 2017/10/24 06:45:11 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -660,7 +660,7 @@ void *display(void *arg){
     // Can be selected with mouse
     row = 1; col = 1;
     for(int i=0;i<Nmodes;i++){
-      if(strcmp(demod->mode,Modes[i].name) == 0)
+      if(strcasecmp(demod->mode,Modes[i].name) == 0)
 	wattron(modes,A_UNDERLINE);
       mvwaddstr(modes,row++,col,Modes[i].name);
       wattroff(modes,A_UNDERLINE);

@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.56 2017/10/24 01:30:30 karn Exp karn $
+// $Id: audio.c,v 1.57 2017/10/24 06:44:50 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -390,6 +390,7 @@ static int setup_portaudio(struct audio *const audio){
   outputParameters.channelCount = 2;
   outputParameters.device = inDevNum;
   outputParameters.sampleFormat = paFloat32;
+  outputParameters.suggestedLatency = 0.010; // 0 doesn't seem to be a good value on OSX, lots of underruns and stutters
   
   r = Pa_OpenStream(&audio->Pa_Stream,NULL,&outputParameters,48000,paFramesPerBufferUnspecified,
 		    paNoFlag,pa_callback,&Audio);
