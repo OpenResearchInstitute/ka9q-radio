@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.57 2017/10/24 06:44:50 karn Exp karn $
+// $Id: audio.c,v 1.58 2017/10/24 10:14:32 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo, and the Opus lossy codec
 // Copyright 2017 Phil Karn, KA9Q
@@ -150,8 +150,8 @@ void *stereo_opus_audio(void *arg){
     fprintf(stderr,"80/100/120 supported only on opus 1.2 and later\n");
     return NULL;
   }
-  // Number of samples (note: twice number of stereo frames) in an Opus block
-  int const opus_blocksize = round(2 *audio->opus_blocktime * audio->samprate / 1000.);
+  // Number of frames in an Opus block
+  int const opus_blocksize = round(audio->opus_blocktime * audio->samprate / 1000.);
   int error;
   audio->opus = opus_encoder_create(audio->samprate,2,OPUS_APPLICATION_AUDIO,&error);
   if(audio->opus == NULL){
@@ -193,7 +193,7 @@ void *stereo_opus_audio(void *arg){
       avail = audio->write_ptr - read_ptr; // How much is available
       if(avail < 0)
 	avail += AUD_BUFSIZE; // write has wrapped around behind read
-      if(avail >= opus_blocksize)
+      if(avail >= 2*opus_blocksize)
 	break;
       pthread_cond_wait(&audio->buffer_cond,&audio->buffer_mutex); // Block until enough available
     }
@@ -201,19 +201,19 @@ void *stereo_opus_audio(void *arg){
 
     int dlen = 0;
     // Is what we want contiguous in the buffer?
-    if(read_ptr + opus_blocksize <= AUD_BUFSIZE){
+    if(read_ptr + 2*opus_blocksize <= AUD_BUFSIZE){
       // Yes; avoid copy
-      dlen = opus_encode_float(audio->opus, audio->audiobuffer + read_ptr, opus_blocksize/2, data,sizeof(data));
-      read_ptr = (read_ptr + opus_blocksize) % AUD_BUFSIZE;
+      dlen = opus_encode_float(audio->opus, audio->audiobuffer + read_ptr, opus_blocksize, data,sizeof(data));
+      read_ptr = (read_ptr + 2*opus_blocksize) % AUD_BUFSIZE;
     } else {
       // Copy to contiguous bounce buffer
-      float opusbuf[sizeof(float) * opus_blocksize]; // Only if a copy is needed	
+      float opusbuf[2 * sizeof(float) * opus_blocksize]; // Only if a copy is needed	
       int chunk = AUD_BUFSIZE - read_ptr;
       memcpy(opusbuf,audio->audiobuffer + read_ptr,sizeof(float) * chunk);
-      int remainder = opus_blocksize - chunk;
+      int remainder = 2*opus_blocksize - chunk;
       memcpy(opusbuf+chunk,audio->audiobuffer,sizeof(float) * remainder);
       read_ptr = remainder;
-      dlen = opus_encode_float(audio->opus,opusbuf,opus_blocksize/2,data,sizeof(data));
+      dlen = opus_encode_float(audio->opus,opusbuf,opus_blocksize,data,sizeof(data));
     }
     if(dlen < 0){
       fprintf(stderr,"opus encode error %d\n",dlen);
