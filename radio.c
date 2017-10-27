@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.75 2017/10/21 01:56:31 karn Exp karn $
+// $Id: radio.c,v 1.76 2017/10/22 07:37:26 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <stdint.h>
 #if defined(linux)
 #include <bsd/string.h>
 #endif
@@ -122,12 +123,72 @@ int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
 }
 
 
+// The funcube dongle uses the Mirics MSi001 tuner. It has a fractional N synthesizer that can't actually do integer frequency steps.
+// This formula is hacked down from code from Howard Long; it's what he uses in the firmware so I can figure out
+// the *actual* frequency. Of course, we still have to correct it for the TCXO offset.
+
+// This needs to be made modular since other tuners will be completely different!
+
+double fcd_actual(unsigned int u32Freq){
+  typedef unsigned int UINT32;
+  typedef unsigned long long UINT64;
+
+  const UINT32 u32Thresh=3250U;
+  const UINT32 u32FRef=26000000U;
+  double f64FAct;
+  
+  struct
+  {
+    UINT32 u32Freq;
+    UINT32 u32FreqOff;
+    UINT32 u32LODiv;
+  } *pts,ats[]=
+      {
+	{4000000U,130000000U,16U},
+	{8000000U,130000000U,16U},
+	{16000000U,130000000U,16U},
+	{32000000U,130000000U,16U},
+	{75000000U,130000000U,16U},
+	{125000000U,0U,32U},
+	{142000000U,0U,16U},
+	{148000000U,0U,16U},
+	{300000000U,0U,16U},
+	{430000000U,0U,4U},
+	{440000000U,0U,4U},
+	{875000000U,0U,4U},
+	{UINT32_MAX,0U,2U},
+	{0U,0U,0U}
+      };
+  for(pts = ats; u32Freq>=pts->u32Freq; pts++)
+    ;
+
+  if (pts->u32Freq == 0)
+    pts--;
+      
+  UINT64 u64FSynth=(((UINT64)u32Freq)+pts->u32FreqOff)*pts->u32LODiv;
+  UINT32 u32Int=(UINT32)(u64FSynth/(u32FRef*4));
+  UINT32 u32Frac4096=(UINT32)((((u64FSynth<<12)*u32Thresh/(u32FRef*4))-(u32Int<<12)*u32Thresh));
+  UINT32 u32Frac=u32Frac4096>>12;
+  UINT32 u32AFC=u32Frac4096-(u32Frac<<12);
+      
+  f64FAct = (4.0 * u32FRef / (double)pts->u32LODiv) * (u32Int + ((u32Frac * 4096.0 + u32AFC) / (u32Thresh * 4096.))) - pts->u32FreqOff;
+  
+  // double f64step = ( (4.0 * u32FRef) / (pts->u32LODiv * (double)u32Thresh) ) / 4096.0;
+  
+  //      printf("f64step = %'lf, u32LODiv = %'u, u32Frac = %'d, u32AFC = %'d, u32Int = %'d, u32Thresh = %'d, u32FreqOff = %'d, f64FAct = %'lf err = %'lf\n",
+  //	     f64step, pts->u32LODiv, u32Frac, u32AFC, u32Int, u32Thresh, pts->u32FreqOff,f64FAct,f64FAct - u32Freq);
+  return f64FAct;
+}
+
+
+
 // Get true first LO frequency
 double const get_first_LO(const struct demod * const demod){
   if(demod == NULL)
     return NAN;
 	 
-  return demod->status.frequency * (1 + demod->calibrate);  // True frequency, as adjusted
+  return fcd_actual(demod->status.frequency) * (1 + demod->calibrate);  // True frequency, as adjusted;
+
 }
 
 
