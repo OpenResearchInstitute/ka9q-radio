@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.92 2017/10/21 05:01:01 karn Exp karn $
+// $Id: main.c,v 1.93 2017/10/24 06:43:34 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -452,20 +452,9 @@ void *input_loop(void *arg){
  
 // Load calibration factor for specified sending IP
 int loadcal(struct demod *demod){
-  char source[NI_MAXHOST];
-  char sport[NI_MAXSERV];
-  memset(source,0,sizeof(source));
-  memset(sport,0,sizeof(sport));
-  // Turn into printable IP address string (no DNS resolution)
-  if(getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
-		 source,sizeof(source),
-		 sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST) != 0){
-    return -1;    // failed
-  }
-
   FILE *fp;
   char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,source);
+  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,demod->iq_mcast_address_text);
 
   if((fp = fopen(pathname,"r")) == NULL){
     fprintf(stderr,"Can't read calibration file %s\n",pathname);
@@ -481,21 +470,9 @@ int loadcal(struct demod *demod){
 // Save calibration factor for specified sending IP
 int savecal(struct demod *demod){
   // Dump receiver state to file
-  char source[NI_MAXHOST];
-  char sport[NI_MAXSERV];
-  memset(source,0,sizeof(source));
-  memset(sport,0,sizeof(sport));
-  // Turn into printable IP address string (no DNS resolution)
-  if(getnameinfo((struct sockaddr *)&demod->input_source_address,sizeof(demod->input_source_address),
-		 source,sizeof(source),
-		 sport,sizeof(sport),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST) != 0){
-    return -1; // failed
-  }
-    
-
   FILE *fp;
   char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,source);
+  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,demod->iq_mcast_address_text);
 
   if((fp = fopen(pathname,"w")) == NULL){
     fprintf(stderr,"Can't write calibration file %s\n",pathname);
