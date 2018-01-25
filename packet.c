@@ -1,4 +1,4 @@
-// $Id$
+// $Id: packet.c,v 1.1 2018/01/24 07:04:51 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -52,9 +52,9 @@ char Mcast_address_text[] = "239.2.1.1";
 float const SCALE = 1./32768;
 int const Bufsize = 2048;
 int const AN = 2048; // Should be power of 2 for FFT efficiency
-int const AL = 2000; // 50 bit times
+int const AL = 1000; // 25 bit times
 //int const AM = AN - AL + 1; // should be >= 40, i.e., samprate / bitrate
-int const AM = 49;
+int const AM = 1049;
 
 extern float Kaiser_beta;
 
@@ -65,8 +65,6 @@ int const Samppbit = 40;
 
 int Input_fd = -1;
 
-complex float *Mark_response;
-complex float *Space_response;
 
 
 
@@ -135,48 +133,199 @@ void *decode_task(void *arg){
   struct packet *sp = (struct packet *)arg;
   assert(sp != NULL);
 
-  struct filter_out *mark_filter = create_filter_output(sp->filter_in,Mark_response,1,COMPLEX);
-  struct filter_out *space_filter = create_filter_output(sp->filter_in,Space_response,1,COMPLEX);  
-  
+  struct filter_out *filter = create_filter_output(sp->filter_in,NULL,1,COMPLEX);
+  set_filter(filter,Samprate,+300,+3300,3.0); // Creates analytic, band-limited signal from +900 to +2500 Hz
+
 #if 0
+
+  // Set up sync correlator
+  int const sync_length = 9 * Samppbit; // Samples in a sync vector
+  float *timebuf = fftwf_alloc_real(1024);
+  float complex *fbuf = fftwf_alloc_complex(513);
+  fftwf_plan plan = fftwf_plan_dft_r2c_1d(1024,timebuf,fbuf,FFTW_ESTIMATE);
+  // Fill timebuf with prototype of flag pattern: 1 bit time of 0, 7 bits of 1, 1 bit of 0
+  // This includes the effect of NRZI encoding
+  memset(timebuf,0,1024*sizeof(*timebuf));
+  int i;
+  for(i=0;i<Samppbit;i++)
+    timebuf[i] = -1;
+
+  for(;i<8*Samppbit;i++)
+    timebuf[i] = +1;
+
+  for(;i<9*Samppbit;i++)
+    timebuf[i] = -1;
+  
+  fftwf_execute(plan); // To frequency domain
+  fftwf_destroy_plan(plan);
+  fftwf_free(timebuf);
+  timebuf = NULL;
+
+  
+  struct filter_in *sync_in = create_filter_input(664,sync_length+1,REAL);
+  struct filter_out *sync_out = create_filter_output(sync_in,fbuf,1,REAL);
+
+
+
+
+  complex float memory = 0;
+  float last_val = 0;
+  int samp_since_last_edge = 0;
+  unsigned char hdlc_frame[1024];
+  memset(hdlc_frame,0,sizeof(hdlc_frame));
+  int frame_bit = 0;
+  unsigned short crc = 0xffff;
+  int zero_pending = 0;
+  int sync_corr_count = 0;
+
+#endif
+  int sample = 0;
+  float complex mark_delay_line[40];
+  memset(mark_delay_line,0,sizeof(mark_delay_line));
+  int pointer = 0;
+  float complex space_delay_line[40];
+  memset(space_delay_line,0,sizeof(space_delay_line));
+  float complex mark_phase = 1;
+  float complex mark_step = csincosf(-2*M_PI*1200./Samprate);
+  float complex space_phase = 1;
+  float complex space_step = csincosf(-2*M_PI*2200./Samprate);
+  float complex mark_sum = 0;
+  float complex space_sum = 0;
+
   printf("signed double\n");
 
-  for(int i = 0;i < AN;i++){
-    printf(". %d %f\n",i,cabsf(Space_response[i]));
-  }
-  exit(0);
-#endif
-
-
-
-  int sample = 0;
 
   while(1){
-    // These block until data appears
-    execute_filter_output(mark_filter);
-    execute_filter_output(space_filter);
+    execute_filter_output(filter);    // Blocks until data appears
 
 
-#if 1
-    struct filter_in *filter_in = mark_filter->master;
-    printf("signed double\n");
-    for(int i=0; 
-
+    for(int n=0; n<filter->olen; n++){
+      float complex s =  mark_phase * filter->output.c[n];
+      mark_phase *= mark_step;
+#if 0
+      if(isnan(crealf(s)) || isnan(cimagf(s)))
+	s = 0;
 #endif
+
+      mark_sum -= mark_delay_line[pointer];
+      mark_sum += mark_delay_line[pointer] = s;
+
+      s =  space_phase * filter->output.c[n];
+      space_phase *= space_step;
+#if 0
+      if(isnan(crealf(s)) || isnan(cimagf(s)))
+	s = 0;
+#endif
+
+      space_sum -= space_delay_line[pointer];
+      space_sum += space_delay_line[pointer] = s;
+      pointer = (pointer + 1) % 40;
+
+      float y = cnrmf(mark_sum) - cnrmf(space_sum);
+
+      printf(". %d %f\n",sample++,y);
+      
+      
 
 
 
 #if 0
-    // Output unfiltered demodulated waveform at full sample rate for testing
-    printf("signed double\n");
-    for(int i=0; i < mark_filter->olen; i++){
-      float e = cnrmf(mark_filter->output.c[i]) - cnrmf(space_filter->output.c[i]);
-      printf(". %d %.0f\n",sample,e);
-      sample++;
-    }
+      // FM demodulate
+      float y = cargf(filter->output.c[n] * conjf(memory)) - (2 * M_PI * 1700. / Samprate); // center is 1700 Hz;
+      memory = filter->output.c[n];
+
+#if 0
+
+      sync_in->input.r[sync_corr_count++] = y;
+      if(sync_corr_count == sync_in->ilen){
+	execute_filter_input(sync_in);
+	sync_corr_count = 0;
+	execute_filter_output(sync_out);
+	for(int k=0;k<sync_out->olen;k++){
+	  printf(". %d %f\n",sample++,sync_out->output.r[k]);
+	}
+      }
 #endif
 
+#if 0
 
+      if(y * last_val < 0){ // NRZI decode: sign flip = 0, no sign flip = 1
+	//	int const crc_poly = 0x1021;
+	int const crc_poly = 0x8408;
+
+	// See how many 1 bits we've had since last zero
+	// 4 or less: that many 1's followed by zero
+	// 5: five 1's, then drop next 0
+	// 6: six 1's: flag, end frame
+	// 7 or more: abort frame
+	int one_bits = roundf((float)samp_since_last_edge / Samppbit) - 1;
+
+	if(one_bits >= 0 && one_bits <= 5){
+	  // Previous transition was a zero bit
+	  if(zero_pending){
+	    // Insert single zero
+	    if((crc & 1) ^ 0)
+	      crc = (crc >> 1) ^ crc_poly;
+	    else
+	      crc >>= 1;
+	    frame_bit++;
+	  }
+	  // Insert 'one_bits' ones
+	  for(int i=0;i<one_bits;i++){
+	    hdlc_frame[frame_bit/8] |= 1 << (frame_bit % 8);
+	    if((crc & 1) ^ 1)
+	      crc = (crc >> 1) ^ crc_poly;
+	    else
+	      crc >>= 1;
+	    frame_bit++;
+	  }
+	  if(one_bits < 5)
+	    zero_pending = 1;
+	  else
+	    zero_pending = 0;
+
+	} else if(one_bits == 6) {
+	  // Flag
+	  // Check CRC, process frame
+	  if(frame_bit > 0)
+	    printf("FLAG, crc = %x (%s), length = %d bytes %d bits\n",crc,
+		   crc == 0xf0b8? "good" : "bad",
+		   frame_bit/8,frame_bit%8);
+
+	  if(crc == 0xf0b8){
+	    int bytes = frame_bit / 8;
+	    for(int i = 0; i < bytes; i++){
+	      printf("%02x ",hdlc_frame[i]);
+	      if((i % 16) == 15)
+		printf("\n");
+	    }
+	    printf("\n");
+	  }
+
+	  memset(hdlc_frame,0,sizeof(hdlc_frame));
+	  frame_bit = 0;
+	  zero_pending = 0;
+	  crc = 0xffff;
+	} else if(one_bits >= 7){
+	  // Abort
+	  memset(hdlc_frame,0,sizeof(hdlc_frame));
+	  frame_bit = 0;
+	  zero_pending = 0;
+	  crc = 0xffff;
+	}
+	samp_since_last_edge = 0;
+      } else {
+	// No transition - string of 1 bits
+	samp_since_last_edge++;
+	// 7 or more consecutive 1's: frame abort
+      }
+      last_val = y;
+#endif
+#endif
+
+    }
+    mark_phase = mark_phase / cabsf(mark_phase);
+    space_phase = space_phase / cabsf(space_phase);
 
 #if 0
     // Find symbol timing
@@ -211,60 +360,7 @@ void *decode_task(void *arg){
 int main(int argc,char *argv[]){
 
 
-  Mark_response = fftwf_alloc_complex(AN);
-  Space_response = fftwf_alloc_complex(AN);
-
-
-
-  complex float timedomain[AN];
-  fftwf_plan plan = fftwf_plan_dft_1d(AN,timedomain,Mark_response,FFTW_FORWARD,FFTW_ESTIMATE);
-
-
   // Initialize these here
-
-  memset(timedomain,0,sizeof(timedomain));
-  complex float mark_phase = 1;
-  complex float mark_step = csincosf(2 * M_PI * 1200. / Samprate); // Complex sinusoid at +1200 Hz
-  for(int i=0;i<Samppbit;i++){ // one bit time of mark tone
-    timedomain[i] = mark_phase; 
-    mark_phase *= mark_step;
-  }
-
-
-  float kaiser_window[AN];
-  Kaiser_beta = 0;
-  make_kaiser(kaiser_window,AM,Kaiser_beta);
-  for(int i=0;i<AM;i++)
-    timedomain[i] *= kaiser_window[i];
-  
-  fftwf_execute(plan);
-  fftwf_destroy_plan(plan);
-
-#if 0
-  printf("signed double\n");
-  for(int i=0;i<AN;i++){
-    printf(". %d %f\n",i,cnrmf(Mark_response[i]));
-  }
-  exit(0);
-#endif
-
-  plan = fftwf_plan_dft_1d(AN,timedomain,Space_response,FFTW_FORWARD,FFTW_ESTIMATE);
-  memset(timedomain,0,sizeof(timedomain));
-  complex float space_phase = 1;
-  complex float space_step = csincosf(2 * M_PI * 2200. / Samprate); // Complex sinusoid at +2200 Hz
-  for(int i=0;i<Samppbit;i++){ // one bit time of space tone
-    timedomain[i] = space_phase;
-    space_phase *= space_step;
-  }
-
-  // Reuse kaiser window
-  for(int i=0;i<AM;i++)
-    timedomain[i] *= kaiser_window[i];
-
-
-
-  fftwf_execute(plan);
-  fftwf_destroy_plan(plan);
 
   // Set up multicast input
   Input_fd = setup_mcast(Mcast_address_text,0);
