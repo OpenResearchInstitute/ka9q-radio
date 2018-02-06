@@ -1,14 +1,12 @@
-# $Id: Makefile.osx,v 1.24 2017/10/20 22:33:31 karn Exp karn $
+# $Id: Makefile.osx,v 1.25 2017/10/22 06:28:42 karn Exp karn $
 #CC=g++
-INCLUDES=-I /opt/local/include
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-#COPTS=-g -pthread -Wall -funsafe-math-optimizations
-CFLAGS=$(COPTS) $(INCLUDES)
+CFLAGS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
+LD_FLAGS=-lpthread -lm
 
-all: iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt
+all: iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt opus
 
 install: all
 	install -d $(LIBDIR)
@@ -17,44 +15,51 @@ install: all
 	install bandplan.txt help.txt modes.txt $(LIBDIR)
 
 clean:
-	rm -f *.o *.a control iqplay iqrecord modulate monitor radio
+	rm -f *.o *.a iqplay iqrecord modulate monitor radio
 	rcsclean
 
-control: control.o modes.o
-	$(CC) -g -o $@ $^ -lm
+packet: packet.o filter.o filter.o misc.o multicast.o
+	$(CC) -g -o $@ $^ `pkg-config --libs fftw3f` $(LD_FLAGS)
+
+opus: opus.o multicast.o
+	$(CC) -g -o $@ $^ `pkg-config --libs opus` $(LD_FLAGS)
 
 iqplay: iqplay.o multicast.o attr.o misc.o
-	$(CC) -g -o $@ $^ -lpthread -lm
+	$(CC) -g -o $@ $^ $(LD_FLAGS)
 
 iqrecord: iqrecord.o multicast.o attr.o
-	$(CC) -g -o $@ $^ -lpthread -lm
+	$(CC) -g -o $@ $^ $(LD_FLAGS)
 
 modulate: modulate.o misc.o filter.o
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lm
+	$(CC) -g -o $@ $^ -lfftw3f_threads `pkg-config --libs fftw3f` $(LD_FLAGS)
 
 monitor: monitor.o multicast.o
-	$(CC) -g -o $@ $^ -lopus -lportaudio -lncurses -lm
+	$(CC) -g -o $@ $^ `pkg-config --libs ncurses portaudio-2.0 opus` $(LD_FLAGS)
 
+# pkg-config doesn't seem to find -lfftw3f_threads so we list it explicitly
 radio: main.o radio.o fm.o linear.o am.o filter.o display.o doppler.o modes.o audio.o multicast.o bandplan.o misc.o
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lpthread -lncurses -lopus -lportaudio -lm
+	$(CC) -g -o $@ $^ -lfftw3f_threads `pkg-config --libs ncurses fftw3f` $(LD_FLAGS)
 
-am.o: dsp.h filter.h radio.h audio.h
+am.o: misc.h filter.h radio.h audio.h
 attr.o: attr.c attr.h
-audio.o: audio.c dsp.h audio.h rtp.h
+audio.o: audio.c misc.h audio.h multicast.h
 bandplan.o: bandplan.c bandplan.h
-control.o: control.c dsp.h radio.h
-display.o: display.c radio.h audio.h dsp.h filter.h bandplan.h multicast.h rtp.h
+display.o: display.c radio.h audio.h misc.h filter.h bandplan.h multicast.h
+doppler.o: doppler.c radio.h misc.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
-filter.o: filter.c dsp.h filter.h
-fm.o: fm.c dsp.h filter.h radio.h audio.h
-iqplay.o: iqplay.c rtp.h dsp.h radio.h multicast.h attr.h
-iqrecord.o: iqrecord.c rtp.h radio.h multicast.h attr.h
-linear.o: linear.c dsp.h filter.h radio.h audio.h
-main.o: main.c radio.h filter.h dsp.h audio.h rtp.h multicast.h
+filter.o: filter.c misc.h filter.h
+fm.o: fm.c misc.h filter.h radio.h audio.h
+iqplay.o: iqplay.c misc.h radio.h multicast.h attr.h
+iqrecord.o: iqrecord.c radio.h multicast.h attr.h
+linear.o: linear.c misc.h filter.h radio.h audio.h
+main.o: main.c radio.h filter.h misc.h audio.h multicast.h
 misc.o: misc.c radio.h
-modes.o: modes.c radio.h dsp.h
-modulate.o: modulate.c dsp.h filter.h radio.h
-monitor.o: monitor.c rtp.h dsp.h multicast.h
+modes.o: modes.c radio.h misc.h
+modulate.o: modulate.c misc.h filter.h radio.h
+monitor.o: monitor.c misc.h multicast.h
 multicast.o: multicast.c multicast.h
-radio.o: radio.c radio.h filter.h dsp.h audio.h
-doppler.o: doppler.c radio.h filter.h dsp.h audio.h
+opus.o: opus.c misc.h multicast.h	     
+packet.o: packet.c filter.h misc.h multicast.h
+radio.o: radio.c radio.h filter.h misc.h audio.h
+
+
