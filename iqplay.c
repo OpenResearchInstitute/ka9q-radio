@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.16 2017/09/21 00:14:14 karn Exp karn $
+// $Id: iqplay.c,v 1.17 2017/10/20 22:31:33 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -21,9 +21,8 @@
 #include <fcntl.h>
 #include <sys/resource.h>
 
+#include "misc.h"
 #include "radio.h"
-#include "rtp.h"
-#include "dsp.h"
 #include "multicast.h"
 #include "attr.h"
 

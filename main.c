@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.93 2017/10/24 06:43:34 karn Exp karn $
+// $Id: main.c,v 1.94 2017/11/02 08:12:20 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -26,11 +26,10 @@
 #include <netdb.h>
 #include <errno.h>
 
+#include "misc.h"
 #include "radio.h"
 #include "filter.h"
-#include "dsp.h"
 #include "audio.h"
-#include "rtp.h"
 #include "multicast.h"
 
 #define MAXPKT 1500 // Maximum bytes of data in incoming I/Q packet
@@ -92,25 +91,27 @@ int main(int argc,char *argv[]){
   }
 
   // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
+  
   fftwf_import_system_wisdom();
+  fftwf_make_planner_thread_safe();
+
 
   struct demod * const demod = &Demod; // Only one demodulator per program for now
+  struct audio * const audio = &Audio;
+
 
   // Set program defaults, can be overridden by state file and command line args, in that order
   memset(demod,0,sizeof(*demod));
-  demod->audio = &Audio; // Link to audio output system
-  demod->audio->samprate = DAC_samprate; // currently 48 kHz, hard to change
+  audio->samprate = DAC_samprate; // currently 48 kHz, hard to change
   strcpy(demod->mode,"FM");
   demod->start_freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
 
-  demod->L = 4096;      // Number of samples in buffer: FFT length = L + M - 1
-  demod->M = 4096+1;    // Length of filter impulse response
+  demod->L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
+  demod->M = 4352+1;    // Length of filter impulse response
   demod->kaiser_beta = 3.0; // Reasonable compromise
-  strlcpy(demod->iq_mcast_address_text,"239.1.2.1",sizeof(demod->iq_mcast_address_text));
+  strlcpy(demod->iq_mcast_address_text,"hf-mcast.local",sizeof(demod->iq_mcast_address_text));
   demod->headroom = pow(10.,-15./20); // -15 dB
-  demod->audio->opus_bitrate = 0;  // off by default
-  demod->audio->opus_blocktime = 20;   // 20 ms
-  strlcpy(demod->audio->audio_mcast_address_text,"239.2.1.1",sizeof(demod->audio->audio_mcast_address_text));
+  strlcpy(audio->audio_mcast_address_text,"audio-pcm-mcast.local",sizeof(audio->audio_mcast_address_text));
   demod->tunestep = 0;  // single digit hertz position
   demod->calibrate = 0;
   demod->imbalance = 1; // 0 dB
@@ -122,7 +123,7 @@ int main(int argc,char *argv[]){
   set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "a:B:c:d:f:I:k:l:L:m:M:pr:R:qo:s:t:Tu:vx";
+  char optstring[] = "c:d:f:I:k:l:L:m:M:r:R:qs:t:T:u:v";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -135,12 +136,6 @@ int main(int argc,char *argv[]){
   int c;
   while((c = getopt(argc,argv,optstring)) != EOF){
     switch(c){
-    case 'a':
-      memcpy(Audio.localdev,optarg,sizeof(Audio.localdev));
-      break;
-    case 'B':   // Opus encoder block time; must be 2.5, 5, 10, 20, 40, 60, 80, 120
-      Audio.opus_blocktime = strtod(optarg,NULL);
-      break;
     case 'c':   // SDR TCXO and A/D clock calibration in parts per million
       set_cal(demod,1e-6*strtod(optarg,NULL));
       break;
@@ -169,48 +164,11 @@ int main(int argc,char *argv[]){
     case 'M':   // Pre-detection filter impulse length
       demod->M = strtol(optarg,NULL,0);
       break;
-    case 'o':   // Opus codec compressed bit rate target
-      {
-	Audio.opus_bitrate = strtol(optarg,NULL,0);
-	if(Audio.opus_bitrate == 0) // No argument given?
-	  Audio.opus_bitrate = 32000; // Default 32 kb/s
-	else if(Audio.opus_bitrate < 500) // Opus says this is min value, but it seems to be 6 kb/s in reality
-	  Audio.opus_bitrate *= 1000;	// Interpret as kilobits/sec
-	// By default, disable local audio when outputting elsewhere
-	if(strlen(Audio.localdev) == 0)
-	  strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
-      }
-      break;
-    case 'p':
-      Audio.rtp_pcm = 1;
-      // By default, disable local audio when outputting elsewhere
-      if(strlen(Audio.localdev) == 0)
-	strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
-      break;
     case 'q':
       Quiet++;  // Suppress display
       break;
-    case 'R':   // Set audio target (IP multicast address, local file or local command)
-      if(optarg[0] == '/' || (strncmp(optarg,"./",2) == 0) || optarg[0] == '>'){
-	Audio.filename = optarg;
-	char *name = optarg;
-	if(name[0] == '>')
-	  name++;
-	if((Audio.stream = fopen(name,"w")) == NULL){
-	  fprintf(stderr,"File write fail: %s\n",Audio.filename);
-	  exit(1);
-	}
-      } else if(optarg[0] == '|'){
-	Audio.filename = optarg;
-	if((Audio.stream = popen(Audio.filename+1,"w")) == NULL){
-	  fprintf(stderr,"Pipe open fail: %s\n",Audio.filename);
-	  exit(1);
-	}
-      } else 
-	strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
-      // By default, disable local audio when outputting elsewhere
-      if(strlen(Audio.localdev) == 0)
-	strncpy(Audio.localdev,"none",sizeof(Audio.localdev));
+    case 'R':   // Set audio target IP multicast address
+      strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
       break;
     case 's':
       {
@@ -218,8 +176,8 @@ int main(int argc,char *argv[]){
 	set_shift(demod,shift);
       }
       break;
-    case 'T': // Tuner lock
-      demod->tuner_lock = 1;
+    case 'T': // TTL on output packets
+      Mcast_ttl = strtol(optarg,NULL,0);
       break;
     case 't':   // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);
@@ -233,11 +191,8 @@ int main(int argc,char *argv[]){
     case 'v':   // Extra debugging
       Verbose++;
       break;
-    case 'x':   // Enable Opus discontinuous mode (can cause problems with CW at very high SNR)
-      Audio.opus_dtx = 1;
-      break;
     default:
-      fprintf(stderr,"Usage: %s [-a audiodev] [-B opus_blocktime] [-c calibrate_ppm] [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-o opus_bitrate] [-p] [-q] [-R Audio multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v] [-x]\n",argv[0]);
+      fprintf(stderr,"Usage: %s [-c calibrate_ppm] [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-q] [-R Audio multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v]\n",argv[0]);
       exit(1);
       break;
     }
@@ -266,6 +221,7 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&demod->doppler_mutex,NULL);
   pthread_mutex_init(&demod->shift_mutex,NULL);
   pthread_mutex_init(&demod->second_LO_mutex,NULL);
+  
 
   // Input socket for I/Q data from SDR
   demod->input_fd = setup_mcast(demod->iq_mcast_address_text,0);
@@ -277,7 +233,8 @@ int main(int argc,char *argv[]){
   if((demod->ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
     perror("can't open control socket");
 
-  if(setup_audio(demod->audio) != 0){
+  // Blocksize really should be computed from demod->L and decimate
+  if(setup_audio(audio,1024) != 0){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
   }
@@ -290,6 +247,12 @@ int main(int argc,char *argv[]){
   // Optional doppler correction
   if(demod->doppler_command)
     pthread_create(&demod->doppler_thread,NULL,doppler,demod);
+
+  // Thread to do downconversion and first half of filtering
+  pthread_create(&demod->filter_thread,NULL,filtert,demod);
+  // Wait for thread to create input filter. KLUDGE!!!!!
+  while(demod->filter_in == NULL)
+    usleep(1000);
 
   // Actually set the mode and frequency already specified
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
@@ -488,6 +451,8 @@ int savecal(struct demod *demod){
 // Path is Statepath[] = $HOME/.radiostate
 int savestate(struct demod *dp,char const *filename){
   // Dump receiver state to file
+  struct audio *audio = &Audio; // Eventually make parameter
+
   FILE *fp;
   char pathname[PATH_MAX];
   if(filename[0] == '/')
@@ -502,10 +467,8 @@ int savestate(struct demod *dp,char const *filename){
   fprintf(fp,"#KA9Q DSP Receiver State dump\n");
   fprintf(fp,"Locale %s\n",Locale);
   fprintf(fp,"Source %s\n",dp->iq_mcast_address_text);
-  if(dp->audio){
-    fprintf(fp,"Audio output %s\n",dp->audio->audio_mcast_address_text);
-    fprintf(fp,"Opus blocktime %.0f\n",dp->audio->opus_blocktime);
-    fprintf(fp,"OPUS bitrate %d\n",dp->audio->opus_bitrate);
+  if(audio){
+    fprintf(fp,"Audio output %s\n",audio->audio_mcast_address_text);
   }
   fprintf(fp,"Blocksize %d\n",dp->L);
   fprintf(fp,"Impulse len %d\n",dp->M);
@@ -525,6 +488,8 @@ int savestate(struct demod *dp,char const *filename){
 // 
 int loadstate(struct demod *dp,char const *filename){
   FILE *fp;
+  struct audio *audio = &Audio; // Eventually make parameter
+
   char pathname[PATH_MAX];
   if(filename[0] == '/')
     strlcpy(pathname,filename,sizeof(pathname));
@@ -550,9 +515,7 @@ int loadstate(struct demod *dp,char const *filename){
     } else if(sscanf(line,"Tunestep %d",&dp->tunestep) > 0){
     } else if(sscanf(line,"Source %256s",dp->iq_mcast_address_text) > 0){
       // Array sizes defined elsewhere!
-    } else if(dp->audio && sscanf(line,"Audio output %256s",dp->audio->audio_mcast_address_text) > 0){
-    } else if(dp->audio && sscanf(line,"Opus blocktime %f",&dp->audio->opus_blocktime) > 0){
-    } else if(dp->audio && sscanf(line,"OPUS bitrate %d",&dp->audio->opus_bitrate) > 0){
+    } else if(audio && sscanf(line,"Audio output %256s",audio->audio_mcast_address_text) > 0){
     } else if(sscanf(line,"Locale %256s",Locale)){
       setlocale(LC_ALL,Locale);
     }

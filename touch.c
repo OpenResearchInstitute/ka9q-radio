@@ -8,7 +8,7 @@
 #include <linux/input.h>
 
 
-#include "dsp.h" // for our version of pthread_setname()
+#include "misc.h" // for our version of pthread_setname()
 #define TOUCH "/dev/input/event1"
 
 void touchitem(void *arg,int x,int y,int ev);

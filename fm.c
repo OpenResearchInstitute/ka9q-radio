@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.43 2017/10/17 07:02:04 karn Exp karn $
+// $Id: fm.c,v 1.44 2017/10/22 06:00:44 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -11,16 +11,19 @@
 #include <fftw3.h>
 #undef I
 
-#include "dsp.h"
+#include "misc.h"
 #include "filter.h"
 #include "radio.h"
 #include "audio.h"
 
+void *pltask(void *);
 
 void *demod_fm(void *arg){
   pthread_setname("fm");
   assert(arg != NULL);
   struct demod * const demod = arg;  
+  struct audio * const audio = &Audio; // Eventually pass as argument
+
   complex float state = 1; // Arbitrary choice; zero would cause first audio sample to be NAN
   float const dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
   demod->pdeviation = 0;
@@ -29,49 +32,30 @@ void *demod_fm(void *arg){
   demod->gain = NAN; // We don't use this, turn it off on the display
 
   // Create predetection filter, leaving response momentarily empty
-  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,COMPLEX);
-  demod->filter = filter;
-  set_filter(demod->filter,dsamprate,demod->low,demod->high,demod->kaiser_beta);
+  struct filter_out * const filter = create_filter_output(demod->filter_in,NULL,demod->decimate,COMPLEX);
+  demod->filter_out = filter;
+  set_filter(filter,dsamprate,demod->low,demod->high,demod->kaiser_beta);
 
   // Set up audio baseband filter
-  // Response is high pass with 300 Hz corner, then -6 dB/octave post-emphasis since demod is FM
-  // and modulation is probably PM (indirect FM)
   int const AL = demod->L / demod->decimate;
   int const AM = (demod->M - 1) / demod->decimate + 1;
   int const AN = AL + AM - 1;
+  float const filter_gain = 3./AN;
+  struct filter_in *audio_master = create_filter_input(AL,AM,REAL);
+
+  demod->audio_master = audio_master;
 
   // Low pass filter to isolate PL tone at low sample rate
-  int const PL_decimate = 32; // 48 kHz in, 1500 Hz out
-  float const PL_samprate = dsamprate / PL_decimate;
-  int const PL_L = AL / PL_decimate;
-  int const PL_M = (AM - 1) / PL_decimate + 1;
-  int const PL_N = PL_L + PL_M - 1;
-  complex float * const plresponse = fftwf_alloc_complex(PL_N/2+1);
-  // Filter gain for both filters
-  // the '3' was set empirically, to make the audio levels sound comparable
-  float const filter_gain = 3./AN;
-  {
-    memset(plresponse,0,(PL_N/2+1)*sizeof(*plresponse));
-    // Positive frequencies only
-    for(int j=0;j<=PL_N/2;j++){
-      float const f = (float)j * dsamprate / AN; // frequencies are relative to INPUT sampling rate
-      if(f > 0 && f < 300)
-	plresponse[j] = filter_gain;
-    }
-  }
-  window_rfilter(PL_L,PL_M,plresponse,2.0); // What's the optimum Kaiser window beta here?
-  struct filter * const plfilter = create_filter(AL,AM,plresponse,PL_decimate,REAL,REAL);
-
-  // Set up long FFT to which we feed the PL tone for frequency analysis
-  int const pl_fft_size = (1 << 19) / PL_decimate;
-  float * const pl_input = fftwf_alloc_real(pl_fft_size);
-  complex float * const pl_spectrum = fftwf_alloc_complex(pl_fft_size/2+1);
-  fftwf_plan pl_plan = fftwf_plan_dft_r2c_1d(pl_fft_size,pl_input,pl_spectrum,FFTW_ESTIMATE);
+  pthread_t pl_thread;
+  pthread_create(&pl_thread,NULL,pltask,demod);
 
   // Voice filter, unless FLAT mode is selected
-  struct filter *afilter = NULL;
+  // Audio response is high pass with 300 Hz corner, then -6 dB/octave post-emphasis since demod is FM
+  // and modulation is probably PM (indirect FM)
+  struct filter_out *audio_filter = NULL;
   if(!(demod->flags & FLAT)){
     complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
+    assert(aresponse != NULL);
     memset(aresponse,0,(AN/2+1) * sizeof(*aresponse));
     for(int j=0;j<=AN/2;j++){
       float const f = (float)j * dsamprate / AN;
@@ -80,16 +64,16 @@ void *demod_fm(void *arg){
     }
     // Window scaling for REAL input, REAL output
     window_rfilter(AL,AM,aresponse,demod->kaiser_beta);
-    afilter = create_filter_slave(plfilter,aresponse,1); // Real input, real output, same sample rate
+    audio_filter = create_filter_output(audio_master,aresponse,1,REAL); // Real input, real output, same sample rate
   }
+  
   float lastaudio = 0; // state for impulse noise removal
-  int fft_ptr = 0;
+  int quiet = 0;
 
   while(!demod->terminate){
-    fillbuf(demod,filter->input.c,filter->ilen);
-    spindown(demod,filter->input.c); // 2nd LO
-    demod->if_power = cpower(filter->input.c,filter->ilen);
-    execute_filter(filter);
+
+    // Wait for next block of frequency domain data
+    execute_filter_output(filter);
     // Compute bb_power below along with average amplitude to save time
     //    demod->bb_power = cpower(filter->output.c,filter->olen);
     float const n0 = compute_n0(demod);
@@ -119,12 +103,24 @@ void *demod_fm(void *arg){
     if(demod->snr < 0)
       demod->snr = 0; // Force to -infinity dB
 
-    if(demod->snr > 2){
+    float samples[audio_master->ilen];
+    // Let the filter tail leave after the squelch is closed, but don't send pure silence
+    int silent = 1;
+
+
+    if(demod->snr > 2) {
+      quiet = 0;
+    } else {
+      if(++quiet > 1000)
+	quiet = 1000; // Could conceivably wrap if squelch is closed for long time
+    }
+    if(quiet < 2){ // keep the squelch open a little longer to make sure we don't chop something off
       // Threshold extension by comparing sample amplitude to threshold
       // 0.55 is empirical constant, 0.5 to 0.6 seems to sound good
       // Square amplitudes are compared to avoid sqrt inside loop
+
       float const min_ampl = 0.55 * 0.55 * avg_amp * avg_amp;
-      assert(filter->olen == plfilter->ilen);
+
       // Actual FM demodulation, with impulse noise blanking
       float pdev_pos = 0;
       float pdev_neg = 0;
@@ -132,7 +128,7 @@ void *demod_fm(void *arg){
       for(int n=0; n<filter->olen; n++){
 	complex float const samp = filter->output.c[n];
 	if(cnrmf(samp) > min_ampl){
-	  lastaudio = plfilter->input.r[n] = cargf(samp * state);
+	  lastaudio = samples[n] = audio_master->input.r[n] = cargf(samp * state);
 	  state = conjf(samp);
 	  // Keep track of peak deviation
 	  if(n == 0)
@@ -142,7 +138,7 @@ void *demod_fm(void *arg){
 	  else if(lastaudio < pdev_neg)
 	    pdev_neg = lastaudio;
 	} else {
-	  plfilter->input.r[n] = lastaudio; // Replace unreliable sample with last good one
+	  samples[n] = audio_master->input.r[n] = lastaudio; // Replace unreliable sample with last good one
 	}
 	avg_f += lastaudio;
       }
@@ -153,40 +149,112 @@ void *demod_fm(void *arg){
       pdev_pos -= avg_f;
       pdev_neg -= avg_f;
       demod->pdeviation = dsamprate * max(pdev_pos,-pdev_neg) * M_1_2PI;
+      silent = 0;
     } else {
       // Squelch is closed
-      memset(plfilter->input.r,0,plfilter->ilen*sizeof(*plfilter->input.r));
+      memset(samples,0,audio_master->ilen * sizeof(*samples));
+      memset(audio_master->input.r,0,audio_master->ilen*sizeof(*audio_master->input.r));
+      silent = 1;
     }
-    execute_filter(plfilter);
-    if(afilter != NULL)
-      execute_filter(afilter);
+    execute_filter_input(audio_master);
 
+    if(audio_filter != NULL){
+      execute_filter_output(audio_filter);
+
+      // in FM flat mode there is no audio filter, and audio is already in samples[]
+      silent = 1;
+      assert(audio_master->ilen == audio_filter->olen);
+      for(int n=0; n < audio_filter->olen; n++){
+	samples[n] = audio_filter->output.r[n] * gain;
+	if(samples[n] != 0)
+	  silent = 0;
+      }
+    }
+    if(1 || !silent){ // test: stream silence
+      send_mono_audio(audio,samples,audio_master->ilen);
+
+    }
+  }
+  // Clean up subthreads
+  pthread_join(pl_thread,NULL);
+
+
+  if(audio_filter != NULL)
+    delete_filter_output(audio_filter); // Must delete first
+  delete_filter_input(audio_master);
+  delete_filter_output(filter);
+  demod->filter_out = NULL;
+
+  // Clear these to keep them from showing up with other demods
+  demod->foffset = NAN;
+  demod->pdeviation = NAN;
+  demod->plfreq = NAN;
+  demod->flags = 0;
+
+  pthread_exit(NULL);
+}
+
+// pltask
+void *pltask(void *arg){
+  pthread_setname("pl");
+  struct demod *demod = (struct demod *)arg;
+
+  assert(demod != NULL);
+
+  // N, L and sample rate for audio master filter (usually 48 kHz)
+  int const AN = (demod->L + demod->M - 1) / demod->decimate;
+  int const AL = demod->L / demod->decimate;
+  float const dsamprate = demod->samprate / demod->decimate; // sample rate from FM demodulator
+
+  // Pl slave filter parameters
+  int const PL_decimate = 32; // 48 kHz in, 1500 Hz out
+  float const PL_samprate = dsamprate / PL_decimate;
+  int const PL_N = AN / PL_decimate;
+  int const PL_L = AL / PL_decimate;
+  int const PL_M = PL_N - PL_L + 1;
+
+  complex float * const plresponse = fftwf_alloc_complex(PL_N/2+1);
+  assert(plresponse != NULL);
+  float const filter_gain = 1;
+  memset(plresponse,0,(PL_N/2+1)*sizeof(*plresponse));
+  // Positive frequencies only
+  for(int j=0;j<=PL_N/2;j++){
+    float const f = (float)j * dsamprate / AN; // frequencies are relative to INPUT sampling rate
+    if(f > 0 && f < 300)
+      plresponse[j] = filter_gain;
+  } 
+  window_rfilter(PL_L,PL_M,plresponse,2.0); // What's the optimum Kaiser window beta here?
+  struct filter_out * const pl_filter = create_filter_output(demod->audio_master,plresponse,PL_decimate,REAL);
+
+  // Set up long FFT to which we feed the PL tone for frequency analysis
+  int const pl_fft_size = (1 << 19) / PL_decimate; // Should be calculated and rounded to power of 2
+  float * const pl_input = fftwf_alloc_real(pl_fft_size);
+  complex float * const pl_spectrum = fftwf_alloc_complex(pl_fft_size/2+1);
+  fftwf_plan pl_plan = fftwf_plan_dft_r2c_1d(pl_fft_size,pl_input,pl_spectrum,FFTW_ESTIMATE);
+  assert(pl_plan != NULL);
+
+  int fft_ptr = 0;
+  int last_fft = 0;
+  while(!demod->terminate){
+    execute_filter_output(pl_filter);
+ 
     // Determine PL tone frequency with a long FFT operating at the low PL filter sample rate
-    assert(malloc_usable_size(pl_input) >= pl_fft_size * sizeof(float));
-    assert(fft_ptr + plfilter->olen <= pl_fft_size);
-    memcpy(pl_input+fft_ptr,plfilter->output.r,plfilter->olen*sizeof(*pl_input));
-    fft_ptr = (fft_ptr + plfilter->olen) % pl_fft_size;
-
-    // Let the filter tail leave after the squelch is closed, but don't send pure silence
-    int silent = 1;
-    float audio[plfilter->ilen];    
-    if(afilter == NULL){
-      for(int n=0; n < plfilter->ilen; n++){
-	audio[n] = plfilter->input.r[n] * gain;
-	if(audio[n] != 0)
-	  silent = 0;
-      }
-    } else {
-      assert(plfilter->ilen == afilter->olen);
-      for(int n=0; n < afilter->olen; n++){
-	audio[n] = afilter->output.r[n] * gain;
-	if(audio[n] != 0)
-	  silent = 0;
-      }
+    int remain = pl_filter->olen;
+    last_fft += remain;
+    float *data = pl_filter->output.r;
+    while(remain != 0){
+      int chunk = min(remain,pl_fft_size - fft_ptr);
+      assert(malloc_usable_size(pl_input) >= sizeof(*pl_input) * (fft_ptr + chunk));
+      memcpy(pl_input+fft_ptr,data,sizeof(*data) * chunk);
+      fft_ptr += chunk;
+      data += chunk;
+      remain -= chunk;
+      if(fft_ptr >= pl_fft_size)
+	fft_ptr -= pl_fft_size;
     }
-    if(!silent){
-
-      send_mono_audio(demod->audio,audio,plfilter->ilen);
+    // Execute only periodically
+    if(last_fft >= 1024){
+      last_fft = 0;
 
       // Determine PL tone, if any
       fftwf_execute(pl_plan);
@@ -213,22 +281,10 @@ void *demod_fm(void *arg){
 	demod->plfreq = NAN;
     }
   }
+  // If we ever get here
+  delete_filter_output(pl_filter);
   fftwf_destroy_plan(pl_plan);
   fftwf_free(pl_input);
   fftwf_free(pl_spectrum);
-
-  delete_filter(plfilter); // Must delete first
-  if(afilter != NULL)
-    delete_filter(afilter);
-  delete_filter(filter);
-  demod->filter = NULL;
-
-  // Clear these to keep them from showing up with other demods
-  demod->foffset = NAN;
-  demod->pdeviation = NAN;
-  demod->plfreq = NAN;
-  demod->flags = 0;
-
-  pthread_exit(NULL);
+  return NULL;
 }
-

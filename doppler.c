@@ -1,4 +1,4 @@
-// $Id: doppler.c,v 1.4 2017/10/01 23:24:40 karn Exp karn $
+// $Id: doppler.c,v 1.5 2017/10/17 07:03:05 karn Exp karn $
 // Real-time doppler steering
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -18,10 +18,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#include "audio.h"
+#include "misc.h"
 #include "radio.h"
-#include "filter.h"
-#include "dsp.h"
+
 
 void *doppler(void *arg){
   pthread_setname("doppler");

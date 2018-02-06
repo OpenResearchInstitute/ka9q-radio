@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.28 2017/10/23 09:02:51 karn Exp karn $
+// $Id: monitor.c,v 1.29 2017/10/24 10:14:27 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -20,8 +20,7 @@
 #include <locale.h>
 #include <errno.h>
 
-#include "rtp.h"
-#include "dsp.h"
+#include "misc.h"
 #include "multicast.h"
 
 // Global config variables
@@ -222,13 +221,11 @@ int main(int argc,char * const argv[]){
   outputParameters.sampleFormat = paFloat32;
   outputParameters.suggestedLatency = 0.010; // 0 doesn't seem to be a good value on OSX, lots of underruns and stutters
   
-#if 0
-  r = Pa_OpenStream(&Pa_Stream,NULL,&outputParameters,Samprate,paFramesPerBufferUnspecified,
-		    paPrimeOutputBuffersUsingStreamCallback,pa_callback,NULL);
-#else
-  r = Pa_OpenStream(&Pa_Stream,NULL,&outputParameters,Samprate,paFramesPerBufferUnspecified,
+  r = Pa_OpenStream(&Pa_Stream,NULL,&outputParameters,Samprate,
+		    //		    paFramesPerBufferUnspecified,
+		    960, // Match 20ms Opus blocksize
 		    0,pa_callback,NULL);
-#endif      
+
   if(r != paNoError){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
     exit(1);
@@ -274,7 +271,8 @@ int main(int argc,char * const argv[]){
 	goto endloop;
       }
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
-		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
+		  //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
+		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
       sp->write_ptr = Read_ptr;
       sp->gain = 1; // 0 dB by default
       sp->dupes = 0;

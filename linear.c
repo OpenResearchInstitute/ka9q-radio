@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.16 2017/10/23 09:02:18 karn Exp karn $
+// $Id: linear.c,v 1.17 2017/10/24 06:45:02 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -16,7 +16,7 @@
 #include <string.h>
 
 
-#include "dsp.h"
+#include "misc.h"
 #include "filter.h"
 #include "radio.h"
 #include "audio.h"
@@ -26,6 +26,7 @@ void *demod_linear(void *arg){
   pthread_setname("linear");
   assert(arg != NULL);
   struct demod * const demod = arg;
+  struct audio * const audio = &Audio; // Eventually pass as argument
 
   demod->loop_bw = 1; // eventually to be set from mode table
 
@@ -36,7 +37,9 @@ void *demod_linear(void *arg){
   // AGC
   int hangcount = 0;
   float const recovery_factor = dB2voltage(demod->recovery_rate * samptime); // AGC ramp-up rate/sample
+#if 0
   float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
+#endif
   int const hangmax = demod->hangtime / samptime; // samples before AGC increase
   if(isnan(demod->gain))
     demod->gain = dB2voltage(20.0); // initial setting - a little quiet to avoid blasting
@@ -70,16 +73,18 @@ void *demod_linear(void *arg){
   //  float const ramprate = demod->loop_bw * blocktime / integrator_gain;   // sweep at one loop bw/sec
   float const ramprate = 0; // temp disable
 
+#if 0
   // DC removal from envelope-detected AM and coherent AM
   complex float DC_filter = 0;
   float const DC_filter_coeff = .0001;
+#endif
 
   demod->snr = 0;
 
   // Detection filter
-  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
+  struct filter_out * const filter = create_filter_output(demod->filter_in,NULL,demod->decimate,
 					       (demod->flags & ISB) ? CROSS_CONJ : COMPLEX);
-  demod->filter = filter;
+  demod->filter_out = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
   // Carrier search FFT
@@ -108,16 +113,13 @@ void *demod_linear(void *arg){
 
   while(!demod->terminate){
     // New samples
-    fillbuf(demod,filter->input.c,filter->ilen);
-    spindown(demod,filter->input.c);
-    demod->if_power = cpower(filter->input.c,filter->ilen);
     // Copy ISB flag to filter
     if(demod->flags & ISB)
       filter->out_type = CROSS_CONJ;
     else
       filter->out_type = COMPLEX;
 
-    execute_filter(filter);
+    execute_filter_output(filter);    
     if(!isnan(demod->n0))
       demod->n0 += .001 * (compute_n0(demod) - demod->n0);
     else
@@ -253,9 +255,10 @@ void *demod_linear(void *arg){
     // Demodulation
     float signal = 0;
     float noise = 0;
+#if 0 // Now a separate demodulator
     if(demod->flags & ENVELOPE){
       // Envelope detected AM
-      float audio[filter->olen];
+      float samples[filter->olen];
       for(int n=0; n<filter->olen; n++){
 	float const sampsq = cnrmf(filter->output.c[n]);
 	signal += sampsq;
@@ -267,17 +270,20 @@ void *demod_linear(void *arg){
 	if(isnan(demod->gain)){
 	  demod->gain = demod->headroom / crealf(DC_filter);
 	} else if(demod->gain * crealf(DC_filter) > demod->headroom){
-	  demod->gain *= attack_factor;
+	  //	  demod->gain *= attack_factor;
+	  demod->gain = demod->headroom / crealf(DC_filter);
 	  hangcount = hangmax;
 	} else if(hangcount != 0){
 	  hangcount--;
 	} else {
 	  demod->gain *= recovery_factor;
 	}
-	audio[n] = (samp - crealf(DC_filter)) * demod->gain;
+	samples[n] = (samp - crealf(DC_filter)) * demod->gain;
       }
-      send_mono_audio(demod->audio,audio,filter->olen);
-    } else {
+      send_mono_audio(audio,samples,filter->olen);
+    } else
+#endif
+      {
       // All other linear modes besides envelope detection
       for(int n=0; n<filter->olen; n++){
 	signal += crealf(filter->output.c[n]) * crealf(filter->output.c[n]);
@@ -288,7 +294,8 @@ void *demod_linear(void *arg){
 	if(isnan(demod->gain)){
 	  demod->gain = demod->headroom / amplitude; // Startup
 	} else if(amplitude * demod->gain > demod->headroom){
-	  demod->gain *= attack_factor;
+	  demod->gain = demod->headroom / amplitude;
+	  //	  demod->gain *= attack_factor;
 	  hangcount = hangmax;
 	} else if(hangcount != 0){
 	  hangcount--;
@@ -310,12 +317,12 @@ void *demod_linear(void *arg){
 
       if(demod->flags & MONO) {
 	// Send only I channel as mono
-	float audio[filter->olen];
+	float samples[filter->olen];
 	for(int n=0; n<filter->olen; n++)
-	  audio[n] = crealf(filter->output.c[n]);
-	send_mono_audio(demod->audio,audio,filter->olen);
+	  samples[n] = crealf(filter->output.c[n]);
+	send_mono_audio(audio,samples,filter->olen);
       } else {
-	send_stereo_audio(demod->audio,(float *)filter->output.c,filter->olen);
+	send_stereo_audio(audio,(float *)filter->output.c,filter->olen);
       }
     } // not envelope detection
     demod->bb_power = (signal + noise) / filter->olen;
@@ -335,7 +342,7 @@ void *demod_linear(void *arg){
   if(fft_plan)
     fftwf_destroy_plan(fft_plan);
   if(filter)
-    delete_filter(filter);
-  demod->filter = NULL;
+    delete_filter_output(filter);
+  demod->filter_out = NULL;
   pthread_exit(NULL);
 }

@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.19 2017/09/11 04:35:43 karn Exp karn $
+// $Id: misc.c,v 1.20 2017/09/28 22:04:12 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -17,15 +17,6 @@
 #endif
 
 #include "radio.h"
-
-double const angle_mod(double x){
-  while(x > M_PI)
-    x -= 2*M_PI;
-  while(x < -M_PI)
-    x += 2*M_PI;
-  return x;
-}
-
 
 // return unit magnitude complex number with phase x radians
 complex float const csincosf(const float x){
@@ -68,65 +59,6 @@ int is_phasor_init(const complex double x){
 }
 
 
-// Fast arctangent approximation
-// http://www.embedded.com/design/other/4216719/Performing-efficient-arctangent-approximation
-float const fast_atan2f(float const y,float const x){
-  float term;
-  if(fabsf(x) > fabsf(y)){
-    // octants 1, 4, 5, 8
-    term = (x * y) / (x*x + 0.28125*y*y);
-    if(x > 0)
-      return term; // 1 or 8
-    else {
-      if(term > 0) // 5 octant - special case
-	return -M_PI + term;
-      else
-	return M_PI + term; // octant 4;
-    }
-  } else {
-    // octants 2, 3, 6, 7
-    term = -(x * y) / (y*y + 0.28125*x*x);
-    if(y > 0)
-      return M_PI/2 + term; // 2 or 3
-    else
-      return -M_PI/2 + term; // 6 or 7
-  }
-}
-float const fast_cargf(complex float const x){
-  return fast_atan2f(cimagf(x),creal(x));
-}
-
-
-
-float complex const cpowers(const float complex * const data,const int len){
-  int n;
-  float amplitude = 0;
-  float noise = 0;
-  for(n=0; n < len; n++){
-    // Sample with signal rotated onto I axis
-    complex float const rsamp = data[n];
-    amplitude += crealf(rsamp) * crealf(rsamp);
-    noise += cimagf(rsamp) * cimagf(rsamp);
-  }
-  amplitude/= len;
-  noise /= len;
-  return CMPLXF(amplitude,noise);
-}
-
-
-// Average power in an array of real floats
-float const rpower(const float *data,const int len){
-  float sum = 0;  
-  int n;
-  
-  if(len <= 0)
-    return 0;
-  for(n=0; n < len; n++)
-    sum += data[n] * data[n];
-
-  return sum/len;
-}
-
 // Average power in an array of complex floats
 const float cpower(const complex float *data, const int len){
   float amplitude = 0;
@@ -156,8 +88,6 @@ int pipefill(const int fd,void *buffer,const int cnt){
   return i;
 
 }
-
-
 
 // Remove return or newline, if any, from end of string
 void chomp(char *s){

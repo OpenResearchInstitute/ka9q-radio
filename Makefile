@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.75 2017/10/24 01:26:59 karn Exp karn $
+# $Id: Makefile,v 1.76 2018/02/06 11:47:39 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -14,7 +14,7 @@ install: all
 	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt modes.txt
 
 clean:
-	rm -f *.o *.a control funcube iqplay iqrecord modulate monitor radio
+	rm -f *.o *.a control funcube iqplay iqrecord modulate monitor radio opus packet
 	rcsclean
 
 packet: packet.o multicast.o filter.o misc.o

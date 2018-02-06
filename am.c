@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.29 2017/10/17 07:01:54 karn Exp karn $
+// $Id: am.c,v 1.30 2017/10/24 06:43:50 karn Exp karn $
 
 // New AM demodulator, stripped from linear.c
 // Oct 9 2017 Phil Karn, KA9Q
@@ -14,7 +14,7 @@
 #include <string.h>
 
 
-#include "dsp.h"
+#include "misc.h"
 #include "filter.h"
 #include "radio.h"
 #include "audio.h"
@@ -24,6 +24,7 @@ void *demod_am(void *arg){
   pthread_setname("am");
   assert(arg != NULL);
   struct demod * const demod = arg;
+  struct audio * const audio = &Audio; // Eventually pass this as an argument
 
   // Set derived (and other) constants
   float const samptime = demod->decimate / demod->samprate;  // Time between (decimated) samples
@@ -31,7 +32,7 @@ void *demod_am(void *arg){
   // AGC
   int hangcount = 0;
   float const recovery_factor = dB2voltage(demod->recovery_rate * samptime); // AGC ramp-up rate/sample
-  float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
+  //  float const attack_factor = dB2voltage(demod->attack_rate * samptime);      // AGC ramp-down rate/sample
   int const hangmax = demod->hangtime / samptime; // samples before AGC increase
   if(isnan(demod->gain))
     demod->gain = dB2voltage(20.);
@@ -45,17 +46,13 @@ void *demod_am(void *arg){
   demod->snr = -INFINITY; // Not used
 
   // Detection filter
-  struct filter * const filter = create_filter(demod->L,demod->M,NULL,demod->decimate,COMPLEX,
-					       (demod->flags & ISB) ? CROSS_CONJ : COMPLEX);
-  demod->filter = filter;
+  struct filter_out * const filter = create_filter_output(demod->filter_in,NULL,demod->decimate,COMPLEX);
+  demod->filter_out = filter;
   set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 
   while(!demod->terminate){
     // New samples
-    fillbuf(demod,filter->input.c,filter->ilen);
-    spindown(demod,filter->input.c);
-    demod->if_power = cpower(filter->input.c,filter->ilen);
-    execute_filter(filter);
+    execute_filter_output(filter);    
     if(!isnan(demod->n0))
       demod->n0 += .001 * (compute_n0(demod) - demod->n0);
     else
@@ -65,7 +62,7 @@ void *demod_am(void *arg){
     float signal = 0;
     float noise = 0;
     // Envelope detected AM
-    float audio[filter->olen];
+    float samples[filter->olen];
     for(int n=0; n<filter->olen; n++){
       float const sampsq = cnrmf(filter->output.c[n]);
       signal += sampsq;
@@ -78,19 +75,19 @@ void *demod_am(void *arg){
       if(isnan(demod->gain)){
 	demod->gain = demod->headroom / DC_filter;
       } else if(demod->gain * DC_filter > demod->headroom){
-	demod->gain *= attack_factor;
+	demod->gain = demod->headroom / DC_filter;
 	hangcount = hangmax;
       } else if(hangcount != 0){
 	hangcount--;
       } else {
 	demod->gain *= recovery_factor;
       }
-      audio[n] = (samp - DC_filter) * demod->gain;
+      samples[n] = (samp - DC_filter) * demod->gain;
     }
-    send_mono_audio(demod->audio,audio,filter->olen);
+    send_mono_audio(audio,samples,filter->olen);
     demod->bb_power = (signal + noise) / filter->olen;
   } // terminate
-  delete_filter(filter);
-  demod->filter = NULL;
+  delete_filter_output(filter);
+  demod->filter_out = NULL;
   pthread_exit(NULL);
 }

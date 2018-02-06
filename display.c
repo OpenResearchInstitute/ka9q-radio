@@ -1,5 +1,4 @@
-
-// $Id: display.c,v 1.106 2017/10/24 06:45:11 karn Exp karn $
+// $Id: display.c,v 1.107 2017/10/24 10:14:32 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -29,10 +28,10 @@
 #include <ctype.h>
 #include <sys/socket.h>
 #include <netdb.h>
-#include "rtp.h"
+
+#include "misc.h"
 #include "radio.h"
 #include "audio.h"
-#include "dsp.h"
 #include "filter.h"
 #include "multicast.h"
 #include "bandplan.h"
@@ -169,11 +168,11 @@ void adjust_item(struct demod *demod,int direction){
     break;
   case 4: // Filter low edge
     demod->low += tunestep;
-    set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+    set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
   case 5: // Filter high edge
     demod->high += tunestep;
-    set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+    set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
   case 6: // Post-detection audio frequency shift
     set_shift(demod,demod->shift + tunestep);
@@ -182,7 +181,7 @@ void adjust_item(struct demod *demod,int direction){
     demod->kaiser_beta += tunestep;
     if(demod->kaiser_beta < 0)
       demod->kaiser_beta = 0;
-    set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+    set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
     break;
   }
 }
@@ -322,7 +321,7 @@ void *display(void *arg){
   pthread_setname("display");
   assert(arg != NULL);
   struct demod * const demod = arg;
-  struct audio * const audio = demod->audio;
+  struct audio * const audio = &Audio; // Eventually make parameter
 
 #ifdef linux
   extern void *knob(void *);
@@ -334,6 +333,7 @@ void *display(void *arg){
   pthread_create(&pthread_touch,NULL,touch,demod);   // Disable for now
 #endif
 
+  slk_init(3);
   // talk directly to the terminal
   Tty = fopen("/dev/tty","r+");
   Term = newterm(NULL,Tty,Tty);
@@ -529,8 +529,8 @@ void *display(void *arg){
 
     // Signal data window
     float bw = 0;
-    if(demod->filter != NULL)
-      bw = demod->samprate * demod->filter->noise_gain;
+    if(demod->filter_out != NULL)
+      bw = demod->samprate * demod->filter_out->noise_gain;
     float sn0 = demod->bb_power / demod->n0 - bw;
     if(sn0 < 0)
       sn0 = 0; // Force to 0 so it'll show as -Inf dB
@@ -680,29 +680,15 @@ void *display(void *arg){
     row = 1;
     col = 1;
     extern int Delayed,Skips;
+    extern uint32_t Ssrc;
+
     wmove(network,0,0);
     mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
     mvwprintw(network,row++,col,"IQ pkts: %'llu; late %'d; skips %'d",demod->iq_packets,
 	      Delayed,Skips);
-
-    if(strlen(audio->localdev) > 0 && strcmp(audio->localdev,"none") != 0)
-      mvwprintw(network,row++,col,"Audio device: %s",audio->localdev);
-
-    if(audio->opus_bitrate != 0 || audio->rtp_pcm != 0) 
-      // Audio output dest address (usually multicast)
-      mvwprintw(network,row++,col,"Sink: %s",audio->audio_mcast_address_text);
-
-    if(audio->opus_bitrate > 0)
-      mvwprintw(network,row++,col,"Opus %.1fms%s %.0f kb/s; %'.1f kb/s; pkts %'llu",
-		audio->opus_blocktime,audio->opus_dtx ? " dtx":"",
-		audio->opus_bitrate/1000.,audio->bitrate/1000.,audio->audio_packets);
-
-    if(audio->rtp_pcm)
-      mvwprintw(network,row++,col,"PCM %'d Hz; %'.1f kb/s; pkts %'llu",audio->samprate,audio->bitrate/1000.,
-		audio->audio_packets);
-
-    if(audio->filename != NULL)
-      mvwprintw(network,row++,col,"Stream: %s",audio->filename);
+    mvwprintw(network,row++,col,"Sink: %s; ssrc %8x; TTL %d%s",audio->audio_mcast_address_text,
+	      Ssrc,Mcast_ttl,Mcast_ttl == 0 ? " (Local host only)":"");
+    mvwprintw(network,row++,col,"PCM %'d Hz; pkts %'llu",audio->samprate,audio->audio_packets);
 
     box(network,0,0);
     mvwaddstr(network,0,35,"I/O");
@@ -744,6 +730,20 @@ void *display(void *arg){
       ;
       break;
     }
+    // Write function key labels for current mode
+    slk_set(1,"FM",1);
+    slk_set(2,"AM",1);
+    slk_set(3,"USB",1);
+    slk_set(4,"LSB",1);
+    slk_set(5,"CW",1);    
+    slk_set(6,"PLL",1);
+    slk_set(7,"CAL",1);
+    slk_set(8,"SQR",1);
+    slk_set(9,"ISB",1);
+    slk_set(11,"STEREO",1);
+    slk_set(12,"MONO",1);
+    slk_noutrefresh();
+
     move(mod_y,mod_x);
     doupdate();      // Right before we pause
     
@@ -751,6 +751,45 @@ void *display(void *arg){
     int c = getch(); // read keyboard with timeout; controls refresh rate
 
     switch(c){
+    case KEY_F(1):
+      set_mode(demod,"FM",1);
+      break;
+    case KEY_F(2):
+      set_mode(demod,"AM",1);
+      break;
+    case KEY_F(3):
+      set_mode(demod,"USB",1);
+      break;
+    case KEY_F(4):
+      set_mode(demod,"LSB",1);
+      break;
+    case KEY_F(5):
+      set_mode(demod,"CWU",1);
+      break;
+    case KEY_F(6):
+      demod->flags ^= PLL;
+      break;
+    case KEY_F(7):
+      demod->flags ^= CAL;
+      if(demod->flags & CAL)
+	demod->flags |= PLL;
+      break;
+    case KEY_F(8):
+      demod->flags ^= SQUARE;
+      if(demod->flags & SQUARE)
+	demod->flags |= PLL;
+      break;
+    case KEY_F(9):
+      demod->flags ^= ISB;
+      break;
+    case KEY_F(10):
+      break;
+    case KEY_F(11):
+      demod->flags &= ~MONO;
+      break;
+    case KEY_F(12):
+      demod->flags |= MONO;
+      break;
     case KEY_MOUSE: // Mouse event
       getmouse(&mouse_event);
       break;
@@ -927,7 +966,7 @@ void *display(void *arg){
 	}
 	if(b != demod->kaiser_beta){
 	  demod->kaiser_beta = b;
-	  set_filter(demod->filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+	  set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
 	}
       }
       break;
@@ -974,6 +1013,7 @@ void *display(void *arg){
     my = mouse_event.y;
     mouse_event.y = mouse_event.x = mouse_event.z = 0;
     if(mx != 0 && my != 0){
+      wprintw(debug," (%d %d)",mx,my);
       if(wmouse_trafo(tuning,&my,&mx,false)){
 	// Tuning window
 	demod->tuneitem = my-1;
@@ -1054,7 +1094,7 @@ void *display(void *arg){
   
   // Dump receiver state to default
   savestate(demod,"default");
-  audio_cleanup(demod->audio);
+  audio_cleanup(&Audio);
   exit(0);
 }
 

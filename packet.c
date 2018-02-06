@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.2 2018/01/25 20:05:08 karn Exp karn $
+// $Id: packet.c,v 1.3 2018/02/06 01:36:16 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -30,16 +30,17 @@ struct packet {
   char addr[NI_MAXHOST];    // RTP Sender IP address
   char port[NI_MAXSERV];    // RTP Sender source port
 
-  int input_pointer;
-  struct filter_in *filter_in;
-  pthread_t decode_thread;
 
   unsigned long age;
-  unsigned long packets;    // RTP packets for this session
+  unsigned long rtp_packets;    // RTP packets for this session
   unsigned long drops;      // Apparent rtp packet drops
   unsigned long invalids;   // Unknown RTP type
   unsigned long empties;    // RTP but no data
   unsigned long dupes;      // Duplicate or old serial numbers
+  int input_pointer;
+  struct filter_in *filter_in;
+  pthread_t decode_thread;
+  unsigned int decoded_packets;
 };
 
 
@@ -237,22 +238,19 @@ int crc_good(unsigned char *frame,int length){
 
 
 
-// Packet demod task - incomplete
+// AFSK demod, HDLC decode
 void *decode_task(void *arg){
-  pthread_setname("decode");
+  pthread_setname("afsk");
   struct packet *sp = (struct packet *)arg;
   assert(sp != NULL);
 
   struct filter_out *filter = create_filter_output(sp->filter_in,NULL,1,COMPLEX);
   set_filter(filter,Samprate,+100,+4000,3.0); // Creates analytic, band-limited signal
 
-  int bits_since_last_edge = 0;
   unsigned char hdlc_frame[1024];
   memset(hdlc_frame,0,sizeof(hdlc_frame));
   int frame_bit = 0;
-  int zero_pending = 0;
   float last_val = 0;
-  int packets = 0;
 
 
   float complex mark_delay_line[Samppbit];
@@ -273,7 +271,6 @@ void *decode_task(void *arg){
 #endif
 
   int ones = 0;
-  int zeroes = 0;
 
   float peak_mark = 0;
   float peak_space = 0;
@@ -299,7 +296,6 @@ void *decode_task(void *arg){
 	peak_mark *= (1-peak_smooth);
       if(cnrmf(mark_sum) >= peak_mark)
 	peak_mark = cnrmf(mark_sum);
-
 
       s =  space_phase * filter->output.c[n];
       space_phase *= space_step;
@@ -338,7 +334,6 @@ void *decode_task(void *arg){
       else
 	yval = y[i];
 
-#if 1
       assert(frame_bit >= 0);
       if(yval * last_val < 0){
 	// NRZI zero
@@ -348,7 +343,7 @@ void *decode_task(void *arg){
 	    frame_bit -= 7; // Remove 0111111
 	    int bytes = frame_bit / 8;
 	    if(bytes > 0 && crc_good(hdlc_frame,bytes)){
-	      printf("Packet %d, %d bytes\n",packets++,bytes);
+	      printf("ssrc %x packet %d: %d bytes\n",sp->ssrc,sp->decoded_packets++,bytes);
 	      dump_frame(hdlc_frame,bytes);
 	    }
 	  }
@@ -381,70 +376,6 @@ void *decode_task(void *arg){
 	  }
 	}
       }
-#else
-
-      if(yval * last_val < 0){ // NRZI decode: sign flip = 0, no sign flip = 1
-
-	// See how many 1 bits we've had since last zero
-	// 4 or less: that many 1's followed by zero
-	// 5: five 1's, then drop next 0
-	// 6: six 1's: flag, end frame
-	// 7 or more: abort frame
-	int one_bits = bits_since_last_edge;
-	bits_since_last_edge = 0;
-
-	if(flagsync && (one_bits >= 0 && one_bits <= 5) && (frame_bit < 8 * 1022)){ // Leave room
-	  // not a flag or abort
-	  // Previous transition was a zero bit
-	  if(zero_pending){
-	    // Insert single zero
-	    frame_bit++;
-	  }
-	  // Insert 'one_bits' ones
-	  for(int k=0;k<one_bits;k++){
-	    hdlc_frame[frame_bit/8] |= 1 << (frame_bit % 8);
-	    frame_bit++;
-	  }
-	  if(one_bits < 5)
-	    zero_pending = 1;
-	  else
-	    zero_pending = 0;  // remove bit-stuffed 0
-
-	} else if(one_bits == 6) {
-	  // Flag began with the preceeding zero
-	  // Check CRC, process frame
-	  if(flagsync){
-	    
-	    if(frame_bit > 0){
-#if 0
-	      printf("crc = %x (%s), length = %d bytes %d bits\n",crc,
-		     crc == 0xf0b8? "good" : "bad",
-		     frame_bit/8,frame_bit%8);
-#endif	      
-	      int bytes = frame_bit / 8;
-              if(crc_good(hdlc_frame,bytes)){
-		printf("Packet %d, %d bytes\n",packets++,bytes);
-		dump_frame(hdlc_frame,bytes);
-	      }
-	    }
-	  }
-	  flagsync = 1;
-	  memset(hdlc_frame,0,sizeof(hdlc_frame));
-	  frame_bit = 0;
-	  zero_pending = 0;
-	} else if(one_bits > 6){
-	  // Abort
-	  flagsync = 0;
-	  memset(hdlc_frame,0,sizeof(hdlc_frame));
-	  frame_bit = 0;
-	  zero_pending = 0;
-	}
-      } else {
-	bits_since_last_edge++;
-      }
-#endif
-
-
       last_val = yval;
     }
     memcpy(old_y,&y[filter->olen - Samppbit],sizeof(old_y));
@@ -473,8 +404,6 @@ int main(int argc,char *argv[]){
       exit(1);
     }
   }
-  
-
 
   // Set up multicast input
   Input_fd = setup_mcast(Mcast_address_text,0);
@@ -548,7 +477,7 @@ int main(int argc,char *argv[]){
     sp->age = 0;
     int drop = 0;
 
-    sp->packets++;
+    sp->rtp_packets++;
     if(rtp.seq != sp->eseq){
       int const diff = (int)(rtp.seq - sp->eseq);
       //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);

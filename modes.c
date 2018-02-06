@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.22 2017/10/16 23:24:24 karn Exp karn $
+// $Id: modes.c,v 1.23 2017/10/24 06:44:30 karn Exp karn $
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,8 +7,10 @@
 #endif
 #include <string.h>
 #include <errno.h>
+
+#include "misc.h"
 #include "radio.h"
-#include "dsp.h"
+
 
 
 #define MAXMODES 256

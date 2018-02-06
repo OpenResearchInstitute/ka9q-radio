@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.24 2017/10/20 22:38:14 karn Exp karn $
+// $Id: funcube.c,v 1.25 2017/10/20 22:43:33 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -24,8 +24,7 @@
 #include "fcd.h"
 #include "sdr.h"
 #include "radio.h"
-#include "dsp.h"
-#include "rtp.h"
+#include "misc.h"
 #include "multicast.h"
 
 void *display(void *arg);
@@ -68,6 +67,8 @@ double set_fc_LO(double);
 
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 int Ctl_sock;
+extern int Mcast_ttl;
+
 
 int main(int argc,char *argv[]){
   // if we have root, up our priority and drop privileges
@@ -87,7 +88,7 @@ int main(int argc,char *argv[]){
     Locale = "en_US.UTF-8";
 
   int c;
-  while((c = getopt(argc,argv,"d:vp:l:b:oR:")) != EOF){
+  while((c = getopt(argc,argv,"d:vp:l:b:oR:T:")) != EOF){
     switch(c){
     case 'R':
       dest = optarg;
@@ -106,6 +107,9 @@ int main(int argc,char *argv[]){
       break;
     case 'b':
       Blocksize = strtol(optarg,NULL,0);
+      break;
+    case 'T':
+      Mcast_ttl = strtol(optarg,NULL,0);
       break;
     }
   }

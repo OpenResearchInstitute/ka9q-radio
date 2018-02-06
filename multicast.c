@@ -9,6 +9,9 @@
 #endif
 #include "multicast.h"
 
+int Mcast_ttl = 1;
+
+
 static void soptions(int fd){
   // Failures here are not fatal
   int reuse = 1;
@@ -21,6 +24,14 @@ static void soptions(int fd){
   linger.l_linger = 0;
   if(setsockopt(fd,SOL_SOCKET,SO_LINGER,&linger,sizeof(linger)) != 0)
     perror("so_linger failed");
+  u_char ttl = Mcast_ttl;
+  if(setsockopt(fd,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof(ttl)) != 0){
+    perror("so_ttl failed");
+  }
+  u_char loop = 1;
+  if(setsockopt(fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
+    perror("so_ttl failed");
+  }
 }
 
 #if defined(linux) // Linux, etc, for both IPv4/IPv6

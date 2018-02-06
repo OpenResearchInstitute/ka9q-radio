@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.55 2017/10/21 01:56:18 karn Exp karn $
+// $Id: radio.h,v 1.56 2017/10/24 06:44:10 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -138,7 +138,8 @@ struct demod {
   struct notchfilter *nf;
 
   // Zero IF pre-demod filter params
-  struct filter *filter;
+  struct filter_in *filter_in;
+  struct filter_out *filter_out;
   int L;            // Signal samples in FFT buffer
   int M;            // Samples in filter impulse response
   int interpolate;  // Input sample ratio multiplier, should be power of 2
@@ -149,6 +150,8 @@ struct demod {
   // Transition region is approx sqrt(1+Beta^2)
   // 0 => rectangular window; increasing values widens main lobe and decreases ripple
   float kaiser_beta;
+  pthread_t filter_thread;          // Thread for downconversion and first half of filter
+
 
   // Demodulator configuration settngs
   float headroom;   // Audio level headroom
@@ -169,13 +172,15 @@ struct demod {
   float plfreq;     // PL tone frequency (FM);
   float spare;
 
-  struct audio *audio; // Link to audio output system
+  struct filter_in *audio_master;
+
 };
 extern char Libdir[];
 extern int Tunestep;
 extern struct modetab Modes[];
 extern int Nmodes;
 
+void *filtert(void *arg);
 int fillbuf(struct demod *,complex float *,const int);
 int LO2_in_range(struct demod *,double f,int);
 double get_freq(struct demod *);

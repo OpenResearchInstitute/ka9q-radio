@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.9 2017/09/02 05:48:30 karn Exp karn $
+// $Id: iqrecord.c,v 1.10 2017/10/20 22:31:54 karn Exp karn $
 // Read complex float samples from stdin (e.g., from funcube.c)
 // write into file
 #define _GNU_SOURCE 1
@@ -27,7 +27,6 @@
 #include <sys/resource.h>
 
 #include "radio.h"
-#include "rtp.h"
 #include "attr.h"
 #include "multicast.h"
 

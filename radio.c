@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.76 2017/10/22 07:37:26 karn Exp karn $
+// $Id: radio.c,v 1.77 2017/10/27 06:01:12 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -19,10 +19,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#include "audio.h"
+#include "misc.h"
 #include "radio.h"
 #include "filter.h"
-#include "dsp.h"
+
+
+static double const Raster = 125.; // Tune LO1 to multiples of this frequency
+
 
 // Lower half of input thread
 // Preprocessing of samples performed for all demodulators
@@ -122,6 +125,25 @@ int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
   return cnt;
 }
 
+// Thread to read adjusted I/Q samples, downconvert with second LO, and execute master half of filter
+// Also compute total power in IF before filtering
+void *filtert(void *arg){
+  struct demod *demod = arg;
+  pthread_setname("downcvt");
+  assert(demod != NULL);
+  struct filter_in *master;
+
+  demod->filter_in = master = create_filter_input(demod->L,demod->M,COMPLEX);
+
+  while(1){
+    fillbuf(demod,master->input.c,master->ilen);
+    spindown(demod,master->input.c);
+    demod->if_power = cpower(master->input.c,master->ilen);
+    execute_filter_input(master);
+  }
+}
+
+
 
 // The funcube dongle uses the Mirics MSi001 tuner. It has a fractional N synthesizer that can't actually do integer frequency steps.
 // This formula is hacked down from code from Howard Long; it's what he uses in the firmware so I can figure out
@@ -133,8 +155,8 @@ double fcd_actual(unsigned int u32Freq){
   typedef unsigned int UINT32;
   typedef unsigned long long UINT64;
 
-  const UINT32 u32Thresh=3250U;
-  const UINT32 u32FRef=26000000U;
+  const UINT32 u32Thresh = 3250U;
+  const UINT32 u32FRef = 26000000U;
   double f64FAct;
   
   struct
@@ -159,22 +181,31 @@ double fcd_actual(unsigned int u32Freq){
 	{UINT32_MAX,0U,2U},
 	{0U,0U,0U}
       };
-  for(pts = ats; u32Freq>=pts->u32Freq; pts++)
+  for(pts = ats; u32Freq >= pts->u32Freq; pts++)
     ;
 
   if (pts->u32Freq == 0)
     pts--;
       
-  UINT64 u64FSynth=(((UINT64)u32Freq)+pts->u32FreqOff)*pts->u32LODiv;
-  UINT32 u32Int=(UINT32)(u64FSynth/(u32FRef*4));
-  UINT32 u32Frac4096=(UINT32)((((u64FSynth<<12)*u32Thresh/(u32FRef*4))-(u32Int<<12)*u32Thresh));
-  UINT32 u32Frac=u32Frac4096>>12;
-  UINT32 u32AFC=u32Frac4096-(u32Frac<<12);
+  // Frequency of synthesizer before divider - can possibly exceed 32 bits, so it's stored in 64
+  UINT64 u64FSynth = ((UINT64)u32Freq + pts->u32FreqOff) * pts->u32LODiv;
+
+  // Integer part of divisor ("INT")
+  UINT32 u32Int = u64FSynth / (u32FRef*4);
+
+  // Subtract integer part to get fractional and AFC parts of divisor ("FRAC" and "AFC")
+  UINT32 u32Frac4096 =  (u64FSynth<<12) * u32Thresh/(u32FRef*4) - (u32Int<<12) * u32Thresh;
+
+  // FRAC is higher 12 bits
+  UINT32 u32Frac = u32Frac4096>>12;
+
+  // AFC is lower 12 bits
+  UINT32 u32AFC = u32Frac4096 - (u32Frac<<12);
       
+  // Actual tuner frequency, in floating point, given specified parameters
   f64FAct = (4.0 * u32FRef / (double)pts->u32LODiv) * (u32Int + ((u32Frac * 4096.0 + u32AFC) / (u32Thresh * 4096.))) - pts->u32FreqOff;
   
   // double f64step = ( (4.0 * u32FRef) / (pts->u32LODiv * (double)u32Thresh) ) / 4096.0;
-  
   //      printf("f64step = %'lf, u32LODiv = %'u, u32Frac = %'d, u32AFC = %'d, u32Int = %'d, u32Thresh = %'d, u32FreqOff = %'d, f64FAct = %'lf err = %'lf\n",
   //	     f64step, pts->u32LODiv, u32Frac, u32AFC, u32Int, u32Thresh, pts->u32FreqOff,f64FAct,f64FAct - u32Freq);
   return f64FAct;
@@ -187,8 +218,7 @@ double const get_first_LO(const struct demod * const demod){
   if(demod == NULL)
     return NAN;
 	 
-  return fcd_actual(demod->status.frequency) * (1 + demod->calibrate);  // True frequency, as adjusted;
-
+  return fcd_actual(demod->status.frequency) * (1 + demod->calibrate);  // True frequency, as quantized and corrected for TCXO offset
 }
 
 
@@ -268,9 +298,8 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
   }
   double const new_lo1 = f + new_lo2;
     
-  // returns actual frequency, which may be a fraction of a Hz
-  // different from requested because of calibration offset and
-  // the fact that the tuner can only tune in 1 Hz steps
+  // returns actual frequency, which may be different from requested because
+  // of calibration offset and quantization error in the fractional-N synthesizer
   double const actual_lo1 = set_first_LO(demod,new_lo1);
   new_lo2 += (actual_lo1 - new_lo1); // fold the difference into LO2
 
@@ -289,7 +318,7 @@ const int ADC_samprate = 192000;
 // Note: single precision floating point is not accurate enough at VHF and above
 // demod->first_LO isn't updated here, but by the
 // incoming status frames so it don't change right away
-double set_first_LO(struct demod * const demod,double const first_LO){
+double set_first_LO(struct demod * const demod,double first_LO){
   if(demod == NULL)
     return NAN;
   if(first_LO == get_first_LO(demod))
@@ -303,6 +332,7 @@ double set_first_LO(struct demod * const demod,double const first_LO){
   if(first_LO > 0){
     // Set tuner to integer nearest requested frequency after decalibration
     demod->requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
+    demod->requested_status.frequency = Raster * round(demod->requested_status.frequency / Raster);
     // These need a way to set
     demod->requested_status.samprate = ADC_samprate; // Preferred samprate; ignored by funcube
     demod->requested_status.lna_gain = 0xff;    // 0xff means "don't change"
@@ -491,10 +521,10 @@ int set_cal(struct demod * const demod,double const cal){
 // Apply LO2 to input samples
 // Length of data input obtained from demod->filter->i_len
 int spindown(struct demod * const demod,complex float const * const data){
-  if(demod == NULL || data == NULL || demod->filter == NULL)
+  if(demod == NULL || data == NULL || demod->filter_in == NULL)
     return -1;
 
-  struct filter * const filter = demod->filter;
+  struct filter_in * const filter = demod->filter_in;
 
   pthread_mutex_lock(&demod->second_LO_mutex);
   if(is_phasor_init(demod->second_LO_phasor)) { // Initialized?
@@ -528,10 +558,10 @@ int spindown(struct demod * const demod,complex float const * const data){
 // Then recompute the average, tossing bins > 3 dB above the previous average
 // Hopefully this will get rid of any signals from the noise estimate
 float const compute_n0(struct demod const * const demod){
-  if(demod == NULL || demod->filter == NULL)
+  if(demod == NULL || demod->filter_in == NULL)
     return NAN;
   
-  struct filter const *f = demod->filter;
+  struct filter_in const *f = demod->filter_in;
   int const N = f->ilen + f->impulse_length - 1;
   float power_spectrum[N];
   

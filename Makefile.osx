@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.25 2017/10/22 06:28:42 karn Exp karn $
+# $Id: Makefile.osx,v 1.26 2018/02/06 11:47:48 karn Exp karn $
 #CC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
@@ -6,7 +6,7 @@ BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
 
-all: iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt opus
+all: iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt opus packet
 
 install: all
 	install -d $(LIBDIR)
@@ -15,7 +15,7 @@ install: all
 	install bandplan.txt help.txt modes.txt $(LIBDIR)
 
 clean:
-	rm -f *.o *.a iqplay iqrecord modulate monitor radio
+	rm -f *.o *.a iqplay iqrecord modulate monitor radio opus packet
 	rcsclean
 
 packet: packet.o filter.o filter.o misc.o multicast.o

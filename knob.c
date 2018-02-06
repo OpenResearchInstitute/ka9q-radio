@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <linux/input.h>
 
-#include "dsp.h" // for our version of pthread_setname()
+#include "misc.h" // for our version of pthread_setname()
 
 #define DIAL "/dev/input/by-id/usb-Griffin_Technology__Inc._Griffin_PowerMate-event-if00"
 

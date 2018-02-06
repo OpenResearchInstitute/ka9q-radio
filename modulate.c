@@ -1,4 +1,4 @@
-// $Id: modulate.c,v 1.6 2017/09/19 12:58:52 karn Exp karn $ AM modulator - will eventually support other modes
+// $Id: modulate.c,v 1.7 2017/10/20 22:32:19 karn Exp karn $ AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
 #include <stdio.h>
 #include <unistd.h>
@@ -12,8 +12,8 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
+#include "misc.h"
 #include "filter.h"
-#include "dsp.h"
 #include "radio.h"
 
 #define BLOCKSIZE 4096
@@ -89,7 +89,9 @@ int main(int argc,char *argv[]){
     }
   }
   window_filter(L,M,response,3.0);
-  struct filter * const filter = create_filter(L,M,response,1,REAL,COMPLEX);
+  struct filter_in * const filter_in = create_filter_input(L,M,REAL);
+  struct filter_out * const filter_out = create_filter_output(filter_in,response,1,COMPLEX);
+  
 
   while(1){
     int16_t samp[L/4];
@@ -97,21 +99,22 @@ int main(int argc,char *argv[]){
       break;
     // Filter will upsample by 4x
     for(int j=0,i=0;i<L;){
-      filter->input.r[i++] = samp[j++] * scale;
-      filter->input.r[i++] = 0;
-      filter->input.r[i++] = 0;
-      filter->input.r[i++] = 0;      
+      filter_in->input.r[i++] = samp[j++] * scale;
+      filter_in->input.r[i++] = 0;
+      filter_in->input.r[i++] = 0;
+      filter_in->input.r[i++] = 0;      
     }
     // Form baseband signal (analytic for SSB, pure real for AM/DSB)
-    execute_filter(filter);
+    execute_filter_input(filter_in);
+    execute_filter_output(filter_out);
     
     // Add AM carrier
     for(int i=0;i<L;i++)
-      filter->output.c[i] += 1;
+      filter_out->output.c[i] += 1;
 
     // Spin up to chosen carrier frequency
     for(int i=0;i<L;i++){
-      filter->output.c[i] *= phase * amplitude;
+      filter_out->output.c[i] *= phase * amplitude;
       phase *= phase_step;
       phase_step *= phase_accel;
     }
@@ -119,11 +122,12 @@ int main(int argc,char *argv[]){
     phase_step /= cabs(phase_step);
     int16_t output[2*L];
     for(int i=0;i<L;i++){
-      output[2*i] = crealf(filter->output.c[i]) * SHRT_MAX;
-      output[2*i+1] = cimagf(filter->output.c[i]) * SHRT_MAX;
+      output[2*i] = crealf(filter_out->output.c[i]) * SHRT_MAX;
+      output[2*i+1] = cimagf(filter_out->output.c[i]) * SHRT_MAX;
     }
     write(1,output,sizeof(output));
   }
-  delete_filter(filter);
+  delete_filter_input(filter_in);
+  delete_filter_output(filter_out);
   exit(0);
 }
