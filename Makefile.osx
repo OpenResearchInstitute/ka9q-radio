@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.28 2018/02/16 01:29:57 karn Exp karn $
+# $Id: Makefile.osx,v 1.29 2018/02/16 06:02:39 karn Exp karn $
 #CC=g++
 GCC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -45,7 +45,7 @@ radio: main.o radio.o fm.o linear.o am.o filter.o display.o doppler.o modes.o au
 	$(CC) -g -o $@ $^ -lfftw3f_threads `pkg-config --libs ncurses fftw3f` $(LD_FLAGS)
 
 am.o: misc.h filter.h radio.h audio.h
-aprs.o: aprs.c ax25.h multicast.h
+aprs.o: aprs.c ax25.h multicast.h misc.h
 attr.o: attr.c attr.h
 audio.o: audio.c misc.h audio.h multicast.h
 ax25.o: ax25.c ax25.h
