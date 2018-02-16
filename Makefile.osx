@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.26 2018/02/06 11:47:48 karn Exp karn $
+# $Id: Makefile.osx,v 1.27 2018/02/06 11:49:26 karn Exp karn $
 #CC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
@@ -18,7 +18,10 @@ clean:
 	rm -f *.o *.a iqplay iqrecord modulate monitor radio opus packet
 	rcsclean
 
-packet: packet.o filter.o filter.o misc.o multicast.o
+aprs: aprs.o ax25.o multicast.o
+	$(CC) -g -o $@ $^ $(LD_FLAGS)
+
+packet: packet.o filter.o filter.o misc.o multicast.o ax25.o
 	$(CC) -g -o $@ $^ `pkg-config --libs fftw3f` $(LD_FLAGS)
 
 opus: opus.o multicast.o
@@ -41,8 +44,10 @@ radio: main.o radio.o fm.o linear.o am.o filter.o display.o doppler.o modes.o au
 	$(CC) -g -o $@ $^ -lfftw3f_threads `pkg-config --libs ncurses fftw3f` $(LD_FLAGS)
 
 am.o: misc.h filter.h radio.h audio.h
+aprs.o: aprs.c ax25.h multicast.h
 attr.o: attr.c attr.h
 audio.o: audio.c misc.h audio.h multicast.h
+ax25.o: ax25.c ax25.h
 bandplan.o: bandplan.c bandplan.h
 display.o: display.c radio.h audio.h misc.h filter.h bandplan.h multicast.h
 doppler.o: doppler.c radio.h misc.h

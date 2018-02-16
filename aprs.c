@@ -52,7 +52,7 @@ int main(int argc,char *argv[]){
 	    Mcast_address_text);
     exit(1);
   }
-  char packet[2048];
+  unsigned char packet[2048];
   int len;
 
   while((len = recv(Input_fd,packet,sizeof(packet),0)) > 0){
@@ -65,10 +65,9 @@ int main(int argc,char *argv[]){
 
       printf("match!\n");
       // Find end of address field
-      char *cp = packet;
       int i;
       for(i = 0; i < len;i++){
-	if(*cp++ & 1)
+	if(packet[i] & 1)
 	  break;
       }
       if(i == len){
@@ -76,69 +75,95 @@ int main(int argc,char *argv[]){
 	printf("Incomplete frame\n");
 	continue;
       }
-      if(cp[0] != 0x03 || cp[1] != 0xf0){
-	printf("Invalid type\n");
+      if(packet[i+1] != 0x03 || packet[i+2] != 0xf0){
+	printf("Invalid ax25 type\n");
 	continue;
       }
-	
-      cp += 2; // Skip type and protocol fields
-      cp++;
+      char *data = (char *)(packet + i + 3); // First byte of text field
       // Extract lat/long
 
-      double latitude,longitude,altitude=0,timestamp;
-      int t, hours=-1, minutes=-1, seconds = -1;
-      char *ncp;
+      // Parse APRS position packets
+      // The APRS spec is an UNBELIEVABLE FUCKING MESS THAT SHOULD BE SHOT, SHREDDED, BURNED AND SENT TO HELL!
+      // There, now I feel a little better. But not much.
+      double latitude=NAN,longitude=NAN,altitude=NAN,timestamp = NAN;
+      int t, hours=-1, minutes=-1,days=-1,seconds=-1;
 
-      switch(*cp++){
-      case '/': // Position with timestamp (WB8ELK pico tracker)
-	// Sample WB8ELK: LU1ESY-3>APRS,TCPIP*,qAS,WB8ELK:/180205h3648.75S/04627.50WO000/000/A=039566 2 4.50 25 12060 GF63SE 1N7MSE 226
-	t = strtol(cp,&ncp,10);
-	hours = t / 10000;
-	t -= hours * 10000;
-	minutes = t / 100;
-	t -= minutes * 100;
-	seconds = t;
-	cp = ncp+1;
-	latitude = strtod(cp,&ncp) / 100.;
-	latitude = (int)(latitude) + fmod(latitude,1.0) / 0.6;
-	if(*ncp == 'S' || *ncp == 's')
-	  latitude = -latitude;
-	cp = ncp + 2;
-	longitude = strtod(cp,&ncp) / 100.;
-	longitude = (int)(longitude) + fmod(longitude,1.0) / 0.6;
-	if(*ncp == 'w' || *ncp == 'W')
-	  longitude = -longitude;
-	cp = ncp;
-	while(*cp != '\0' && *(cp+1) != '\0'){
-	  if(*cp == 'A' && cp[1] == '='){
-	    altitude = strtol(cp+2,&ncp,10);
-	    break;
-	  } else
-	    cp++;
+      // Sample WB8ELK LU1ESY-3>APRS,TCPIP*,qAS,WB8ELK:/180205h3648.75S/04627.50WO000/000/A=039566 2 4.50 25 12060 GF63SE 1N7MSE 226
+      // Sample PITS "!/%s%sO   /A=%06ld|%s|%s/%s,%d'C,http://www.pi-in-the-sky.com",
+
+      if(*data == '/' || *data == '@'){
+	// process timestamp
+	char *ncp = NULL;
+	data++;
+	t = strtol(data,&ncp,10);
+	if(*ncp == 'h'){
+	  // Hours, minutes, seconds
+	  days = 0;
+	  hours = t / 10000;
+	  t -= hours * 10000;
+	  minutes = t / 100;
+	  t -= minutes * 100;
+	  seconds = t;
+	} else if(*ncp == 'z'){
+	  // day, hours minutes zulo
+	  days = t / 10000;
+	  t -= days * 10000;
+	  hours = t / 100;
+	  t -= hours * 100;
+	  minutes = t;
+	  seconds = 0;
+	} else if(*ncp == '/'){
+	  // day, hours, minutes local -- HOW AM I SUPPOSED TO KNOW THE TIME ZONE ??!?!?
+	  days = t / 10000;
+	  t -= days * 10000;
+	  hours = t / 100;
+	  t -= hours * 100;
+	  minutes = t;
+	  seconds = 0;
 	}
-	altitude *= 0.3048; // Convert to meters
-	break;
-      case '!': // Position without timestamp (Pi in the Sky)
-		// "!/%s%sO   /A=%06ld|%s|%s/%s,%d'C,http://www.pi-in-the-sky.com",
-	cp++; // skip /
-	timestamp = 0;
-	latitude = 90 - decode_base91(cp)/380926.;
-	longitude = -180 + decode_base91(cp+4) / 190463.;
-	cp = cp + 8;
-	while(*cp != '\0' && *(cp+1) != '\0'){
-	  if(*cp == 'A' && cp[1] == '='){
-	    altitude = strtol(cp+2,&ncp,10);
-	    break;
-	  } else
-	    cp++;
-	}
-	altitude *= 0.3048; // Convert to meters
-	break;
+
+	data = ncp+1; // skip 'h' or 'z' (process?)
+      } else if(*data == '!' || *data == '='){
+	// Position without timestamp
+	data++;
+      } else {
+	printf("Unsupported APRS frame type 0x%x (%c)\n",*data,*data);
+	continue;
       }
-      printf("Latitude %.6lf deg; Longitude %.6lf deg; Altitude %.6lf m\n",latitude,longitude,altitude);
-
+	      
+      // parse position
+      if(*data == '/'){
+	// Compressed
+	data++; // skip /
+	latitude = 90 - decode_base91(data)/380926.;
+	longitude = -180 + decode_base91(data+4) / 190463.;
+	data += 12;
+      } else {
+	// Uncompressed
+	char *ncp = NULL;
+	latitude = strtod(data,&ncp) / 100.;
+	latitude = (int)(latitude) + fmod(latitude,1.0) / 0.6;
+	if(tolower(*ncp) == 's')
+	  latitude = -latitude;
+	data = ncp + 2; // Skip S and /
+	longitude = strtod(data,&ncp) / 100.;
+	longitude = (int)(longitude) + fmod(longitude,1.0) / 0.6;
+	if(tolower(*ncp) == 'w')
+	  longitude = -longitude;
+	data = ncp + 2; // Skip W and /
+	// Look for A=
+	while(*data != '\0' && *(data+1) != '\0'){
+	  if(*data == 'A' && data[1] == '='){
+	    altitude = strtol(data+2,&ncp,10);
+	    break;
+	  } else
+	    data++;
+	}
+	altitude *= 0.3048; // Convert to meters
+      }
+      printf("days %d hours %d minutes %d seconds %d\n",days,hours,minutes,seconds);
+      printf("Latitude %.6lf deg; Longitude %.6lf deg; Altitude %.1lf m\n",latitude,longitude,altitude);
     }
   }
-
-
 }
+

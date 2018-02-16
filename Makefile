@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.76 2018/02/06 11:47:39 karn Exp karn $
+# $Id: Makefile,v 1.77 2018/02/06 11:49:26 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -17,9 +17,11 @@ clean:
 	rm -f *.o *.a control funcube iqplay iqrecord modulate monitor radio opus packet
 	rcsclean
 
-packet: packet.o multicast.o filter.o misc.o
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread 
+aprs: aprs.o ax25.o multicast.o
+	$(CC) -g -o $@ $^ $(LD_FLAGS)
 
+packet: packet.o multicast.o filter.o misc.o ax25.o
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread 
 
 opus: opus.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread
@@ -52,6 +54,7 @@ libfcd.a: fcd.o hid-libusb.o
 am.o: am.c misc.h filter.h radio.h audio.h
 attr.o: attr.c attr.h
 audio.o: audio.c misc.h audio.h
+ax25.o: ax25.c ax25.h
 bandplan.o: bandplan.c bandplan.h
 control.o: control.c misc.h radio.h
 display.o: display.c radio.h audio.h misc.h filter.h bandplan.h multicast.h

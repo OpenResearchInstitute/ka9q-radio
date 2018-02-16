@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.107 2017/10/24 10:14:32 karn Exp karn $
+// $Id: display.c,v 1.108 2018/02/06 11:45:49 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -599,7 +599,7 @@ void *display(void *arg){
     mvwaddstr(sdr,row++,col,"Samprate");
     mvwprintw(sdr,row,col,"%'18.0f Hz",demod->status.frequency); // Integer for now (SDR dependent)
     mvwaddstr(sdr,row++,col,"LO");
-    mvwprintw(sdr,row,col,"%'+18.3f ppm",demod->calibrate *1e6);
+    mvwprintw(sdr,row,col,"%'+18.5f ppm",demod->calibrate *1e6);
     mvwaddstr(sdr,row++,col,"TCXO cal");
     mvwprintw(sdr,row,col,"%+18.6f",demod->DC_i);  // Scaled to +/-1
     mvwaddstr(sdr,row++,col,"I offset");

@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.3 2018/02/06 01:36:16 karn Exp karn $
+// $Id: packet.c,v 1.4 2018/02/06 11:46:44 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -17,6 +17,7 @@
 #include "filter.h"
 #include "misc.h"
 #include "multicast.h"
+#include "ax25.h"
 
 struct packet {
   struct packet *prev;       // Linked list pointers
@@ -46,6 +47,7 @@ struct packet {
 
 
 char *Mcast_address_text = "audio-pcm-mcast.local";
+char *Decode_mcast_address_text = "ax25-mcast.local:8192";
 float const SCALE = 1./32768;
 int const Bufsize = 2048;
 int const AN = 2048; // Should be power of 2 for FFT efficiency
@@ -58,6 +60,7 @@ float const Bitrate = 1200;
 int const Samppbit = 40;
 
 int Input_fd = -1;
+int Output_fd = -1;
 struct packet *Packet;
 extern float Kaiser_beta;
 int Verbose;
@@ -117,125 +120,6 @@ int close_session(struct packet *sp){
   free(sp);
   return 0;
 }
-
-
-int dump_frame(unsigned char *frame,int bytes){
-
-  // By default, no digipeaters; will update if there are any
-  unsigned char *control = frame + 14;
-
-  // Source address
-  // Is this the transmitter?
-  int this_transmitter = 1;
-  int digipeaters = 0;
-  // Look for digipeaters
-  if(!(frame[13] & 1)){
-    // Scan digipeater list; have any repeated it?
-    for(int i=0;i<8;i++){
-      unsigned char digi_ssid = frame[20 + 7*i];
-      
-      digipeaters++;
-      if(digi_ssid & 0x80){
-	// Yes, passed this one, keep looking
-	this_transmitter = 2 + i;
-      }
-      if(digi_ssid & 1)
-	break; // Last digi
-    }
-  }
-  // Show source address, in upper case if this is the transmitter, otherwise lower case
-  for(int n=7; n < 13; n++){
-    unsigned char c = frame[n] >> 1;
-    if(c == ' ')
-      break;
-    if(this_transmitter == 1)
-      putchar(toupper(c));
-    else
-      putchar(tolower(c));
-  }
-  printf("-%d",(frame[13] >> 1) & 0xf); // SSID
-  
-  printf(" -> ");
-  
-  // List digipeaters
-
-  if(!(frame[13] & 0x1)){
-    // Digipeaters are present
-    for(int i=0; i<digipeaters; i++){
-      for(int k=0;k<6;k++){
-	unsigned char c = frame[14 + 7*i + k] >> 1;
-	if(c == ' ')
-	  break;
-	
-	if(this_transmitter == 2+i)
-	  putchar(toupper(c));
-	else
-	  putchar(tolower(c));
-      }
-      int ssid = frame[14 + 7*i + 6];
-      printf("-%d",(ssid>> 1) & 0xf); // SSID
-      printf(" -> ");
-      if(ssid  & 0x1){ // Last one
-	control = frame + 14 + 7*i + 7;
-	break;
-      }
-    }
-  }
-  // NOW print destination, in lower case since it's not the transmitter
-  for(int n=0; n < 6; n++){
-    unsigned char c = frame[n] >> 1;
-    if(c == ' ')
-      break;
-    putchar(tolower(c));
-  }
-  printf("-%d",(frame[6] >> 1) & 0xf); // SSID
-
-  // Type field
-  printf("; control = %02x",*control++);
-  printf("; type = %02x\n",*control);
-
-  for(int i = 0; i < bytes; i++){
-    printf("%02x ",frame[i]);
-    if((i % 16) == 15 || i == bytes-1){
-      for(int k = (i % 16); k < 15; k++)
-	printf("   "); // blanks as needed in last line
-
-      printf(" |  ");
-      for(int k=(i & ~0xf );k <= i; k++){
-	if(isprint(frame[k]))
-	  putchar(frame[k]);
-	else
-	  putchar('.');
-      }
-      printf("\n");
-    }
-  }
-  printf("\n");
-  return 0;
-}
-
-// Check CRC on frame
-int crc_good(unsigned char *frame,int length){
-  unsigned int const crc_poly = 0x8408;
-	
-  unsigned short crc = 0xffff;
-  while(length-- > 0){
-    unsigned char byte = *frame++;
-    for(int i=0; i < 8; i++){
-      unsigned short feedback = 0;
-      if((crc ^ byte) & 1)
-	feedback = crc_poly;
-
-      crc = (crc >> 1) ^ feedback;
-      byte >>= 1;
-    }
-  }
-  if(crc == 0xf0b8)
-    return 1;
-  else
-    return 0;
-}
-
 
 
 // AFSK demod, HDLC decode
@@ -343,8 +227,11 @@ void *decode_task(void *arg){
 	    frame_bit -= 7; // Remove 0111111
 	    int bytes = frame_bit / 8;
 	    if(bytes > 0 && crc_good(hdlc_frame,bytes)){
-	      printf("ssrc %x packet %d: %d bytes\n",sp->ssrc,sp->decoded_packets++,bytes);
-	      dump_frame(hdlc_frame,bytes);
+	      if(Verbose){
+		printf("ssrc %x packet %d: %d bytes\n",sp->ssrc,sp->decoded_packets++,bytes);
+		dump_frame(hdlc_frame,bytes);
+	      }
+	      send(Output_fd,hdlc_frame,bytes,0);
 	    }
 	  }
 	  if(1 || frame_bit != 0){
@@ -390,13 +277,16 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"I:v")) != EOF){
+  while((c = getopt(argc,argv,"I:R:v")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
       break;
     case 'I':
       Mcast_address_text = optarg;
+      break;
+    case 'R':
+      Decode_mcast_address_text = optarg;
       break;
     default:
       fprintf(stderr,"Usage: %s [-v] [-I mcast_address]\n",argv[0]);
@@ -408,7 +298,14 @@ int main(int argc,char *argv[]){
   // Set up multicast input
   Input_fd = setup_mcast(Mcast_address_text,0);
   if(Input_fd == -1){
-    fprintf(stderr,"Can't set up input\n");
+    fprintf(stderr,"Can't set up input from %s\n",
+	    Mcast_address_text);
+    exit(1);
+  }
+  Output_fd = setup_mcast(Decode_mcast_address_text,1);
+  if(Output_fd == -10){
+    fprintf(stderr,"Can't set up output to %s\n",
+	    Decode_mcast_address_text);
     exit(1);
   }
   struct iovec iovec[2];
@@ -461,7 +358,7 @@ int main(int argc,char *argv[]){
     if(sp == NULL){
       // Not found
       if((sp = make_session(&sender,rtp.ssrc,rtp.seq,rtp.timestamp)) == NULL){
-	fprintf(stderr,"No room!!\n");
+	fprintf(stderr,"No room for new session!!\n");
 	goto endloop;
       }
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
@@ -472,7 +369,8 @@ int main(int argc,char *argv[]){
       sp->input_pointer = 0;
       sp->filter_in = create_filter_input(AL,AM,REAL);
       pthread_create(&sp->decode_thread,NULL,decode_task,sp); // One decode thread per stream
-      fprintf(stderr,"New session from %s, ssrc %x\n",sp->addr,sp->ssrc);
+      if(Verbose)
+	fprintf(stderr,"New session from %s, ssrc %x\n",sp->addr,sp->ssrc);
     }
     sp->age = 0;
     int drop = 0;
@@ -480,7 +378,8 @@ int main(int argc,char *argv[]){
     sp->rtp_packets++;
     if(rtp.seq != sp->eseq){
       int const diff = (int)(rtp.seq - sp->eseq);
-      //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
+      if(Verbose > 1)
+	fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
       if(diff < 0 && diff > -10){
 	sp->dupes++;
 	goto endloop;	// Drop probable duplicate
