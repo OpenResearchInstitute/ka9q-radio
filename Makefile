@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.78 2018/02/16 01:29:57 karn Exp karn $
+# $Id: Makefile,v 1.79 2018/02/16 03:08:21 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -72,7 +72,7 @@ iqplay.o: iqplay.c misc.h radio.h multicast.h attr.h
 iqrecord.o: iqrecord.c radio.h multicast.h attr.h
 linear.o: linear.c misc.h filter.h radio.h audio.h
 main.o: main.c radio.h filter.h misc.h audio.h multicast.h
-misc.o: misc.c
+misc.o: misc.c radio.h
 modes.o: modes.c 
 modulate.o: modulate.c misc.h filter.h radio.h
 monitor.o: monitor.c misc.h multicast.h
