@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.94 2017/11/02 08:12:20 karn Exp karn $
+// $Id: main.c,v 1.95 2018/02/06 11:46:44 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -371,39 +371,66 @@ void *input_loop(void *arg){
       }
       eseq = rtp.seq + 1;
 
-      if(memcmp(&demod->status,&new_status,sizeof(demod->status)) != 0){
-	// Protect status with a mutex and signal a condition when it changes
-	// since demod threads will be waiting for this
-	pthread_mutex_lock(&demod->status_mutex);
-	memcpy(&demod->status,&new_status,sizeof(demod->status));
-	// We now know the A/D sample rate
-	// These need to be set before the demod thread starts!
+      // Protect status with a mutex and signal a condition when it changes
+      // since demod threads will be waiting for this
+      int sig = 0;
+      if(new_status.samprate != demod->status.samprate){
+	sig++;
+	// A/D sample rate is now known or has changed
+	// This needs to be set before the demod thread starts!
 	// Signalled every time the status is updated
 	// status.samprate contains *nominal* A/D sample rate
 	// demod->samprate contains *corrected* A/D sample rate
 	// Use nominal rates here so result is clean integer
-	demod->decimate = 1; demod->interpolate = 1;
-	if(demod->status.samprate >= Audio.samprate){
+	pthread_mutex_lock(&demod->status_mutex);
+	if(new_status.samprate >= Audio.samprate){
 	  // Sample rate is higher than audio rate; decimate
-	  demod->decimate = demod->status.samprate / Audio.samprate;
-	  demod->samprate = demod->status.samprate * (1 + demod->calibrate);
-	  demod->max_IF = demod->status.samprate/2 - IF_EXCLUDE;
+	  demod->interpolate = 1;
+	  demod->decimate = new_status.samprate / Audio.samprate;
+	  demod->samprate = new_status.samprate * (1 + demod->calibrate);
+	  demod->max_IF = new_status.samprate/2 - IF_EXCLUDE;
 	  demod->min_IF = -demod->max_IF;
 	} else {
 	  // Sample rate is lower than audio rate
 	  // Interpolate up to audio rate, pretend sample rate is audio rate
-	  demod->interpolate = Audio.samprate / demod->status.samprate;	  
+	  demod->decimate = 1; 
+	  demod->interpolate = Audio.samprate / new_status.samprate;	  
 	  demod->samprate = Audio.samprate * (1 + demod->calibrate);
 	  demod->max_IF = Audio.samprate/2 - IF_EXCLUDE;
 	  demod->min_IF = -demod->max_IF;
 	}
-	// re-call these two to recalculate their phasor steps in case the sample rate
-	// has changed or was unknown
+	// re-call these two to recalculate their phasor steps
+	demod->status.samprate = new_status.samprate;
+	pthread_mutex_unlock(&demod->status_mutex);
 	set_second_LO(demod,get_second_LO(demod));
 	set_shift(demod,demod->shift);
+      }
+      // Gain settings changed? Store and signal but take no other action for now
+      if(new_status.lna_gain != demod->status.lna_gain
+	 || new_status.mixer_gain != demod->status.mixer_gain
+	 || new_status.if_gain != demod->status.if_gain){
+	sig++;
+      }
+      if(new_status.frequency != demod->status.frequency){
+	sig++;
+	pthread_mutex_lock(&demod->status_mutex);
+	// Tuner is now set or has been changed; adjust 2nd LO to compensate only if possible
+	double old_first_LO = get_first_LO(demod); // returns PREVIOUS first LO, since we haven't copied yet
+	demod->status.frequency = new_status.frequency;
+	double LO_change = get_first_LO(demod) - old_first_LO;
+	double new_LO2 = get_second_LO(demod) + LO_change;
+	pthread_mutex_unlock(&demod->status_mutex);
+	if(LO2_in_range(demod,new_LO2,1))
+	  set_second_LO(demod,get_second_LO(demod) + LO_change);
+      }
+      if(sig){
+	// Something changed, store the new status and let everybody know
+	pthread_mutex_lock(&demod->status_mutex);
+	memcpy(&demod->status,&new_status,sizeof(demod->status));
 	pthread_cond_broadcast(&demod->status_cond);
 	pthread_mutex_unlock(&demod->status_mutex);
       }
+
       // Pass PCM I/Q samples to corrector and input queue
       cnt -= sizeof(rtp) + sizeof(demod->status);
       // count 4-byte stereo samples
