@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.44 2017/10/22 06:00:44 karn Exp karn $
+// $Id: fm.c,v 1.45 2018/02/06 11:46:05 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -40,7 +40,7 @@ void *demod_fm(void *arg){
   int const AL = demod->L / demod->decimate;
   int const AM = (demod->M - 1) / demod->decimate + 1;
   int const AN = AL + AM - 1;
-  float const filter_gain = 3./AN;
+  float const filter_gain = 10./AN;  // Add some gain to bring up subjective volume level
   struct filter_in *audio_master = create_filter_input(AL,AM,REAL);
 
   demod->audio_master = audio_master;
@@ -50,8 +50,8 @@ void *demod_fm(void *arg){
   pthread_create(&pl_thread,NULL,pltask,demod);
 
   // Voice filter, unless FLAT mode is selected
-  // Audio response is high pass with 300 Hz corner, then -6 dB/octave post-emphasis since demod is FM
-  // and modulation is probably PM (indirect FM)
+  // Audio response is high pass with 300 Hz corner to remove PL tone
+  // then -6 dB/octave post-emphasis since demod is FM and modulation is actually PM (indirect FM)
   struct filter_out *audio_filter = NULL;
   if(!(demod->flags & FLAT)){
     complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
