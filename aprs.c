@@ -1,4 +1,4 @@
-// $Id$
+// $Id: aprs.c,v 1.3 2018/02/16 06:02:57 karn Exp karn $
 // Process AX.25 frames containing APRS data, extract lat/long/altitude, compute az/el
 
 
@@ -15,10 +15,13 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <math.h>
+#include <time.h>
 
 #include "multicast.h"
 #include "ax25.h"
 #include "misc.h"
+
+char *Months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
 
 #define square(x) ((x)*(x))
 double const WGS84_E = 0.081819190842622;  // Eccentricity
@@ -141,9 +144,18 @@ int main(int argc,char *argv[]){
   int len;
 
   while((len = recv(Input_fd,packet,sizeof(packet),0)) > 0){
+    time_t t;
+    struct tm *tmp;
+    time(&t);
+    tmp = gmtime(&t);
+    printf("%d %s %04d %02d:%02d:%02d UTC: ",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
+	   tmp->tm_hour,tmp->tm_min,tmp->tm_sec);
+		
+
     //    dump_frame(packet,len);
     // Is this the droid we're looking for?
     char result[10];
+
     get_callsign(result,packet+7);
     printf("source = %s\n",result);
     if(All || strncasecmp(result,Source,sizeof(result)) == 0){
