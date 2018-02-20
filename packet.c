@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.4 2018/02/06 11:46:44 karn Exp karn $
+// $Id: packet.c,v 1.5 2018/02/16 01:29:33 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -13,11 +13,15 @@
 #include <ctype.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <time.h>
 
 #include "filter.h"
 #include "misc.h"
 #include "multicast.h"
 #include "ax25.h"
+
+char *Months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+
 
 struct packet {
   struct packet *prev;       // Linked list pointers
@@ -131,95 +135,65 @@ void *decode_task(void *arg){
   struct filter_out *filter = create_filter_output(sp->filter_in,NULL,1,COMPLEX);
   set_filter(filter,Samprate,+100,+4000,3.0); // Creates analytic, band-limited signal
 
-  unsigned char hdlc_frame[1024];
-  memset(hdlc_frame,0,sizeof(hdlc_frame));
-  int frame_bit = 0;
-  float last_val = 0;
 
-
-  float complex mark_delay_line[Samppbit];
-  memset(mark_delay_line,0,sizeof(mark_delay_line));
-  int pointer = 0;
-  float complex space_delay_line[Samppbit];
-  memset(space_delay_line,0,sizeof(space_delay_line));
+  // Tone replica generators (-1200 and -2200 Hz)
   float complex mark_phase = 1;
   float complex mark_step = csincosf(-2*M_PI*1200./Samprate);
   float complex space_phase = 1;
   float complex space_step = csincosf(-2*M_PI*2200./Samprate);
-  float complex mark_sum = 0;
-  float complex space_sum = 0;
+
+  // Tone integrators
+  int symphase = 0;
+  float complex mark_accum = 0; // On-time
+  float complex space_accum = 0;
+  float complex mark_offset_accum = 0; // Straddles previous zero crossing
+  float complex space_offset_accum = 0;
+  float last_val = 0;  // Last on-time symbol
+  float mid_val = 0;   // Last zero crossing symbol
+
+  // hdlc state
+  unsigned char hdlc_frame[1024];
+  memset(hdlc_frame,0,sizeof(hdlc_frame));
+  int frame_bit = 0;
   int flagsync = 0;
-#if 0
-  int sample = 0;
-  printf("signed double\n");
-#endif
-
   int ones = 0;
-
-  float peak_mark = 0;
-  float peak_space = 0;
-  float const peak_smooth = .001;
-  float old_y[Samppbit];
-  memset(old_y,0,sizeof(old_y));
 
   while(1){
     execute_filter_output(filter);    // Blocks until data appears
 
-    float y[filter->olen];
-    float phase_energies[Samppbit];
-
-    memset(phase_energies,0,sizeof(phase_energies));
-    int pointer_start = pointer;
     for(int n=0; n<filter->olen; n++){
 
-      // Spin down by 1200 and 2200 Hz, accumulate each in a sliding boxcar (comb) filter
-      float complex s =  mark_phase * filter->output.c[n];
+      // Spin down by 1200 and 2200 Hz, accumulate each in boxcar (comb) filters
+      // Mark and space each have in-phase and offset integrators for timing recovery
+      float complex s;
+      s = mark_phase * filter->output.c[n];
       mark_phase *= mark_step;
-      mark_sum -= mark_delay_line[pointer]; // Remove old sample falling off back end of boxcar
-      mark_sum += mark_delay_line[pointer] = s; // And add in the new one
-	peak_mark *= (1-peak_smooth);
-      if(cnrmf(mark_sum) >= peak_mark)
-	peak_mark = cnrmf(mark_sum);
+      mark_accum += s;
+      mark_offset_accum += s;
 
-      s =  space_phase * filter->output.c[n];
+      s = space_phase * filter->output.c[n];
       space_phase *= space_step;
-      space_sum -= space_delay_line[pointer];
-      space_sum += space_delay_line[pointer] = s;
-      peak_space *= (1-peak_smooth);
-      if(cnrmf(space_sum) >= peak_space)
-	peak_space = cnrmf(space_sum);
+      space_accum += s;
+      space_offset_accum += s;
 
-      // Noncoherent FSK detection: which tone channel has more energy?
-      y[n] = cnrmf(mark_sum) - cnrmf(space_sum);
-      phase_energies[pointer] += fabsf(y[n]);
-      
-      if(++pointer >= Samppbit)
-	pointer = 0;
-    }
-    mark_phase = mark_phase / cabsf(mark_phase);
-    space_phase = space_phase / cabsf(space_phase);
-
-    // Which phase is best?
-    float max_signal = 0;
-    int max_n = -1;
-    for(int n=0;n < Samppbit;n++){
-      if(phase_energies[n] >= max_signal){
-	max_signal = phase_energies[n];
-	max_n = n;
+      if(++symphase == Samppbit/2){
+	// Finish offset integrator and reset
+	mid_val = cnrmf(mark_offset_accum) - cnrmf(space_offset_accum);
+	mark_offset_accum = space_offset_accum = 0;
       }
-    }
-
-    // Now actually process the demodulated data
-    for(int i = max_n - pointer_start; i < filter->olen; i += Samppbit){
-      float yval;
-
-      if(i < 0)
-	yval = old_y[i + Samppbit];
-      else
-	yval = y[i];
+      if(symphase < Samppbit)
+	continue;
+      
+      // Finished whole bit
+      symphase = 0;
+      float cur_val = cnrmf(mark_accum) - cnrmf(space_accum);
+      mark_accum = space_accum = 0;
 
       assert(frame_bit >= 0);
-      if(yval * last_val < 0){
+      if(cur_val * last_val < 0){
+	// Transition -- Gardner-style clock adjust
+	symphase += ((cur_val - last_val) * mid_val) > 0 ? +1 : -1;
+
 	// NRZI zero
 	if(ones == 6){
 	  // Flag
@@ -228,7 +202,14 @@ void *decode_task(void *arg){
 	    int bytes = frame_bit / 8;
 	    if(bytes > 0 && crc_good(hdlc_frame,bytes)){
 	      if(Verbose){
-		printf("ssrc %x packet %d: %d bytes\n",sp->ssrc,sp->decoded_packets++,bytes);
+		time_t t;
+		struct tm *tmp;
+		time(&t);
+		tmp = gmtime(&t);
+		printf("%d %s %04d %02d:%02d:%02d UTC ",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
+		       tmp->tm_hour,tmp->tm_min,tmp->tm_sec);
+		
+		printf("ssrc %x packet %d len %d:\n",sp->ssrc,sp->decoded_packets++,bytes);
 		dump_frame(hdlc_frame,bytes);
 	      }
 	      send(Output_fd,hdlc_frame,bytes,0);
@@ -263,9 +244,8 @@ void *decode_task(void *arg){
 	  }
 	}
       }
-      last_val = yval;
+      last_val = cur_val;
     }
-    memcpy(old_y,&y[filter->olen - Samppbit],sizeof(old_y));
   }
 
   return NULL;
