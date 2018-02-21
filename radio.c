@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.77 2017/10/27 06:01:12 karn Exp karn $
+// $Id: radio.c,v 1.78 2018/02/06 11:46:44 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -266,9 +266,8 @@ double get_doppler_rate(struct demod * const demod){
 
 // Set radio frequency with optional IF selection
 // new_lo2 is explicitly allowed to be NAN. If it is, that's a "don't care"
-// we'll try to pick a new LO2 that avoids retuning LO1,
-// and if that isn't possible we'll pick a default:
-// (usually +/- 48 kHz, samprate/4)
+// and we'll try to pick a new LO2 that avoids retuning LO1.
+// If that isn't possible we'll pick a default, (usually +/- 48 kHz, samprate/4)
 double set_freq(struct demod * const demod,double const f,double new_lo2){
   if(demod == NULL)
     return NAN;
@@ -279,31 +278,27 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
   pthread_mutex_unlock(&demod->status_mutex);
 
+  demod->freq = f;
   if(isnan(new_lo2) || !LO2_in_range(demod,new_lo2,0)){
     new_lo2 = -(f - get_first_LO(demod));
 
     // If the required new LO2 is out of range, recenter LO2 and retune LO1
     if(!LO2_in_range(demod,new_lo2,1)){
-      // Assume we'll keep tuning in the same direction
-#if 0
-      if(new_lo2 < 0)
-	new_lo2 = demod->status.samprate/4.;
-      else 
-	new_lo2 = -(demod->status.samprate/4.);
-#else
-      // Experimentally fix IF to -48 kHz to check calibration offsets
-      new_lo2 = demod->status.samprate/4.;
-#endif    
-    }
-  }
-  double const new_lo1 = f + new_lo2;
-    
-  // returns actual frequency, which may be different from requested because
-  // of calibration offset and quantization error in the fractional-N synthesizer
-  double const actual_lo1 = set_first_LO(demod,new_lo1);
-  new_lo2 += (actual_lo1 - new_lo1); // fold the difference into LO2
+      // Pick new LO2 to minimize change in LO1 in case another receiver is using it
+      double new_lo2 = demod->status.samprate/4.;
+      double LO1 = get_first_LO(demod);
 
-  // If front end doesn't retune don't retune LO2 either (e.g., recording)
+      if(fabs(f + new_lo2 - LO1) > fabs(f - new_lo2 - LO1))
+	new_lo2 = -new_lo2;
+    }
+    double const new_lo1 = f + new_lo2;
+    // returns actual frequency, which may be different from requested because
+    // of calibration offset and quantization error in the fractional-N synthesizer
+    double const actual_lo1 = set_first_LO(demod,new_lo1);
+    new_lo2 += (actual_lo1 - new_lo1); // fold the difference into LO2
+  }
+    
+  // If front end doesn't retune don't retune LO2 either (e.g., when receiving from a recording)
   if(LO2_in_range(demod,new_lo2,0))
      set_second_LO(demod,new_lo2);
 

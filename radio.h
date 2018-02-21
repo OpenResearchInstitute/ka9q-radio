@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.56 2017/10/24 06:44:10 karn Exp karn $
+// $Id: radio.h,v 1.57 2018/02/06 11:47:17 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -91,7 +91,7 @@ struct demod {
 #define ENVELOPE 32 // Envelope detection of AM
 #define MONO     64 // Only output I channel of linear mode
 
-  double start_freq;              // Initial frequency to set at startup
+  double freq;              // Desired carrier frequency
 
   // Tuning parameters
   int ctl_fd;                     // File descriptor for controlling SDR frequency and gaim

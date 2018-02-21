@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.95 2018/02/06 11:46:44 karn Exp karn $
+// $Id: main.c,v 1.96 2018/02/20 22:29:10 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -104,7 +104,7 @@ int main(int argc,char *argv[]){
   memset(demod,0,sizeof(*demod));
   audio->samprate = DAC_samprate; // currently 48 kHz, hard to change
   strcpy(demod->mode,"FM");
-  demod->start_freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
+  demod->freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
 
   demod->L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
   demod->M = 4352+1;    // Length of filter impulse response
@@ -143,7 +143,7 @@ int main(int argc,char *argv[]){
       demod->doppler_command = optarg;
       break;
     case 'f':   // Initial RF tuning frequency
-      demod->start_freq = parse_frequency(optarg);
+      demod->freq = parse_frequency(optarg);
       break;
     case 'I':   // Multicast address to listen to for I/Q data
       strlcpy(demod->iq_mcast_address_text,optarg,sizeof(demod->iq_mcast_address_text));
@@ -257,8 +257,7 @@ int main(int argc,char *argv[]){
   // Actually set the mode and frequency already specified
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
   fprintf(stderr,"Waiting for SDR response...\n");
-  set_freq(demod,demod->start_freq,NAN); 
-  demod->start_freq = 0;
+  set_freq(demod,demod->freq,NAN); 
   demod->gain = dB2voltage(30.); // Empirical starting value
   set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
 
@@ -414,14 +413,13 @@ void *input_loop(void *arg){
       if(new_status.frequency != demod->status.frequency){
 	sig++;
 	pthread_mutex_lock(&demod->status_mutex);
-	// Tuner is now set or has been changed; adjust 2nd LO to compensate only if possible
-	double old_first_LO = get_first_LO(demod); // returns PREVIOUS first LO, since we haven't copied yet
+	// Tuner is now set or has been changed
+	// If we can, adjust 2nd LO to compensate but don't retune tuner to avoid fights
 	demod->status.frequency = new_status.frequency;
-	double LO_change = get_first_LO(demod) - old_first_LO;
-	double new_LO2 = get_second_LO(demod) + LO_change;
+	double new_LO2 = -(demod->freq - get_first_LO(demod));
 	pthread_mutex_unlock(&demod->status_mutex);
-	if(LO2_in_range(demod,new_LO2,1))
-	  set_second_LO(demod,get_second_LO(demod) + LO_change);
+	if(LO2_in_range(demod,new_LO2,0))
+	  set_second_LO(demod,new_LO2);
       }
       if(sig){
 	// Something changed, store the new status and let everybody know
@@ -530,7 +528,7 @@ int loadstate(struct demod *dp,char const *filename){
   char line[PATH_MAX];
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
-    if(sscanf(line,"Frequency %lf",&dp->start_freq) > 0){
+    if(sscanf(line,"Frequency %lf",&dp->freq) > 0){
     } else if(strncmp(line,"Mode ",5) == 0){
       strlcpy(dp->mode,&line[5],sizeof(dp->mode));
     } else if(sscanf(line,"Shift %lf",&dp->shift) > 0){
