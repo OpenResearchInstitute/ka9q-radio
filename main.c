@@ -58,8 +58,6 @@ int Verbose = 0;
 char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
 int Update_interval = 100;  // 100 ms between screen updates
-// SDR alias keep-out region, i.e., stay between -(samprate/2 - IF_EXCLUDE) and (samprate/2 - IF_EXCLUDE)
-int IF_EXCLUDE = 16000; // Hardwired for UK Funcube Dongle Pro+, make this more general
 
 
 int main(int argc,char *argv[]){
@@ -370,65 +368,7 @@ void *input_loop(void *arg){
       }
       eseq = rtp.seq + 1;
 
-      // Protect status with a mutex and signal a condition when it changes
-      // since demod threads will be waiting for this
-      int sig = 0;
-      if(new_status.samprate != demod->status.samprate){
-	sig++;
-	// A/D sample rate is now known or has changed
-	// This needs to be set before the demod thread starts!
-	// Signalled every time the status is updated
-	// status.samprate contains *nominal* A/D sample rate
-	// demod->samprate contains *corrected* A/D sample rate
-	// Use nominal rates here so result is clean integer
-	pthread_mutex_lock(&demod->status_mutex);
-	if(new_status.samprate >= Audio.samprate){
-	  // Sample rate is higher than audio rate; decimate
-	  demod->interpolate = 1;
-	  demod->decimate = new_status.samprate / Audio.samprate;
-	  demod->samprate = new_status.samprate * (1 + demod->calibrate);
-	  demod->max_IF = new_status.samprate/2 - IF_EXCLUDE;
-	  demod->min_IF = -demod->max_IF;
-	} else {
-	  // Sample rate is lower than audio rate
-	  // Interpolate up to audio rate, pretend sample rate is audio rate
-	  demod->decimate = 1; 
-	  demod->interpolate = Audio.samprate / new_status.samprate;	  
-	  demod->samprate = Audio.samprate * (1 + demod->calibrate);
-	  demod->max_IF = Audio.samprate/2 - IF_EXCLUDE;
-	  demod->min_IF = -demod->max_IF;
-	}
-	// re-call these two to recalculate their phasor steps
-	demod->status.samprate = new_status.samprate;
-	pthread_mutex_unlock(&demod->status_mutex);
-	set_second_LO(demod,get_second_LO(demod));
-	set_shift(demod,demod->shift);
-      }
-      // Gain settings changed? Store and signal but take no other action for now
-      if(new_status.lna_gain != demod->status.lna_gain
-	 || new_status.mixer_gain != demod->status.mixer_gain
-	 || new_status.if_gain != demod->status.if_gain){
-	sig++;
-      }
-      if(new_status.frequency != demod->status.frequency){
-	sig++;
-	pthread_mutex_lock(&demod->status_mutex);
-	// Tuner is now set or has been changed
-	// If we can, adjust 2nd LO to compensate but don't retune tuner to avoid fights
-	demod->status.frequency = new_status.frequency;
-	double new_LO2 = -(demod->freq - get_first_LO(demod));
-	pthread_mutex_unlock(&demod->status_mutex);
-	if(LO2_in_range(demod,new_LO2,0))
-	  set_second_LO(demod,new_LO2);
-      }
-      if(sig){
-	// Something changed, store the new status and let everybody know
-	pthread_mutex_lock(&demod->status_mutex);
-	memcpy(&demod->status,&new_status,sizeof(demod->status));
-	pthread_cond_broadcast(&demod->status_cond);
-	pthread_mutex_unlock(&demod->status_mutex);
-      }
-
+      update_status(demod,&new_status);
       // Pass PCM I/Q samples to corrector and input queue
       cnt -= sizeof(rtp) + sizeof(demod->status);
       // count 4-byte stereo samples
