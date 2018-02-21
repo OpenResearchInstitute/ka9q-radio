@@ -22,9 +22,13 @@
 #include "misc.h"
 #include "radio.h"
 #include "filter.h"
+#include "audio.h"
 
 
 static double const Raster = 125.; // Tune LO1 to multiples of this frequency
+// SDR alias keep-out region, i.e., stay between -(samprate/2 - IF_EXCLUDE) and (samprate/2 - IF_EXCLUDE)
+int IF_EXCLUDE = 16000; // Hardwired for UK Funcube Dongle Pro+, make this more general
+
 
 
 // Lower half of input thread
@@ -116,9 +120,9 @@ int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
       // copy only one sample at a time, then stuff zeroes
       *buffer++ = demod->corr_data[demod->read_ptr++];
       demod->read_ptr %= DATASIZE;
-      for(int j=1; j<demod->interpolate; j++){
+      for(int j=1; j<demod->interpolate; j++)
 	*buffer++ = 0;
-      }
+
       i -= demod->interpolate;
     }
   }
@@ -231,6 +235,7 @@ double get_second_LO(struct demod * const demod){
   return f;
 }
 
+// Return actual frequency, as opposed to desired (in demod->freq)
 double get_freq(struct demod * const demod){
   if(demod == NULL)
     return NAN;
@@ -268,9 +273,12 @@ double get_doppler_rate(struct demod * const demod){
 // new_lo2 is explicitly allowed to be NAN. If it is, that's a "don't care"
 // and we'll try to pick a new LO2 that avoids retuning LO1.
 // If that isn't possible we'll pick a default, (usually +/- 48 kHz, samprate/4)
+// that moves the tuner the least
 double set_freq(struct demod * const demod,double const f,double new_lo2){
   if(demod == NULL)
     return NAN;
+
+  demod->freq = f;
 
   // Wait for sample rate to be known
   pthread_mutex_lock(&demod->status_mutex);
@@ -278,32 +286,32 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
   pthread_mutex_unlock(&demod->status_mutex);
 
-  demod->freq = f;
+  // No alias checking on explicitly provided lo2
   if(isnan(new_lo2) || !LO2_in_range(demod,new_lo2,0)){
+    // Determine new LO2
     new_lo2 = -(f - get_first_LO(demod));
 
-    // If the required new LO2 is out of range, recenter LO2 and retune LO1
+    // If the required new LO2 is out of range, retune LO1
     if(!LO2_in_range(demod,new_lo2,1)){
       // Pick new LO2 to minimize change in LO1 in case another receiver is using it
-      double new_lo2 = demod->status.samprate/4.;
+      new_lo2 = demod->status.samprate/4.;
       double LO1 = get_first_LO(demod);
 
       if(fabs(f + new_lo2 - LO1) > fabs(f - new_lo2 - LO1))
 	new_lo2 = -new_lo2;
+      double new_lo1 = f + new_lo2;
+      // returns actual frequency, which may be different from requested because
+      // of calibration offset and quantization error in the fractional-N synthesizer
+      double actual_lo1 = set_first_LO(demod,new_lo1);
+      new_lo2 += (actual_lo1 - new_lo1); // fold the difference into LO2
     }
-    double const new_lo1 = f + new_lo2;
-    // returns actual frequency, which may be different from requested because
-    // of calibration offset and quantization error in the fractional-N synthesizer
-    double const actual_lo1 = set_first_LO(demod,new_lo1);
-    new_lo2 += (actual_lo1 - new_lo1); // fold the difference into LO2
   }
     
-  // If front end doesn't retune don't retune LO2 either (e.g., when receiving from a recording)
+  //   // If front end doesn't retune don't retune LO2 either (e.g., when receiving from a recording)
   if(LO2_in_range(demod,new_lo2,0))
-     set_second_LO(demod,new_lo2);
+    set_second_LO(demod,new_lo2);
 
-  // Set to new actual frequency, rather than one requested
-  return get_freq(demod);
+  return f;
 }
 
 // Preferred A/D sample rate; ignored by funcube but may be used by others someday
@@ -316,51 +324,31 @@ const int ADC_samprate = 192000;
 double set_first_LO(struct demod * const demod,double first_LO){
   if(demod == NULL)
     return NAN;
-  if(first_LO == get_first_LO(demod))
+
+  double current_lo1 = get_first_LO(demod);
+
+  // Just return actual frequency without changing anything
+  if(first_LO == current_lo1 || first_LO <= 0 || demod->tuner_lock || demod->input_source_address.sa_family != AF_INET)
     return first_LO;
 
-  if(demod->tuner_lock){
-    // Just return actual frequency, don't touch anything
-    return get_first_LO(demod);
-  }
+  // Set tuner to integer nearest requested frequency after decalibration
+  demod->requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
+  demod->requested_status.frequency = Raster * round(demod->requested_status.frequency / Raster);
+  // These need a way to set
+  demod->requested_status.samprate = ADC_samprate; // Preferred samprate; ignored by funcube
+  demod->requested_status.lna_gain = 0xff;    // 0xff means "don't change"
+  demod->requested_status.mixer_gain = 0xff;
+  demod->requested_status.if_gain = 0xff;
+  
+  // If we know the sender, send it a tuning request
+  struct sockaddr_in sdraddr;
+  memcpy(&sdraddr,&demod->input_source_address,sizeof(sdraddr));
+  sdraddr.sin_port = htons(ntohs(sdraddr.sin_port)+1);
+  if(sendto(demod->ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&sdraddr,sizeof(sdraddr)) == -1)
+    perror("sendto control socket");
 
-  if(first_LO > 0){
-    // Set tuner to integer nearest requested frequency after decalibration
-    demod->requested_status.frequency = round(first_LO / (1 + demod->calibrate)); // What we send to the tuner
-    demod->requested_status.frequency = Raster * round(demod->requested_status.frequency / Raster);
-    // These need a way to set
-    demod->requested_status.samprate = ADC_samprate; // Preferred samprate; ignored by funcube
-    demod->requested_status.lna_gain = 0xff;    // 0xff means "don't change"
-    demod->requested_status.mixer_gain = 0xff;
-    demod->requested_status.if_gain = 0xff;
-    
-    // Wait up to 1 sec for the frequency to actually change
-    // Tries are limited to keep two or more receivers from continually fighting, or if it's a recording
-    struct timespec ts;
-    struct timeval tv;
-    gettimeofday(&tv,NULL);
-    ts.tv_sec = tv.tv_sec + 1; // Wait 1 sec
-    ts.tv_nsec = 1000 * tv.tv_usec;
-
-    pthread_mutex_lock(&demod->status_mutex);
-    for(int i=0;i<10;i++){
-      if(demod->requested_status.frequency == demod->status.frequency)
-	break;
-
-      if(demod->input_source_address.sa_family == AF_INET){
-	// If we know the sender, send it a tuning request
-	struct sockaddr_in sdraddr;
-	memcpy(&sdraddr,&demod->input_source_address,sizeof(sdraddr));
-	sdraddr.sin_port = htons(ntohs(sdraddr.sin_port)+1);
-	if(sendto(demod->ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&sdraddr,sizeof(sdraddr)) == -1)
-	  perror("sendto control socket");
-	if(pthread_cond_timedwait(&demod->status_cond,&demod->status_mutex,&ts) == -1)
-	  break;
-      }
-    }
-    pthread_mutex_unlock(&demod->status_mutex);
-  }
-  return get_first_LO(demod);
+  // Return the tuner's new true frequency, as rounded, quantized and corrected for TCXO offset
+  return fcd_actual(demod->requested_status.frequency) * (1 + demod->calibrate);
 }
 
 // If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
@@ -545,6 +533,67 @@ int spindown(struct demod * const demod,complex float const * const data){
   }
   pthread_mutex_unlock(&demod->doppler_mutex);
   return 0;
+}
+// Called from network packet receiver to process incoming metadata from SDR
+void update_status(struct demod *demod,struct status *new_status){
+      // Protect status with a mutex and signal a condition when it changes
+      // since demod threads will be waiting for this
+      int sig = 0;
+      if(new_status->samprate != demod->status.samprate){
+	// A/D sample rate is now known or has changed
+	// This needs to be set before the demod thread starts!
+	// Signalled every time the status is updated
+	// status.samprate contains *nominal* A/D sample rate
+	// demod->samprate contains *corrected* A/D sample rate
+	// Use nominal rates here so result is clean integer
+	pthread_mutex_lock(&demod->status_mutex);
+	demod->status.samprate = new_status->samprate;
+	if(demod->status.samprate >= Audio.samprate){
+	  // Sample rate is higher than audio rate; decimate
+	  demod->interpolate = 1;
+	  demod->decimate = demod->status.samprate / Audio.samprate;
+	  demod->samprate = demod->status.samprate * (1 + demod->calibrate);
+	  demod->max_IF = demod->status.samprate/2 - IF_EXCLUDE;
+	  demod->min_IF = -demod->max_IF;
+	} else {
+	  // Sample rate is lower than audio rate
+	  // Interpolate up to audio rate, pretend sample rate is audio rate
+	  demod->decimate = 1; 
+	  demod->interpolate = Audio.samprate / demod->status.samprate;	  
+	  demod->samprate = Audio.samprate * (1 + demod->calibrate);
+	  demod->max_IF = Audio.samprate/2 - IF_EXCLUDE;
+	  demod->min_IF = -demod->max_IF;
+	}
+	// re-call these two to recalculate their phasor steps
+	pthread_mutex_unlock(&demod->status_mutex);
+	set_second_LO(demod,get_second_LO(demod));
+	set_shift(demod,demod->shift);
+	sig++;
+      }
+      // Gain settings changed? Store and signal but take no other action for now
+      if(new_status->lna_gain != demod->status.lna_gain
+	 || new_status->mixer_gain != demod->status.mixer_gain
+	 || new_status->if_gain != demod->status.if_gain){
+	sig++;
+      }
+      if(new_status->frequency != demod->status.frequency){
+	pthread_mutex_lock(&demod->status_mutex);
+	// Tuner is now set or has been changed
+	// Adjust 2nd LO to compensate
+	// NB! This may take the 2nd LO out of its range. This is deliberate so we don't get
+	// into fights over the SDR tuner. If the tuner comes back, we'll recover
+	demod->status.frequency = new_status->frequency;
+	pthread_mutex_unlock(&demod->status_mutex);
+	double new_LO2 = -(demod->freq - get_first_LO(demod));
+	set_second_LO(demod,new_LO2);
+	sig++;
+      }
+      if(sig){
+	// Something changed, store the new status and let everybody know
+	pthread_mutex_lock(&demod->status_mutex);
+	pthread_cond_broadcast(&demod->status_cond);
+	pthread_mutex_unlock(&demod->status_mutex);
+      }
 }
 
 // Compute noise spectral density - experimental, my algorithm
