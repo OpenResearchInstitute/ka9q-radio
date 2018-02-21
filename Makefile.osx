@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.30 2018/02/16 15:50:46 karn Exp karn $
+# $Id: Makefile.osx,v 1.31 2018/02/20 22:31:35 karn Exp karn $
 #CC=g++
 GCC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -66,6 +66,7 @@ monitor.o: monitor.c misc.h multicast.h
 multicast.o: multicast.c multicast.h
 opus.o: opus.c misc.h multicast.h	     
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
-radio.o: radio.c radio.h filter.h misc.h audio.h
+radio.o: radio.c radio.h filter.h misc.h audio.h audio.h
+
 
 

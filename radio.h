@@ -197,6 +197,7 @@ int set_doppler(struct demod *,double,double);
 int set_mode(struct demod *,const char *,int);
 int set_cal(struct demod *,double);
 int spindown(struct demod *,complex float const *);
+void update_status(struct demod *,struct status *);
 void proc_samples(struct demod *,int16_t const *,int);
 const float compute_n0(struct demod const *);
 
