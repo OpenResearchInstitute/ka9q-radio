@@ -247,8 +247,8 @@ void *decode_task(void *arg){
       last_val = cur_val;
     }
     // Renormalize tone oscillators -- important when floats are used
-    mark_phase /= cnrm(mark_phase);
-    space_phase /= cnrm(space_phase);    
+    mark_phase /= cnrmf(mark_phase);
+    space_phase /= cnrmf(space_phase);    
   }
 
   return NULL;

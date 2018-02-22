@@ -130,7 +130,7 @@ void *demod_fm(void *arg){
 	if(cnrmf(samp) > min_ampl){
 	  lastaudio = samples[n] = audio_master->input.r[n] = cargf(samp * state);
 	  state = conjf(samp);
-	  // Keep track of peak deviation
+	  // Keep track of peak deviation only if signal is present
 	  if(n == 0)
 	    pdev_pos = pdev_neg = lastaudio;
 	  else if(lastaudio > pdev_pos)
@@ -143,12 +143,14 @@ void *demod_fm(void *arg){
 	avg_f += lastaudio;
       }
       avg_f /= filter->olen;  // freq offset
-      demod->foffset = dsamprate  * avg_f * M_1_2PI;
+      if(quiet < 1){
+	demod->foffset = dsamprate  * avg_f * M_1_2PI;
 
-      // Find peak deviation allowing for frequency offset, scale for output
-      pdev_pos -= avg_f;
-      pdev_neg -= avg_f;
-      demod->pdeviation = dsamprate * max(pdev_pos,-pdev_neg) * M_1_2PI;
+	// Find peak deviation allowing for frequency offset, scale for output
+	pdev_pos -= avg_f;
+	pdev_neg -= avg_f;
+	demod->pdeviation = dsamprate * max(pdev_pos,-pdev_neg) * M_1_2PI;
+      }
       silent = 0;
     } else {
       // Squelch is closed
@@ -172,7 +174,6 @@ void *demod_fm(void *arg){
     }
     if(1 || !silent){ // test: stream silence
       send_mono_audio(audio,samples,audio_master->ilen);
-
     }
   }
   // Clean up subthreads
