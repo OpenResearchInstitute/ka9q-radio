@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.5 2018/02/16 01:29:33 karn Exp karn $
+// $Id: packet.c,v 1.6 2018/02/20 22:30:57 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -246,6 +246,9 @@ void *decode_task(void *arg){
       }
       last_val = cur_val;
     }
+    // Renormalize tone oscillators -- important when floats are used
+    mark_phase /= cnrm(mark_phase);
+    space_phase /= cnrm(space_phase);    
   }
 
   return NULL;
