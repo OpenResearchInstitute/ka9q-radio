@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.78 2018/02/06 11:46:44 karn Exp karn $
+// $Id: radio.c,v 1.80 2018/02/21 05:02:46 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -239,7 +239,8 @@ double get_second_LO(struct demod * const demod){
 double get_freq(struct demod * const demod){
   if(demod == NULL)
     return NAN;
-  return get_first_LO(demod) - get_second_LO(demod);
+  //  return get_first_LO(demod) - get_second_LO(demod);
+  return demod->freq;
 }
 
 int set_doppler(struct demod * const demod,double freq,double rate){
