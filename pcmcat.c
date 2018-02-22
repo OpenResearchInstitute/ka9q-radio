@@ -1,4 +1,4 @@
-// $Id$
+// $Id: pcmcat.c,v 1.1 2018/02/22 06:25:32 karn Exp karn $
 // Receive and stream PCM RTP data to stdout
 
 #define _GNU_SOURCE 1
@@ -15,7 +15,6 @@
 #include <netdb.h>
 #include <time.h>
 
-#include "misc.h"
 #include "multicast.h"
 
 struct pcmstream {

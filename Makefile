@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.80 2018/02/20 22:31:28 karn Exp karn $
+# $Id: Makefile,v 1.81 2018/02/21 05:04:58 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,15 +6,18 @@ COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
+EXECS=aprs funcube iqplay iqrecord modulate monitor opus packet pcmcat radio
+AFILES=bandplan.txt help.txt modes.txt
 
-all: funcube iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt opus packet aprs
+
+all: $(EXECS) $(AFILES)
 
 install: all
-	install -o root -m 04755 -D --target-directory=$(BINDIR) radio funcube monitor iqrecord iqplay modulate opus packet aprs
-	install -D --target-directory=$(LIBDIR) bandplan.txt help.txt modes.txt
+	install -o root -m 04755 -D --target-directory=$(BINDIR) $(EXECS)
+	install -D --target-directory=$(LIBDIR) $(AFILES)
 
 clean:
-	rm -f *.o *.a control funcube iqplay iqrecord modulate monitor radio opus packet aprs
+	rm -f *.o *.a $(EXECS) $(AFILES)
 	rcsclean
 
 aprs: aprs.o ax25.o multicast.o
@@ -22,6 +25,9 @@ aprs: aprs.o ax25.o multicast.o
 
 packet: packet.o multicast.o filter.o misc.o ax25.o
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread 
+
+pcmcat: pcmcat.o multicast.o
+	$(CC) -g -o $@ $^ -lbsd
 
 opus: opus.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread
@@ -53,7 +59,7 @@ libfcd.a: fcd.o hid-libusb.o
 
 am.o: am.c misc.h filter.h radio.h audio.h
 attr.o: attr.c attr.h
-aprs.o: aprs.c multicast.h ax25.h
+aprs.o: aprs.c multicast.h ax25.h misc.h
 audio.o: audio.c misc.h audio.h
 ax25.o: ax25.c ax25.h
 bandplan.o: bandplan.c bandplan.h
@@ -79,5 +85,6 @@ monitor.o: monitor.c misc.h multicast.h
 multicast.o: multicast.c multicast.h
 opus.o: opus.c misc.h multicast.h	     
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
+pcmcat.o: pcmcat.c multicast.h
 radio.o: radio.c radio.h filter.h misc.h audio.h
 

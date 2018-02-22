@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.31 2018/02/20 22:31:35 karn Exp karn $
+# $Id: Makefile.osx,v 1.32 2018/02/21 05:05:09 karn Exp karn $
 #CC=g++
 GCC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,17 +6,19 @@ CFLAGS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cf
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
+EXECS=aprs iqplay iqrecord modulate monitor opus packet pcmcat radio
+AFILES=bandplan.txt help.txt modes.txt
 
-all: iqplay iqrecord modulate monitor radio bandplan.txt help.txt modes.txt opus packet aprs
+all: $(EXECS) $(AFILES)
 
 install: all
 	install -d $(LIBDIR)
 	install -d $(BINDIR)
-	install -o root -m 04755 radio monitor iqrecord iqplay modulate $(BINDIR)
-	install bandplan.txt help.txt modes.txt $(LIBDIR)
+	install -o root -m 04755 $(EXECS) $(BINDIR)
+	install $(AFILES) $(LIBDIR)
 
 clean:
-	rm -f *.o *.a iqplay iqrecord modulate monitor radio opus packet
+	rm -f *.o *.a $(EXECS) $(AFILES)
 	rcsclean
 
 aprs: aprs.o ax25.o multicast.o misc.o
@@ -24,6 +26,9 @@ aprs: aprs.o ax25.o multicast.o misc.o
 
 packet: packet.o filter.o filter.o misc.o multicast.o ax25.o
 	$(CC) -g -o $@ $^ `pkg-config --libs fftw3f` $(LD_FLAGS)
+
+pcmcat: pcmcat.o multicast.o
+	$(CC) -g -o $@ $^ $(LD_FLAGS)
 
 opus: opus.o multicast.o
 	$(CC) -g -o $@ $^ `pkg-config --libs opus` $(LD_FLAGS)
@@ -66,6 +71,7 @@ monitor.o: monitor.c misc.h multicast.h
 multicast.o: multicast.c multicast.h
 opus.o: opus.c misc.h multicast.h	     
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
+pcmcat.o: pcmcat.c multicast.h
 radio.o: radio.c radio.h filter.h misc.h audio.h audio.h
 
 
