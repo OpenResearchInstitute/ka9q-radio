@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.29 2017/10/24 10:14:27 karn Exp karn $
+// $Id: monitor.c,v 1.30 2018/02/06 11:46:44 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -24,7 +24,7 @@
 #include "multicast.h"
 
 // Global config variables
-char *Mcast_address_text = "239.2.1.1";     // Multicast address we're listening to
+char *Mcast_address_text = "audio-opus-mcast.local";     // Multicast address we're listening to
 char Audiodev[256];           // Name of audio device; empty means portaudio's default
 const int Slop = 480;         // Playout delay in samples to add after an underrun
 #define Aud_bufsize (1<<18)     // make this a power of 2 for efficiency
@@ -223,7 +223,7 @@ int main(int argc,char * const argv[]){
   
   r = Pa_OpenStream(&Pa_Stream,NULL,&outputParameters,Samprate,
 		    //		    paFramesPerBufferUnspecified,
-		    960, // Match 20ms Opus blocksize
+		    960, // Match 20ms preferred Opus blocksize
 		    0,pa_callback,NULL);
 
   if(r != paNoError){
