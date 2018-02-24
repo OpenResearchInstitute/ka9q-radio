@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.1 2018/02/06 11:46:44 karn Exp karn $
+// $Id: opus.c,v 1.2 2018/02/16 01:28:56 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Copyright Jan 2018 Phil Karn, KA9Q
@@ -91,8 +91,11 @@ int main(int argc,char * const argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"I:vR:B:o:x")) != EOF){
+  while((c = getopt(argc,argv,"I:vR:B:o:xT:")) != EOF){
     switch(c){
+    case 'T':
+      Mcast_ttl = strtol(optarg,NULL,0);
+      break;
     case 'v':
       Verbose++;
       break;
@@ -112,8 +115,8 @@ int main(int argc,char * const argv[]){
       Discontinuous = 1;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-x] [-v] [-B blocktime] [-I input_mcast_address] [-R output_mcast_address]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s [-B %.1f] -I %s -R %s [-o %d]\n",argv[0],Opus_blocktime,Mcast_input_address_text,Mcast_output_address_text,Opus_bitrate);
+      fprintf(stderr,"Usage: %s [-x] [-v] [-o bitrate] [-B blocktime] [-I input_mcast_address] [-R output_mcast_address][-T mcast_ttl]\n",argv[0]);
+      fprintf(stderr,"Defaults: %s -o %d -B %.1f -I %s -R %s -T %d\n",argv[0],Opus_bitrate,Opus_blocktime,Mcast_input_address_text,Mcast_output_address_text,Mcast_ttl);
       exit(1);
     }
   }
