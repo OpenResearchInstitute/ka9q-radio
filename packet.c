@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.6 2018/02/20 22:30:57 karn Exp karn $
+// $Id: packet.c,v 1.8 2018/02/22 00:11:44 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -260,7 +260,8 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"I:R:v")) != EOF){
+  Mcast_ttl = 5; // Low intensity, higher default is OK
+  while((c = getopt(argc,argv,"I:R:vT:")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
@@ -271,9 +272,12 @@ int main(int argc,char *argv[]){
     case 'R':
       Decode_mcast_address_text = optarg;
       break;
+    case 'T':
+      Mcast_ttl = strtol(optarg,NULL,0);
+      break;
     default:
-      fprintf(stderr,"Usage: %s [-v] [-I mcast_address]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -I %s\n",argv[0],Mcast_address_text);
+      fprintf(stderr,"Usage: %s [-v] [-I input_mcast_address] [-R output_mcast_address] [-T mcast_ttl]\n",argv[0]);
+      fprintf(stderr,"Defaults: %s -I %s -R %s -T %d\n",argv[0],Mcast_address_text,Decode_mcast_address_text,Mcast_ttl);
       exit(1);
     }
   }
