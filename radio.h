@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.57 2018/02/06 11:47:17 karn Exp karn $
+// $Id: radio.h,v 1.59 2018/02/21 05:04:42 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -27,8 +27,10 @@ struct modetab {
 
 // Sent in each RTP packet right after header
 // NB! because we just copy this into the network stream, it's important that the compiler
-// not add any extra padding. To avoid this, the size must be a multiple of 8, the size of the double
+// not add any extra padding.
+// To avoid this, the size must be a multiple of 8, the size of a double and long long
 struct status {
+  long long timestamp; // Nanoseconds since GPS epoch 6 Jan 1980 00:00:00 UTC
   double frequency;
   uint32_t samprate;
   uint8_t lna_gain;
