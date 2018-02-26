@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.45 2018/02/06 11:46:05 karn Exp karn $
+// $Id: fm.c,v 1.47 2018/02/22 00:09:27 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -228,7 +228,10 @@ void *pltask(void *arg){
   struct filter_out * const pl_filter = create_filter_output(demod->audio_master,plresponse,PL_decimate,REAL);
 
   // Set up long FFT to which we feed the PL tone for frequency analysis
-  int const pl_fft_size = (1 << 19) / PL_decimate; // Should be calculated and rounded to power of 2
+  // PL analyzer sample rate = 48 kHz / 32 = 1500 Hz
+  // FFT blocksize = 512k / 32 = 16k
+  // i.e., one FFT buffer every 16k / 1500 = 10.92 sec, which gives < 0.1 Hz resolution
+  int const pl_fft_size = (1 << 19) / PL_decimate;
   float * const pl_input = fftwf_alloc_real(pl_fft_size);
   complex float * const pl_spectrum = fftwf_alloc_complex(pl_fft_size/2+1);
   fftwf_plan pl_plan = fftwf_plan_dft_r2c_1d(pl_fft_size,pl_input,pl_spectrum,FFTW_ESTIMATE);
@@ -254,7 +257,7 @@ void *pltask(void *arg){
 	fft_ptr -= pl_fft_size;
     }
     // Execute only periodically
-    if(last_fft >= 1024){
+    if(last_fft >= 512){ // 512 / 1500 Hz = 0.34 seconds
       last_fft = 0;
 
       // Determine PL tone, if any
@@ -271,10 +274,10 @@ void *pltask(void *arg){
 	  peakbin = n;
 	}
       }
-      if(peakbin > 0 && peakenergy > 0.25 * totenergy ){
-	// Standard PL tones range from 67.0 to 254.1 Hz; ignore out of range results
-	// as they can be falsed by voice in the absence of a tone
-	// Give a result only if the energy in the tone is at least quarter of the total (arbitrary)
+      // Standard PL tones range from 67.0 to 254.1 Hz; ignore out of range results
+      // as they can be falsed by voice in the absence of a tone
+      // Give a result only if the energy in the tone exceeds a threshold
+      if(peakbin > 0 && peakenergy > 0.01 * totenergy){
 	float const f = (float)peakbin * PL_samprate / pl_fft_size;
 	if(f > 67 && f < 255)
 	  demod->plfreq = f;
@@ -282,7 +285,7 @@ void *pltask(void *arg){
 	demod->plfreq = NAN;
     }
   }
-  // If we ever get here
+  // Clean up
   delete_filter_output(pl_filter);
   fftwf_destroy_plan(pl_plan);
   fftwf_free(pl_input);
