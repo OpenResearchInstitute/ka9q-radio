@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.82 2018/02/22 06:52:19 karn Exp karn $
+# $Id: Makefile,v 1.83 2018/02/26 22:50:47 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -20,7 +20,7 @@ clean:
 	rm -f *.o *.a $(EXECS) $(AFILES)
 	rcsclean
 
-aprs: aprs.o ax25.o multicast.o
+aprs: aprs.o ax25.o multicast.o misc.o
 	$(CC) -g -o $@ $^ -lbsd -lm
 
 packet: packet.o multicast.o filter.o misc.o ax25.o
@@ -33,7 +33,7 @@ opus: opus.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread
 
 opussend: opussend.o multicast.o
-	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread $(LD_FLAGS)
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lm -lpthread $(LD_FLAGS)
 
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lbsd -lm
