@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.25 2017/10/20 22:43:33 karn Exp karn $
+// $Id: funcube.c,v 1.26 2018/02/06 11:46:44 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -56,7 +56,12 @@ int ADC_samprate = 192000;
 int Verbose;
 int No_hold_open; // if set, close control between commands
 int Dongle;       // Which of several funcube dongles to use
-int Blocksize = 256;      // Could be up to 356 bytes with 20 bytes available for tunneling, but this is a power of 2
+
+// A larger blocksize makes more efficient use of each frame, but the receiver generally runs on
+// frames that match the Opus codec: 2.5, 5, 10, 20, 40, 60, 180, 100, 120 ms
+// So to minimize latency, make this a common denominator:
+// 240 samples @ 16 bit stereo = 960 bytes/packet; at 192 kHz, this is 1.25 ms (800 pkt/sec)
+int Blocksize = 240;
 int Dongle = 0;
 char *Locale;
 
@@ -186,7 +191,12 @@ int main(int argc,char *argv[]){
 
   int timestamp = 0;
   int seq = 0;
+
   while(1){
+    struct timeval tp;
+    gettimeofday(&tp,NULL);
+    // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
+    FCD.status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
 
     get_adc(sampbuf,Blocksize);
     if(Verbose > 1){
