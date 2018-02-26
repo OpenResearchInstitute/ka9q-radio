@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.83 2018/02/26 22:50:47 karn Exp karn $
+# $Id: Makefile,v 1.84 2018/02/26 22:59:18 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -87,6 +87,7 @@ modulate.o: modulate.c misc.h filter.h radio.h
 monitor.o: monitor.c misc.h multicast.h
 multicast.o: multicast.c multicast.h
 opus.o: opus.c misc.h multicast.h	     
+opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
 pcmcat.o: pcmcat.c multicast.h
 radio.o: radio.c radio.h filter.h misc.h audio.h

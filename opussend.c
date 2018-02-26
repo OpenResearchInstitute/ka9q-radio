@@ -1,4 +1,4 @@
-// $Id$
+// $Id: opussend.c,v 1.1 2018/02/26 08:54:23 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -27,7 +27,8 @@
 char *Input_device_text = "";
 char *Mcast_output_address_text = "audio-opus-mcast.local";     // Multicast address we're sending to
 
-int const Bufsize = 8192;     // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
+#define BUFSIZE 8192          // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
+                              // Defined as macro so the Audiodata[] declaration below won't bother some compilers
 int const Samprate = 48000;   // Too hard to handle other sample rates right now
                               // Opus will notice the actual audio bandwidth, so there's no real cost to this
 int Verbose;                  // Verbosity flag (currently unused)
@@ -41,7 +42,7 @@ int Discontinuous = 0;        // Off by default
 
 OpusEncoder *Opus;
 int Output_fd = -1;
-float Audiodata[Bufsize];
+float Audiodata[BUFSIZE];
 pthread_mutex_t Buffer_mutex;
 pthread_cond_t Buffer_cond;
 int Samples_available;
@@ -133,7 +134,7 @@ int main(int argc,char * const argv[]){
   // Set up to transmit Opus RTP/UDP/IP
   struct iovec iovec_out[2];
   struct rtp_header rtp_out;
-  unsigned char data_out[Bufsize];
+  unsigned char data_out[BUFSIZE];
   struct msghdr message_out;
 
   iovec_out[0].iov_base = &rtp_out;
