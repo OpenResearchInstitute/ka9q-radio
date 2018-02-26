@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.17 2017/09/28 22:03:47 karn Exp karn $
+// $Id: misc.h,v 1.1 2018/02/06 11:47:17 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -35,6 +35,11 @@ void chomp(char *);
 
 #define DEGPRA (180./M_PI)
 #define RAPDEG (M_PI/180.)
+
+#define GPS_UTC_OFFSET (18) // GPS ahead of utc by 18 seconds - make this a table!
+#define UNIX_EPOCH ((time_t)315964800) // GPS epoch on unix time scale
+
+
 
 // I *hate* this sort of pointless, stupid, gratuitous incompatibility that
 // makes a lot of code impossible to read and debug

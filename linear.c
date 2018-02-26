@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.17 2017/10/24 06:45:02 karn Exp karn $
+// $Id: linear.c,v 1.18 2018/02/06 11:46:44 karn Exp karn $
 
 // General purpose linear modes demodulator
 // Derived from dsb.c by folding in ISB and making coherent tracking optional
@@ -250,6 +250,7 @@ void *demod_linear(void *arg){
       // In calibrate mode, apply and clear the current measured offset
       set_cal(demod,demod->calibrate - calibrate_offset/get_freq(demod));
       calibrate_offset = 0;
+      savecal(demod);
     }
 
     // Demodulation
