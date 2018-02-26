@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.20 2017/09/28 22:04:12 karn Exp karn $
+// $Id: misc.c,v 1.21 2018/02/06 11:46:44 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -7,6 +7,7 @@
 #undef I
 #include <math.h>
 #include <assert.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <ctype.h>
@@ -16,6 +17,7 @@
 #define NULL ((void *)0)
 #endif
 
+#include "misc.h"
 #include "radio.h"
 
 // return unit magnitude complex number with phase x radians
@@ -35,12 +37,7 @@ complex float const csincosf(const float x){
 complex double const csincos(const double x){
   double s,c;
 
-#if __APPLE__
-  s = sin(x);
-  c = cos(x);
-#else
   sincos(x,&s,&c);
-#endif
   return CMPLX(c,s);
 }
 
@@ -152,4 +149,25 @@ double const parse_frequency(const char *s){
     f *= 1e3;
 
   return f;
+}
+
+char *Days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+char *Months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
+
+// Format a timestamp expressed as nanoseconds from the GPS epoch
+char *lltime(long long t){
+  struct tm tm;
+  time_t utime;
+  int t_usec;
+  static char result[100];
+
+  utime = (t / 1000000000LL) - GPS_UTC_OFFSET + UNIX_EPOCH;
+  t_usec = (t % 1000000000LL) / 1000;
+
+  gmtime_r(&utime,&tm);
+  // Mon Feb 26 14:40:08.123456 UTC 2018
+  snprintf(result,sizeof(result),"%s %s %d %02d:%02d:%02d.%06d UTC %4d",
+	   Days[tm.tm_wday],Months[tm.tm_mon],tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec,t_usec,tm.tm_year+1900);
+  return result;
+
 }

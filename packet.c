@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.8 2018/02/22 00:11:44 karn Exp karn $
+// $Id: packet.c,v 1.9 2018/02/25 02:37:32 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -19,9 +19,6 @@
 #include "misc.h"
 #include "multicast.h"
 #include "ax25.h"
-
-char *Months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-
 
 struct packet {
   struct packet *prev;       // Linked list pointers

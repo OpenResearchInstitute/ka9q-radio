@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.108 2018/02/06 11:45:49 karn Exp karn $
+// $Id: display.c,v 1.109 2018/02/16 01:29:41 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -686,6 +686,8 @@ void *display(void *arg){
     mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
     mvwprintw(network,row++,col,"IQ pkts: %'llu; late %'d; skips %'d",demod->iq_packets,
 	      Delayed,Skips);
+    
+    mvwprintw(network,row++,col,"Time: %s",lltime(demod->status.timestamp));
     mvwprintw(network,row++,col,"Sink: %s; ssrc %8x; TTL %d%s",audio->audio_mcast_address_text,
 	      Ssrc,Mcast_ttl,Mcast_ttl == 0 ? " (Local host only)":"");
     mvwprintw(network,row++,col,"PCM %'d Hz; pkts %'llu",audio->samprate,audio->audio_packets);

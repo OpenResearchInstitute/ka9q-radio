@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.30 2018/02/06 11:46:44 karn Exp karn $
+// $Id: monitor.c,v 1.31 2018/02/22 06:51:43 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -27,12 +27,14 @@
 char *Mcast_address_text = "audio-opus-mcast.local";     // Multicast address we're listening to
 char Audiodev[256];           // Name of audio device; empty means portaudio's default
 const int Slop = 480;         // Playout delay in samples to add after an underrun
-#define Aud_bufsize (1<<18)     // make this a power of 2 for efficiency
+#define Aud_bufsize (1<<18)   // make this a power of 2 for efficiency
 const int Bufsize = 8192;     // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
 const int Samprate = 48000;   // Too hard to handle other sample rates right now
 int List_audio;               // List audio output devices and exit
 int Verbose;                  // Verbosity flag (currently unused)
 int Update_interval = 100;    // Time in ms between display updates
+int Age_limit = 100;          // Delete after 10 sec
+int Highlight_limit = 10;     // Dim after 1 second
 
 pthread_t Display_thread;     // Display thread descriptor
 int Input_fd = -1;            // Multicast receive socket
@@ -104,7 +106,7 @@ int main(int argc,char * const argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"a:S:I:vL")) != EOF){
+  while((c = getopt(argc,argv,"a:S:I:vLE:A:")) != EOF){
     switch(c){
     case 'L':
       List_audio++;
@@ -117,6 +119,12 @@ int main(int argc,char * const argv[]){
       break;
     case 'I':
       Mcast_address_text = optarg;
+      break;
+    case 'E':
+      Highlight_limit = strtol(optarg,NULL,0);
+      break;
+    case 'A':
+      Age_limit = strtol(optarg,NULL,0);
       break;
     default:
       fprintf(stderr,"Usage: %s [-v] [-I mcast_address]\n",argv[0]);
@@ -414,13 +422,11 @@ void *display(void *arg){
     for(struct audio *sp = Audio; sp != NULL; sp = nextsp){
       nextsp = sp->next;
       ++sp->age;
-#if 0
-      if(sp->age > agelimit){
+      if(sp->age > Age_limit){
 	// Age out old session
 	close_session(sp);
 	continue;
       }
-#endif
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
       char *type,typebuf[30];
       switch(sp->type){
@@ -461,7 +467,7 @@ void *display(void *arg){
       }
       wmove(mainscr,row,1);
       wclrtoeol(mainscr);
-      if(sp->age < 5)
+      if(sp->age < Highlight_limit)
 	wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
       mvwprintw(mainscr,row,1,"%-15s%5d%5d%+7.0lf%10lx%'12lu%'10lu%'12lu%'12lu%'8.3lf   %s:%s",
 		type,sp->channels,bw,20*log10(sp->gain),sp->ssrc,sp->packets,sp->dupes,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);

@@ -1,4 +1,4 @@
-// $Id: misc.h,v 1.1 2018/02/06 11:47:17 karn Exp karn $
+// $Id: misc.h,v 1.2 2018/02/26 08:51:11 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -39,6 +39,8 @@ void chomp(char *);
 #define GPS_UTC_OFFSET (18) // GPS ahead of utc by 18 seconds - make this a table!
 #define UNIX_EPOCH ((time_t)315964800) // GPS epoch on unix time scale
 
+char *lltime(long long t);
+extern char *Months[12];
 
 
 // I *hate* this sort of pointless, stupid, gratuitous incompatibility that
@@ -47,6 +49,7 @@ void chomp(char *);
 // The GNU malloc_usable_size() does exactly the same thing as the BSD/OSX malloc_size()
 // except that the former is defined in <malloc.h>, the latter is in <malloc/malloc.h>
 #ifdef __APPLE__
+#define sincos(x,s,c) {*s = sin(x); *c = cos(x);}
 #define pthread_setname(x) pthread_setname_np(x)
 #include <malloc/malloc.h>
 #define malloc_usable_size(x) malloc_size(x)

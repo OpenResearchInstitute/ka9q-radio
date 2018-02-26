@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.81 2018/02/21 05:04:58 karn Exp karn $
+# $Id: Makefile,v 1.82 2018/02/22 06:52:19 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,7 +6,7 @@ COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
-EXECS=aprs funcube iqplay iqrecord modulate monitor opus packet pcmcat radio
+EXECS=aprs funcube iqplay iqrecord modulate monitor opus opussend packet pcmcat radio
 AFILES=bandplan.txt help.txt modes.txt
 
 
@@ -31,6 +31,9 @@ pcmcat: pcmcat.o multicast.o
 
 opus: opus.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread
+
+opussend: opussend.o multicast.o
+	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread $(LD_FLAGS)
 
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lbsd -lm

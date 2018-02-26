@@ -1,4 +1,4 @@
-// $Id: aprs.c,v 1.3 2018/02/16 06:02:57 karn Exp karn $
+// $Id: aprs.c,v 1.4 2018/02/20 22:29:59 karn Exp karn $
 // Process AX.25 frames containing APRS data, extract lat/long/altitude, compute az/el
 
 
@@ -21,17 +21,9 @@
 #include "ax25.h"
 #include "misc.h"
 
-char *Months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-
 #define square(x) ((x)*(x))
 double const WGS84_E = 0.081819190842622;  // Eccentricity
 double const WGS84_A = 6378137;         // Equatorial radius, meters
-//double const RAPDEG = M_PI/180.;
-//double const DEGPRA = 180./M_PI;
-#ifdef __APPLE__
-#define sincos(x,s,c) {*s = sin(x); *c = cos(x);}
-#endif
-
 
 
 int Verbose;

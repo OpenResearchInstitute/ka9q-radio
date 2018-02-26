@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.80 2018/02/21 05:02:46 karn Exp karn $
+// $Id: radio.c,v 1.81 2018/02/22 00:10:17 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -417,11 +417,6 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   }
   if(mindex == Nmodes)
     return -1; // Unregistered mode
-  // Current mode is calibrate, save
-  if(demod->flags & CAL){
-    // Save calibration file
-    savecal(demod);
-  }
 
   // Kill current demod thread, if any, to cause clean exit
   demod->terminate = 1;
@@ -458,12 +453,6 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   demod->plfreq = NAN;
   demod->spare = NAN;
 
-  // Wait until we know the sample rate
-  pthread_mutex_lock(&demod->status_mutex);
-  while(demod->samprate == 0)
-    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
-  pthread_mutex_unlock(&demod->status_mutex);
-
   if(defaults || isnan(demod->shift)){
     if(demod->shift != Modes[mindex].shift){
       // Adjust tuning for change in frequency shift
@@ -475,11 +464,8 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   // Load calibration file
   loadcal(demod);
 
-
-  double lo2 = demod->second_LO;
   // Might now be out of range because of change in filter passband
-  if(!LO2_in_range(demod,lo2,1))
-    set_freq(demod,get_freq(demod),NAN);
+  set_freq(demod,get_freq(demod),NAN);
 
   pthread_create(&demod->demod_thread,NULL,Modes[mindex].demod,demod);
   return 0;
@@ -540,6 +526,7 @@ void update_status(struct demod *demod,struct status *new_status){
       // Protect status with a mutex and signal a condition when it changes
       // since demod threads will be waiting for this
       int sig = 0;
+      demod->status.timestamp = new_status->timestamp; // This should always change
       if(new_status->samprate != demod->status.samprate){
 	// A/D sample rate is now known or has changed
 	// This needs to be set before the demod thread starts!
@@ -572,9 +559,16 @@ void update_status(struct demod *demod,struct status *new_status){
 	sig++;
       }
       // Gain settings changed? Store and signal but take no other action for now
-      if(new_status->lna_gain != demod->status.lna_gain
-	 || new_status->mixer_gain != demod->status.mixer_gain
-	 || new_status->if_gain != demod->status.if_gain){
+      if(new_status->lna_gain != demod->status.lna_gain){
+	demod->status.lna_gain = new_status->lna_gain;
+	sig++;
+      }
+      if(new_status->mixer_gain != demod->status.mixer_gain){
+	demod->status.mixer_gain = new_status->mixer_gain;
+	sig++;
+      }
+      if(new_status->if_gain != demod->status.if_gain){
+	demod->status.if_gain = new_status->if_gain;
 	sig++;
       }
       if(new_status->frequency != demod->status.frequency){
