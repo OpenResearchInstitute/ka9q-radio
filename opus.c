@@ -1,6 +1,7 @@
-// $Id: opus.c,v 1.2 2018/02/16 01:28:56 karn Exp karn $
+// $Id: opus.c,v 1.3 2018/02/24 22:18:49 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
+// Currently subject to memory leaks as old group states aren't yet aged out
 // Copyright Jan 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
