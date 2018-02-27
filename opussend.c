@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.1 2018/02/26 08:54:23 karn Exp karn $
+// $Id: opussend.c,v 1.2 2018/02/26 22:59:05 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -27,7 +27,7 @@
 char *Input_device_text = "";
 char *Mcast_output_address_text = "audio-opus-mcast.local";     // Multicast address we're sending to
 
-#define BUFSIZE 8192          // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
+#define BUFSIZE 65536         // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
                               // Defined as macro so the Audiodata[] declaration below won't bother some compilers
 int const Samprate = 48000;   // Too hard to handle other sample rates right now
                               // Opus will notice the actual audio bandwidth, so there's no real cost to this
@@ -116,14 +116,42 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
   int Opus_frame_size = round(Opus_blocktime * Samprate / 1000.);
-  if(Opus_bitrate < 500)
+  if(Opus_bitrate < 6000)
     Opus_bitrate *= 1000; // Assume it was given in kb/s
+  if(Opus_bitrate > 510000)
+    Opus_bitrate =  510000;
+
+  int est_packet_size = round(Opus_bitrate * Opus_blocktime * .001/8);
+  if(est_packet_size > 1500){
+    fprintf(stderr,"Warning: estimated packet size %d bytes; IP framgmentation is likely\n",est_packet_size);
+  }
 
   int error = 0;
   Opus = opus_encoder_create(Samprate,Channels,OPUS_APPLICATION_AUDIO,&error);
-  opus_encoder_ctl(Opus,OPUS_SET_DTX(Discontinuous));
-  opus_encoder_ctl(Opus,OPUS_SET_BITRATE(Opus_bitrate));
-  opus_encoder_ctl(Opus,OPUS_FRAMESIZE_ARG,Opus_blocktime);
+  if(error != OPUS_OK){
+    fprintf(stderr,"opus_encoder_create error %d\n",error);
+    exit(1);
+  }
+
+  error = opus_encoder_ctl(Opus,OPUS_SET_DTX(Discontinuous));
+  if(error != OPUS_OK){
+    fprintf(stderr,"opus_encoder_ctl set discontinuous %d: error %d\n",Discontinuous,error);
+    exit(1);
+  }
+
+  error = opus_encoder_ctl(Opus,OPUS_SET_BITRATE(Opus_bitrate));
+  if(error != OPUS_OK){
+    fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
+    exit(1);
+  }
+
+  // Always seems to return error -5 even when OK??
+  error = opus_encoder_ctl(Opus,OPUS_FRAMESIZE_ARG,(int)Opus_frame_size);
+  if(0 && error != OPUS_OK){
+    fprintf(stderr,"opus_encoder_ctl set framesize %d (%.1lf ms): error %d\n",Opus_frame_size,Opus_blocktime,error);
+    exit(1);
+  }
+
 
   // Set up multicast transmit socket
   Output_fd = setup_mcast(Mcast_output_address_text,1);
@@ -136,6 +164,8 @@ int main(int argc,char * const argv[]){
   struct rtp_header rtp_out;
   unsigned char data_out[BUFSIZE];
   struct msghdr message_out;
+
+  rtp_out.vpxcc = RTP_VERS << 6;
 
   iovec_out[0].iov_base = &rtp_out;
   iovec_out[0].iov_len = sizeof(rtp_out);
@@ -212,6 +242,7 @@ int main(int argc,char * const argv[]){
     
     int size = opus_encode_float(Opus,fbuffer,Opus_frame_size,data_out,sizeof(data_out));
     if(!Discontinuous || size > 2){
+      // This ought to source fragment if necessary
       iovec_out[1].iov_len = size;
       rtp_out.seq = htons(oseq++);
       rtp_out.mpt = 20; // Opus
@@ -234,8 +265,13 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       void *userData){
 
   pthread_mutex_lock(&Buffer_mutex);
+  int space_available = sizeof(Audiodata) - Samples_available * Channels * sizeof(float);
+  // Simply discard any excess - not elegant, but it works and it's unlikely if the buffer is big enough
+  int copy_amount = min(space_available,framesPerBuffer*Channels*sizeof(float));
+
   memcpy(Audiodata+Samples_available*Channels*sizeof(float),
-	 inputBuffer,framesPerBuffer*Channels*sizeof(float));
+	 inputBuffer,
+	 copy_amount);
   Samples_available += framesPerBuffer;
   pthread_cond_broadcast(&Buffer_cond);
   pthread_mutex_unlock(&Buffer_mutex);

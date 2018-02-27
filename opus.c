@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.3 2018/02/24 22:18:49 karn Exp karn $
+// $Id: opus.c,v 1.4 2018/02/27 01:23:01 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -171,6 +171,8 @@ int main(int argc,char * const argv[]){
   struct rtp_header rtp_out;
   unsigned char data_out[Bufsize];
   
+  rtp_out.vpxcc = RTP_VERS << 6;
+
   iovec_out[0].iov_base = &rtp_out;
   iovec_out[0].iov_len = sizeof(rtp_out);
   iovec_out[1].iov_base = data_out;
@@ -233,10 +235,28 @@ int main(int argc,char * const argv[]){
       sp->audio_index = 0;
       int error = 0;
       sp->opus = opus_encoder_create(Samprate,Channels,OPUS_APPLICATION_AUDIO,&error);
-      opus_encoder_ctl(sp->opus,OPUS_SET_DTX(Discontinuous));
-      opus_encoder_ctl(sp->opus,OPUS_SET_BITRATE(Opus_bitrate));
-      opus_encoder_ctl(sp->opus,OPUS_FRAMESIZE_ARG,Opus_blocktime);
+      if(error != OPUS_OK){
+	fprintf(stderr,"opus_encoder_create error %d\n",error);
+	exit(1);
+      }
+      error = opus_encoder_ctl(sp->opus,OPUS_SET_DTX(Discontinuous));
+      if(error != OPUS_OK){
+	fprintf(stderr,"opus_encoder_ctl set discontinuous %d: error %d\n",Discontinuous,error);
+	exit(1);
+      }
 
+      error = opus_encoder_ctl(sp->opus,OPUS_SET_BITRATE(Opus_bitrate));
+      if(error != OPUS_OK){
+	fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
+	exit(1);
+      }
+
+      // Always seems to return error -5 even when OK??
+      error = opus_encoder_ctl(sp->opus,OPUS_FRAMESIZE_ARG,Opus_blocktime);
+      if(0 && error != OPUS_OK){
+	fprintf(stderr,"opus_encoder_ctl set framesize %d (%.1lf ms): error %d\n",Opus_frame_size,Opus_blocktime,error);
+	exit(1);
+      }
     }
     sp->age = 0;
     int drop = 0;
