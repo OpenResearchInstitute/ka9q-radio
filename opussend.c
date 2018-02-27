@@ -76,8 +76,12 @@ int main(int argc,char * const argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"I:vR:B:o:xT:")) != EOF){
+  int List_audio = 0;
+  while((c = getopt(argc,argv,"I:vR:B:o:xT:L")) != EOF){
     switch(c){
+    case 'L':
+      List_audio++;
+      break;
     case 'T':
       Mcast_ttl = strtol(optarg,NULL,0);
       break;
@@ -105,7 +109,7 @@ int main(int argc,char * const argv[]){
       exit(1);
     }
   }
-  // Set up Opus encoder
+  // Compute opus parameters
   if(Opus_blocktime != 2.5 && Opus_blocktime != 5
      && Opus_blocktime != 10 && Opus_blocktime != 20
      && Opus_blocktime != 40 && Opus_blocktime != 60
@@ -116,6 +120,71 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
   int Opus_frame_size = round(Opus_blocktime * Samprate / 1000.);
+
+
+  // Set up audio input
+  PaError r = Pa_Initialize();
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
+    close(Output_fd);
+    return r;
+  }
+
+  int inDevNum;
+  if(strlen(Input_device_text) == 0){
+    // not specified; use default
+    inDevNum = Pa_GetDefaultInputDevice();
+  } else {
+    // Find requested audio device in the list
+    int numDevices = Pa_GetDeviceCount();
+    
+    for(inDevNum=0; inDevNum < numDevices; inDevNum++){
+      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
+      if(strcmp(deviceInfo->name,Input_device_text) == 0)
+	break;
+    }
+  }
+  if(inDevNum == paNoDevice){
+    fprintf(stderr,"Portaudio: no available devices\n");
+    return -1;
+  }
+
+
+  PaStreamParameters inputParameters;
+  memset(&inputParameters,0,sizeof(inputParameters));
+  inputParameters.channelCount = Channels;
+  inputParameters.device = inDevNum;
+  inputParameters.sampleFormat = paFloat32;
+  inputParameters.suggestedLatency = .001 * Opus_blocktime;
+  
+  PaStream *Pa_Stream;          // Portaudio stream handle
+  r = Pa_OpenStream(&Pa_Stream,&inputParameters,NULL,Samprate,
+		    Opus_frame_size,
+		     0,pa_callback,NULL);
+
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
+    close(Output_fd);
+    exit(1);
+  }
+  r = Pa_StartStream(Pa_Stream);
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
+    close(Output_fd);
+    exit(1);
+  }
+
+  if(List_audio){
+    // On stdout, not stderr, so we can toss ALSA's noisy error messages
+    printf("Audio devices:\n");
+    int numDevices = Pa_GetDeviceCount();
+    for(int inDevNum=0; inDevNum < numDevices; inDevNum++){
+      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
+      printf("%s\n",deviceInfo->name);
+    }
+    exit(0);
+  }
+
   if(Opus_bitrate < 6000)
     Opus_bitrate *= 1000; // Assume it was given in kb/s
   if(Opus_bitrate > 510000)
@@ -184,37 +253,6 @@ int main(int argc,char * const argv[]){
   message_out.msg_controllen = 0;
   message_out.msg_flags = 0;
 
-  // Set up audio input
-  PaError r = Pa_Initialize();
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
-    close(Output_fd);
-    return r;
-  }
-  PaStreamParameters inputParameters;
-  memset(&inputParameters,0,sizeof(inputParameters));
-  inputParameters.channelCount = Channels;
-  int inDevNum = Pa_GetDefaultInputDevice();
-  inputParameters.device = inDevNum;
-  inputParameters.sampleFormat = paFloat32;
-  inputParameters.suggestedLatency = .001 * Opus_blocktime;
-  
-  PaStream *Pa_Stream;          // Portaudio stream handle
-  r = Pa_OpenStream(&Pa_Stream,&inputParameters,NULL,Samprate,
-		    Opus_frame_size,
-		     0,pa_callback,NULL);
-
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-    close(Output_fd);
-    exit(1);
-  }
-  r = Pa_StartStream(Pa_Stream);
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
-    close(Output_fd);
-    exit(1);
-  }
   // Graceful signal catch
   signal(SIGPIPE,closedown);
   signal(SIGINT,closedown);
