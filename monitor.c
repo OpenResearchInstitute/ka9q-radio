@@ -1,5 +1,6 @@
-// $Id: monitor.c,v 1.31 2018/02/22 06:51:43 karn Exp karn $
+// $Id: monitor.c,v 1.32 2018/02/26 22:50:47 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
+// Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <pthread.h>
@@ -14,6 +15,7 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/resource.h>
+#include <sys/select.h>
 #include <netdb.h>
 #include <portaudio.h>
 #include <ncurses.h>
@@ -36,7 +38,6 @@ int Update_interval = 100;    // Time in ms between display updates
 int Age_limit = 100;          // Delete after 10 sec
 int Highlight_limit = 10;     // Dim after 1 second
 
-pthread_t Display_thread;     // Display thread descriptor
 int Input_fd = -1;            // Multicast receive socket
 struct audio *Audio;          // Link to head of session structure chain
 PaStream *Pa_Stream;          // Portaudio stream handle
@@ -46,10 +47,7 @@ int inDevNum;                 // Portaudio's audio output device index
 // and the callback zeroes out each sample as played
 float Audio_buffer[Aud_bufsize]; // Audio playout buffer
 volatile int Read_ptr;           // read_pointer, modified in callback (hence volatile)
-pthread_mutex_t Buffer_mutex;
 float const SCALE = 1./SHRT_MAX;
-
-
 
 struct audio {
   struct audio *prev;       // Linked list pointers
@@ -83,16 +81,16 @@ struct audio {
 };
 
 
-// The Audio structures are accessed by both display() and main(), so protect them
-pthread_mutex_t Audio_mutex;
-
 void closedown(int);
-void *display(void *);
+void display();
 struct audio *lookup_session(const struct sockaddr *,uint32_t);
 struct audio *make_session(struct sockaddr const *r,uint32_t,uint16_t,uint32_t);
 int close_session(struct audio *);
 static int pa_callback(const void *,void *,unsigned long,const PaStreamCallbackTimeInfo*,PaStreamCallbackFlags,void *);
 int write_is_ahead(int write_ptr,int read_ptr);
+
+WINDOW *mainscr;
+struct audio *current = NULL;
 
 
 int main(int argc,char * const argv[]){
@@ -207,18 +205,6 @@ int main(int argc,char * const argv[]){
     }
   }
 
-  // Graceful signal catch
-  signal(SIGPIPE,closedown);
-  signal(SIGINT,closedown);
-  signal(SIGKILL,closedown);
-  signal(SIGQUIT,closedown);
-  signal(SIGTERM,closedown);
-  signal(SIGPIPE,SIG_IGN);
-
-  pthread_mutex_init(&Buffer_mutex,NULL);
-  pthread_mutex_init(&Audio_mutex,NULL);
-  pthread_create(&Display_thread,NULL,display,NULL);
-
   // Create and start portaudio stream.
   // Runs continuously, playing silence until audio arrives.
   // This allows multiple streams to be played on hosts that only support one
@@ -244,11 +230,52 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
 
+  // Graceful signal catch
+  signal(SIGPIPE,closedown);
+  signal(SIGINT,closedown);
+  signal(SIGKILL,closedown);
+  signal(SIGQUIT,closedown);
+  signal(SIGTERM,closedown);
+  signal(SIGPIPE,SIG_IGN);
+
+  initscr();
+  keypad(stdscr,TRUE);
+  timeout(0); // Nonblocking
+  cbreak();
+  noecho();
+
+  mainscr = stdscr;
+
+  struct timeval last_update_time;
+  gettimeofday(&last_update_time,NULL);
 
   while(1){
-    int size;
+    struct timeval tp;
+    
+    gettimeofday(&tp,NULL);
+    // Time since last update in milliseconds
+    int interval = (tp.tv_sec - last_update_time.tv_sec)*1000 + (tp.tv_usec - last_update_time.tv_usec)/1000.;
+    if(interval >= Update_interval){
+      last_update_time = tp;
+      display();
+    }
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 1000 * Update_interval;
 
-    size = recvmsg(Input_fd,&message,0);
+    fd_set fdset;
+    FD_ZERO(&fdset);
+    FD_SET(Input_fd,&fdset);
+    int s = select(Input_fd+1,&fdset,NULL,NULL,&timeout);
+    if(s < 0 && errno != EAGAIN && errno != EINTR)
+      break;
+    if(s == 0){
+      continue;
+    }
+    if(!FD_ISSET(Input_fd,&fdset))
+      continue;
+
+    int size = recvmsg(Input_fd,&message,0);
     if(size == -1){
       if(errno != EINTR){ // Happens routinely
 	perror("recvmsg");
@@ -265,11 +292,8 @@ int main(int argc,char * const argv[]){
     rtp.seq = ntohs(rtp.seq);
     rtp.timestamp = ntohl(rtp.timestamp);
 
-    pthread_mutex_lock(&Audio_mutex); // Keep display thread from modifying the table
-
     if(rtp.mpt != 10 && rtp.mpt != 20 && rtp.mpt != 11) // 1 byte, no need to byte swap
       goto endloop; // Discard unknown RTP types to avoid polluting session table
-
 
     struct audio *sp = lookup_session(&sender,rtp.ssrc);
     if(sp == NULL){
@@ -313,7 +337,6 @@ int main(int argc,char * const argv[]){
     case 10: // Stereo
       sp->channels = 2;
       samples = size / 4;  // # 32-bit word samples
-      pthread_mutex_lock(&Buffer_mutex);
       if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
 	// Past deadline, skip forward
 	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
@@ -325,12 +348,10 @@ int main(int argc,char * const argv[]){
       }
       sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
       sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
-      pthread_mutex_unlock(&Buffer_mutex);
       break;
     case 11: // Mono; send to both stereo channels
       sp->channels = 1;
       samples = size / 2;
-      pthread_mutex_lock(&Buffer_mutex);
       if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
 	// Past deadline, skip forward
 	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
@@ -343,7 +364,6 @@ int main(int argc,char * const argv[]){
       }
       sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
       sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
-      pthread_mutex_unlock(&Buffer_mutex);
       break;
     case 20: // Opus codec decode - arbitrary choice
       if(sp->opus == NULL){ // Create if it doesn't already exist
@@ -366,7 +386,6 @@ int main(int argc,char * const argv[]){
 	  sp->write_ptr %= Aud_bufsize;
 	}
 	samples = opus_decode_float(sp->opus,(unsigned char *)data,size,outsamps,Bufsize,0);
-	pthread_mutex_lock(&Buffer_mutex);
 	if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
 	  // Past deadline, skip forward
 	  sp->underruns++;
@@ -378,7 +397,6 @@ int main(int argc,char * const argv[]){
 	}
 	sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
 	sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
-	pthread_mutex_unlock(&Buffer_mutex);
       }
       break;
     default:
@@ -388,9 +406,7 @@ int main(int argc,char * const argv[]){
     sp->etime = rtp.timestamp + samples;
 
   endloop:;
-    pthread_mutex_unlock(&Audio_mutex); // Give display thread a chance
   }
-  pthread_cancel(Display_thread);
   echo();
   nocbreak();
   endwin();
@@ -398,26 +414,12 @@ int main(int argc,char * const argv[]){
 }
 
 // Use ncurses to display streams; age out unused ones
-void *display(void *arg){
-  setpriority(PRIO_PROCESS,0,0); // We don't need it
+void display(){
 
-  initscr();
-  keypad(stdscr,TRUE);
-  timeout(Update_interval);
-  cbreak();
-  noecho();
-
-  // WINDOW * const mainscr = newwin(25,110,0,0);
-  WINDOW * const mainscr = stdscr;
-
-  struct audio *current = NULL;
-
-  while(1){
     int row = 1;
     wmove(mainscr,row,0);
     wclrtobot(mainscr);
-    mvwprintw(mainscr,row++,1,"Type        channels   BW   Gain      SSRC     Packets     Dupes       Drops   Underruns   Delay   Source");
-    pthread_mutex_lock(&Audio_mutex);
+    mvwprintw(mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops Underruns  Delay Source");
     struct audio *nextsp; // Save in case we close the current one
     for(struct audio *sp = Audio; sp != NULL; sp = nextsp){
       nextsp = sp->next;
@@ -469,18 +471,21 @@ void *display(void *arg){
       wclrtoeol(mainscr);
       if(sp->age < Highlight_limit)
 	wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
-      mvwprintw(mainscr,row,1,"%-15s%5d%5d%+7.0lf%10lx%'12lu%'10lu%'12lu%'12lu%'8.3lf   %s:%s",
-		type,sp->channels,bw,20*log10(sp->gain),sp->ssrc,sp->packets,sp->dupes,sp->drops,sp->underruns,(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
+      mvwprintw(mainscr,row,0,"%-15s%2d%3d%+7.0lf%10x%'12lu%7lu%7lu%'10lu%7.3lf %s:%s",
+		type,sp->channels,bw,
+		20*log10(sp->gain),
+		sp->ssrc,
+		sp->packets,sp->dupes,sp->drops,sp->underruns,
+		(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
       wattr_off(mainscr,A_BOLD,NULL);
       if(current == NULL)
 	current = sp;
       if(sp == current)
-	mvwchgat(mainscr,row,28,5,A_STANDOUT,0,NULL);
+	mvwchgat(mainscr,row,22,5,A_STANDOUT,0,NULL);
 
       row++;
 
     }
-    pthread_mutex_unlock(&Audio_mutex);
     move(row,1);
     clrtobot();
     mvwprintw(mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
@@ -509,20 +514,18 @@ void *display(void *arg){
       current->gain /= 1.122018454; // 1 dB
       break;
     case 'd':
-      pthread_mutex_lock(&Audio_mutex);
       if(current != NULL){
 	struct audio *next = current->next;
 	close_session(current);
 	current = next;
       }
-      pthread_mutex_unlock(&Audio_mutex);
       break;
     default:
       break;
     }
-
-  }
 }
+
+
 
 struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   struct audio *sp;
@@ -614,9 +617,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     memcpy(op,&Audio_buffer[Read_ptr],chunk * sizeof(*op));
     memset(&Audio_buffer[Read_ptr],0,chunk * sizeof(*op)); // Zero buffer just read
     // Atomic update of Read_ptr
-    pthread_mutex_lock(&Buffer_mutex);
     Read_ptr = (Read_ptr + chunk) % Aud_bufsize;
-    pthread_mutex_unlock(&Buffer_mutex);
     op += chunk;
     samples_left -= chunk;
   }
