@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.32 2018/02/26 22:50:47 karn Exp karn $
+// $Id: monitor.c,v 1.33 2018/02/27 06:45:02 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -293,14 +293,14 @@ int main(int argc,char * const argv[]){
     rtp.timestamp = ntohl(rtp.timestamp);
 
     if(rtp.mpt != 10 && rtp.mpt != 20 && rtp.mpt != 11) // 1 byte, no need to byte swap
-      goto endloop; // Discard unknown RTP types to avoid polluting session table
+      continue; // Discard unknown RTP types to avoid polluting session table
 
     struct audio *sp = lookup_session(&sender,rtp.ssrc);
     if(sp == NULL){
       // Not found
       if((sp = make_session(&sender,rtp.ssrc,rtp.seq,rtp.timestamp)) == NULL){
 	fprintf(stderr,"No room!!\n");
-	goto endloop;
+	continue;
       }
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
 		  //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
@@ -318,7 +318,7 @@ int main(int argc,char * const argv[]){
       //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
       if(diff < 0 && diff > -10){
 	sp->dupes++;
-	goto endloop;	// Drop probable duplicate
+	continue;	// Drop probable duplicate
       }
       drop = diff; // Apparent # packets dropped
       sp->drops += abs(drop);
@@ -329,7 +329,7 @@ int main(int argc,char * const argv[]){
     size -= sizeof(rtp); // Bytes in payload
     if(size <= 0){
       sp->empties++;
-      goto endloop; // empty?!
+      continue; // empty?!
     }
     int samples = 0;
 
@@ -404,8 +404,6 @@ int main(int argc,char * const argv[]){
       break; // ignore
     }
     sp->etime = rtp.timestamp + samples;
-
-  endloop:;
   }
   echo();
   nocbreak();
@@ -420,15 +418,20 @@ void display(){
     wmove(mainscr,row,0);
     wclrtobot(mainscr);
     mvwprintw(mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops Underruns  Delay Source");
+    // Age out idle sessions
     struct audio *nextsp; // Save in case we close the current one
     for(struct audio *sp = Audio; sp != NULL; sp = nextsp){
       nextsp = sp->next;
-      ++sp->age;
-      if(sp->age > Age_limit){
+      if(++sp->age > Age_limit){
 	// Age out old session
+	if(current == sp)
+	  current = Audio;
 	close_session(sp);
-	continue;
+	sp = NULL;
       }
+    }
+
+    for(struct audio *sp = Audio; sp != NULL; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
       char *type,typebuf[30];
       switch(sp->type){
@@ -484,7 +487,6 @@ void display(){
 	mvwchgat(mainscr,row,22,5,A_STANDOUT,0,NULL);
 
       row++;
-
     }
     move(row,1);
     clrtobot();
