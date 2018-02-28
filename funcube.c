@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.26 2018/02/06 11:46:44 karn Exp karn $
+// $Id: funcube.c,v 1.27 2018/02/26 08:51:50 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -199,16 +199,26 @@ int main(int argc,char *argv[]){
     FCD.status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
 
     get_adc(sampbuf,Blocksize);
-    if(Verbose > 1){
-      // Only used by display, so don't calculate if the display isn't running
-      // average energy (I+Q) in each sample, current block, **including DC offset**
-      // At low levels, will disagree with demod's IF1 figure, which has the DC removed
-      float sumsq = 0;
-      for(int i=0;i<2*Blocksize;i++)
-	sumsq += (float)sampbuf[i] * sampbuf[i];
-
-      FCD.power = sumsq/Blocksize;
+    // average energy (I+Q) in each sample, current block, **including DC offset**
+    // At low levels, will disagree with demod's IF1 figure, which has the DC removed
+    float sumsq = 0;
+    for(int i=0;i<2*Blocksize;i++)
+      sumsq += (float)sampbuf[i] * sampbuf[i];
+    
+    FCD.power = sumsq/Blocksize;
+    if(FCD.power > 0.25){
+      // > -6 dBFS, I think
+      FCD.status.lna_gain = 0;
+      FCD.status.mixer_gain = 0;
+      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
+      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
+    } else if(FCD.power < 0.000001){ // -60 dBFS ?
+      FCD.status.lna_gain = 1;
+      FCD.status.mixer_gain = 1;
+      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
+      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
     }
+
 
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
