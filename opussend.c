@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.2 2018/02/26 22:59:05 karn Exp karn $
+// $Id: opussend.c,v 1.4 2018/02/27 07:30:25 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -77,6 +77,7 @@ int main(int argc,char * const argv[]){
 
   int c;
   int List_audio = 0;
+  Mcast_ttl = 5; // By default, let Opus be routed
   while((c = getopt(argc,argv,"I:vR:B:o:xT:L")) != EOF){
     switch(c){
     case 'L':
