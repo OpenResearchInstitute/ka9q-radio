@@ -192,6 +192,8 @@ int main(int argc,char *argv[]){
   int timestamp = 0;
   int seq = 0;
 
+  int gaindelay = 0;
+
   while(1){
     struct timeval tp;
     gettimeofday(&tp,NULL);
@@ -199,6 +201,8 @@ int main(int argc,char *argv[]){
     FCD.status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
 
     get_adc(sampbuf,Blocksize);
+#if 1
+
     // average energy (I+Q) in each sample, current block, **including DC offset**
     // At low levels, will disagree with demod's IF1 figure, which has the DC removed
     float sumsq = 0;
@@ -206,19 +210,40 @@ int main(int argc,char *argv[]){
       sumsq += (float)sampbuf[i] * sampbuf[i];
     
     FCD.power = sumsq/Blocksize;
-    if(FCD.power > 0.25){
+    if(FCD.power > 0.25 * 32767 * 32767){
       // > -6 dBFS, I think
-      FCD.status.lna_gain = 0;
-      FCD.status.mixer_gain = 0;
-      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
-      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
-    } else if(FCD.power < 0.000001){ // -60 dBFS ?
-      FCD.status.lna_gain = 1;
-      FCD.status.mixer_gain = 1;
-      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
-      fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
-    }
+      gaindelay--;
 
+    } else if(FCD.power < 316*316){ // -40 dBFS ?
+      gaindelay++;
+    }
+    if(abs(gaindelay) > 20){
+      if(FCD.phd == NULL && (FCD.phd = fcdOpen(FCD.sdr_name,sizeof(FCD.sdr_name),Dongle)) == NULL){
+	perror("funcube: can't re-open control port, aborting");
+	abort();
+      }
+      if(gaindelay < 0){
+	// reduce mixer gain first
+	if(FCD.status.mixer_gain == 1){
+	  FCD.status.mixer_gain = 0;
+	  fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
+	} else if(FCD.status.lna_gain == 1){
+	  FCD.status.lna_gain = 0;
+	  fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
+	}
+      } else if(gaindelay > 0){
+	// Increase LNA gain first
+	if(FCD.status.lna_gain == 0){
+	  FCD.status.lna_gain = 1;
+	  fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
+	} else if(FCD.status.mixer_gain == 0){
+	  FCD.status.mixer_gain = 1;
+	  fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
+	}
+      }
+      gaindelay = 0;
+    }
+#endif
 
     rtp.seq = htons(seq++);
     rtp.timestamp = htonl(timestamp);
