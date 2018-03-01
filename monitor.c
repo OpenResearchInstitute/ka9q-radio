@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.33 2018/02/27 06:45:02 karn Exp karn $
+// $Id: monitor.c,v 1.34 2018/02/28 09:29:24 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -48,6 +48,9 @@ int inDevNum;                 // Portaudio's audio output device index
 float Audio_buffer[Aud_bufsize]; // Audio playout buffer
 volatile int Read_ptr;           // read_pointer, modified in callback (hence volatile)
 float const SCALE = 1./SHRT_MAX;
+WINDOW *Mainscr;
+struct audio *Current = NULL;
+
 
 struct audio {
   struct audio *prev;       // Linked list pointers
@@ -89,8 +92,6 @@ int close_session(struct audio *);
 static int pa_callback(const void *,void *,unsigned long,const PaStreamCallbackTimeInfo*,PaStreamCallbackFlags,void *);
 int write_is_ahead(int write_ptr,int read_ptr);
 
-WINDOW *mainscr;
-struct audio *current = NULL;
 
 
 int main(int argc,char * const argv[]){
@@ -244,7 +245,7 @@ int main(int argc,char * const argv[]){
   cbreak();
   noecho();
 
-  mainscr = stdscr;
+  Mainscr = stdscr;
 
   struct timeval last_update_time;
   gettimeofday(&last_update_time,NULL);
@@ -415,19 +416,18 @@ int main(int argc,char * const argv[]){
 void display(){
 
     int row = 1;
-    wmove(mainscr,row,0);
-    wclrtobot(mainscr);
-    mvwprintw(mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops Underruns  Delay Source");
+    wmove(Mainscr,row,0);
+    wclrtobot(Mainscr);
+    mvwprintw(Mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops Underruns  Delay Source");
     // Age out idle sessions
     struct audio *nextsp; // Save in case we close the current one
     for(struct audio *sp = Audio; sp != NULL; sp = nextsp){
       nextsp = sp->next;
       if(++sp->age > Age_limit){
 	// Age out old session
-	if(current == sp)
-	  current = Audio;
 	close_session(sp);
-	sp = NULL;
+	if(Current == sp)
+	  Current = Audio;
       }
     }
 
@@ -470,28 +470,28 @@ void display(){
 	type = typebuf;
 	break;
       }
-      wmove(mainscr,row,1);
-      wclrtoeol(mainscr);
+      wmove(Mainscr,row,1);
+      wclrtoeol(Mainscr);
       if(sp->age < Highlight_limit)
-	wattr_on(mainscr,A_BOLD,NULL); // Embolden active streams
-      mvwprintw(mainscr,row,0,"%-15s%2d%3d%+7.0lf%10x%'12lu%7lu%7lu%'10lu%7.3lf %s:%s",
+	wattr_on(Mainscr,A_BOLD,NULL); // Embolden active streams
+      mvwprintw(Mainscr,row,0,"%-15s%2d%3d%+7.0lf%10x%'12lu%7lu%7lu%'10lu%7.3lf %s:%s",
 		type,sp->channels,bw,
 		20*log10(sp->gain),
 		sp->ssrc,
 		sp->packets,sp->dupes,sp->drops,sp->underruns,
 		(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
-      wattr_off(mainscr,A_BOLD,NULL);
-      if(current == NULL)
-	current = sp;
-      if(sp == current)
-	mvwchgat(mainscr,row,22,5,A_STANDOUT,0,NULL);
+      wattr_off(Mainscr,A_BOLD,NULL);
+      if(Current == NULL)
+	Current = sp;
+      if(sp == Current)
+	mvwchgat(Mainscr,row,22,5,A_STANDOUT,0,NULL);
 
       row++;
     }
     move(row,1);
     clrtobot();
-    mvwprintw(mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
-    wnoutrefresh(mainscr);
+    mvwprintw(Mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
+    wnoutrefresh(Mainscr);
     doupdate();
     int c = getch();
     switch(c){
@@ -499,27 +499,27 @@ void display(){
       break;
     case KEY_NPAGE:
     case '\t':
-      if(current->next != NULL)
-	current = current->next;
+      if(Current->next != NULL)
+	Current = Current->next;
       else if(Audio != NULL)
-	current = Audio; // Wrap around to top
+	Current = Audio; // Wrap around to top
       break;
     case KEY_BTAB:
     case KEY_PPAGE:
-      if(current->prev != NULL)
-	current = current->prev;
+      if(Current->prev != NULL)
+	Current = Current->prev;
       break;
     case KEY_UP:
-      current->gain *= 1.122018454; // 1 dB
+      Current->gain *= 1.122018454; // 1 dB
       break;
     case KEY_DOWN:
-      current->gain /= 1.122018454; // 1 dB
+      Current->gain /= 1.122018454; // 1 dB
       break;
     case 'd':
-      if(current != NULL){
-	struct audio *next = current->next;
-	close_session(current);
-	current = next;
+      if(Current != NULL){
+	struct audio *next = Current->next;
+	close_session(Current);
+	Current = next;
       }
       break;
     default:
