@@ -122,6 +122,31 @@ int setup_mcast(char const *target,int output){
   else
     fprintf(stderr,"setup_input: Can't create multicast socket for %s:%s\n",host,port);
 
+#if 0 // testing hack - find out if we're using source specific multicast (we're not)
+  {
+  struct in_addr interface,group;
+  uint32_t fmode;
+  uint32_t numsrc;
+  struct in_addr slist[100];
+  int n;
+
+  struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
+
+  
+  interface.s_addr = htonl(0xc0a82c07);
+  group = sin->sin_addr;
+  fmode = MCAST_INCLUDE;
+  numsrc = 100;
+  printf("fd = %d\n",fd);
+
+  n = getipv4sourcefilter(fd,interface,group,&fmode,&numsrc,slist);
+  if(n < 0)
+    perror("getipv4sourcefilter");
+  printf("n = %d numsrc = %d\n",n,numsrc);
+  }
+#endif
+
+
   freeaddrinfo(results);
   return fd;
 }
