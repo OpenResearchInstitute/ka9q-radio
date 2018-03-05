@@ -1,4 +1,4 @@
-# $Id: bandplan.txt,v 1.5 2018/03/05 04:41:04 karn Exp karn $
+# $Id: bandplan.txt,v 1.6 2018/03/05 04:54:17 karn Exp karn $
 # Ham bandplans, for frequency checking
 # Note: Novices have special mode and power limits not shown here
 # bot   top     classes modes   name
@@ -73,6 +73,13 @@
 
 50.0	50.1	EAGT	C	6m
 50.1	54.0	EAGT	CDVI	6m
+
+54	60	-	-	TV Channel 2
+60	66	-	-	TV Channel 3
+66	72	-	-	TV Channel 4
+
+76	82	-	-	TV Channel 5
+82	88	-	-	TV Channel 6
 
 144.0	144.1	EAGT	C	2m
 144.1	148.0	EAGT	CDVI	2m
@@ -194,10 +201,59 @@
 
 163.275	b.025	-	-	Marine 113B/WX10
 
+174	180	-	-	TV Channel 7
+180	186	-	-	TV Channel 8
+186	192	-	-	TV Channel 9
+192	198	-	-	TV Channel 10
+198	204	-	-	TV Channel 11
+204	210	-	-	TV Channel 12
+210	216	-	-	TV Channel 13
+
+
 219	220	EAGT	D	1.25m
 222	225	EAGTN	CDVI	1.25m
 
 420	450	EAGT	CDVI	70cm
+
+470	476	-	-	TV Channel 14
+476	482	-	-	TV Channel 15
+482	488	-	-	TV Channel 16
+488	494	-	-	TV Channel 17
+494	500	-	-	TV Channel 18
+500	506	-	-	TV Channel 19
+506	512	-	-	TV Channel 20
+512	518	-	-	TV Channel 21
+518	524	-	-	TV Channel 22
+524	530	-	-	TV Channel 23
+530	536	-	-	TV Channel 24
+536	542	-	-	TV Channel 25
+542	548	-	-	TV Channel 26
+548	554	-	-	TV Channel 27
+554	560	-	-	TV Channel 28
+560	566	-	-	TV Channel 29
+566	572	-	-	TV Channel 30
+572	578	-	-	TV Channel 31
+578	584	-	-	TV Channel 32
+584	590	-	-	TV Channel 33
+590	596	-	-	TV Channel 34
+596	602	-	-	TV Channel 35
+602	608	-	-	TV Channel 36
+608	614	-	-	TV Channel 37 (radio astronomy)
+614	620	-	-	TV Channel 38
+620	626	-	-	TV Channel 39
+626	632	-	-	TV Channel 40
+632	638	-	-	TV Channel 41
+638	644	-	-	TV Channel 42
+644	650	-	-	TV Channel 43
+650	656	-	-	TV Channel 44
+656	662	-	-	TV Channel 45
+662	668	-	-	TV Channel 46
+668	674	-	-	TV Channel 47
+674	680	-	-	TV Channel 48
+680	686	-	-	TV Channel 49
+686	692	-	-	TV Channel 50
+692	698	-	-	TV Channel 51
+
 
 902	928	EAGT	CDVI	33cm
 
