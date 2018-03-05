@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.109 2018/02/16 01:29:41 karn Exp karn $
+// $Id: display.c,v 1.110 2018/02/26 22:50:47 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -1015,7 +1015,9 @@ void *display(void *arg){
     my = mouse_event.y;
     mouse_event.y = mouse_event.x = mouse_event.z = 0;
     if(mx != 0 && my != 0){
+#if 0
       wprintw(debug," (%d %d)",mx,my);
+#endif
       if(wmouse_trafo(tuning,&my,&mx,false)){
 	// Tuning window
 	demod->tuneitem = my-1;
