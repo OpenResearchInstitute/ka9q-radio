@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.34 2018/02/28 09:29:24 karn Exp karn $
+// $Id: monitor.c,v 1.35 2018/03/01 19:09:58 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -87,7 +87,7 @@ struct audio {
 void closedown(int);
 void display();
 struct audio *lookup_session(const struct sockaddr *,uint32_t);
-struct audio *make_session(struct sockaddr const *r,uint32_t,uint16_t,uint32_t);
+struct audio *create_session(struct sockaddr const *,uint32_t);
 int close_session(struct audio *);
 static int pa_callback(const void *,void *,unsigned long,const PaStreamCallbackTimeInfo*,PaStreamCallbackFlags,void *);
 int write_is_ahead(int write_ptr,int read_ptr);
@@ -299,7 +299,7 @@ int main(int argc,char * const argv[]){
     struct audio *sp = lookup_session(&sender,rtp.ssrc);
     if(sp == NULL){
       // Not found
-      if((sp = make_session(&sender,rtp.ssrc,rtp.seq,rtp.timestamp)) == NULL){
+      if((sp = create_session(&sender,rtp.ssrc)) == NULL){
 	fprintf(stderr,"No room!!\n");
 	continue;
       }
@@ -307,6 +307,9 @@ int main(int argc,char * const argv[]){
 		  //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
       sp->write_ptr = Read_ptr;
+      sp->etime = rtp.timestamp;
+      sp->eseq = rtp.seq;
+
       sp->gain = 1; // 0 dB by default
       sp->dupes = 0;
     }
@@ -493,37 +496,39 @@ void display(){
     mvwprintw(Mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
     wnoutrefresh(Mainscr);
     doupdate();
-    int c = getch();
-    switch(c){
-    case EOF:
-      break;
-    case KEY_NPAGE:
-    case '\t':
-      if(Current->next != NULL)
-	Current = Current->next;
-      else if(Audio != NULL)
-	Current = Audio; // Wrap around to top
-      break;
-    case KEY_BTAB:
-    case KEY_PPAGE:
-      if(Current->prev != NULL)
-	Current = Current->prev;
-      break;
-    case KEY_UP:
-      Current->gain *= 1.122018454; // 1 dB
-      break;
-    case KEY_DOWN:
-      Current->gain /= 1.122018454; // 1 dB
-      break;
-    case 'd':
-      if(Current != NULL){
-	struct audio *next = Current->next;
-	close_session(Current);
-	Current = next;
+    if(Current != NULL){ // process commands only if there's something to act on
+      int c = getch();
+      switch(c){
+      case EOF:
+	break;
+      case KEY_NPAGE:
+      case '\t':
+	if(Current->next != NULL)
+	  Current = Current->next;
+	else if(Audio != NULL)
+	  Current = Audio; // Wrap around to top
+	break;
+      case KEY_BTAB:
+      case KEY_PPAGE:
+	if(Current->prev != NULL)
+	  Current = Current->prev;
+	break;
+      case KEY_UP:
+	Current->gain *= 1.122018454; // 1 dB
+	break;
+      case KEY_DOWN:
+	Current->gain /= 1.122018454; // 1 dB
+	break;
+      case 'd':
+	{
+	  struct audio *next = Current->next;
+	  close_session(Current);
+	  Current = next;
+	}
+	break;
+      default:
+	break;
       }
-      break;
-    default:
-      break;
     }
 }
 
@@ -550,7 +555,7 @@ struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   return NULL;
 }
 // Create a new session, partly initialize
-struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t seq,uint32_t timestamp){
+struct audio *create_session(struct sockaddr const *sender,uint32_t ssrc){
   struct audio *sp;
 
   if((sp = calloc(1,sizeof(*sp))) == NULL)
@@ -559,9 +564,6 @@ struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t 
   // Initialize entry
   memcpy(&sp->sender,sender,sizeof(struct sockaddr));
   sp->ssrc = ssrc;
-  sp->eseq = seq;
-  sp->etime = timestamp;
-
   // Put at head of bucket chain
   sp->next = Audio;
   if(sp->next != NULL)
