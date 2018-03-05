@@ -12,7 +12,8 @@
 #include "bandplan.h"
 
 char Bandplan_file[] = "bandplan.txt";
-struct bandplan Bandplans[100];
+#define MAX_BANDPLANS 1000
+struct bandplan Bandplans[MAX_BANDPLANS];
 int Nbandplans;
 
 
@@ -56,17 +57,23 @@ int init_bandplan(){
   char line[160];
   memset(line,0,sizeof(line));
   int i=0;
-  while(fgets(line,sizeof(line),fp) != NULL){
+  for(i=0; i < MAX_BANDPLANS && fgets(line,sizeof(line),fp) != NULL;){
     if(line[0] == ';' || line[0] == '#')
       continue;
     char classes[160];
     char modes[160];
-    char name[160];
     double lower,upper;
-    int r = sscanf(line,"%lf %lf %160s %160s %160s",&lower,&upper,classes,modes,name);
-	   
-    if(r < 5)
-      continue;
+    int nchar = 0;
+    int r = sscanf(line,"%lf %lf %160s %160s %n",&lower,&upper,classes,modes,&nchar);
+    if(r < 4){
+      double center,bw;
+      r = sscanf(line,"%lf b%lf %160s %160s %n",&center,&bw,classes,modes,&nchar);      
+      if(r < 4)
+	continue;
+      lower = center - bw/2;
+      upper = center + bw/2;
+    }
+    printf("lower %lf upper %lf\n",lower,upper);
 
     memset(&Bandplans[i],0,sizeof(struct bandplan));
     Bandplans[i].lower = lower;
@@ -112,7 +119,7 @@ int init_bandplan(){
 	break;
       }
     }    
-    strlcpy(Bandplans[i].name,name,sizeof(Bandplans[i].name));
+    strlcpy(Bandplans[i].name,line + nchar,sizeof(Bandplans[i].name));
     i++;
   }
 #if 0
