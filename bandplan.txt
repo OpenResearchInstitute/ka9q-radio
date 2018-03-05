@@ -1,4 +1,4 @@
-# $Id: bandplan.txt,v 1.3 2017/08/09 06:48:40 karn Exp karn $
+# $Id: bandplan.txt,v 1.4 2017/09/19 21:58:48 karn Exp karn $
 # Ham bandplans, for frequency checking
 # Note: Novices have special mode and power limits not shown here
 # bot   top     classes modes   name
@@ -77,6 +77,123 @@
 144.0	144.1	EAGT	C	2m
 144.1	148.0	EAGT	CDVI	2m
 
+156.0	b.025	-	-	Marine 0 (ship)	
+156.025 b.025	-	-	Marine 60 (ship)
+156.05	b.025	-	-       Marine 1 (ship)
+156.075	b.025	-	-	Marine 61 (ship non-US)
+156.1	b.025	-	-       Marine 2 (ship)
+156.125 b.025	-	-	Marine 62 (ship)
+156.15	b.025	-	-	Marine 3 (ship non-US)
+156.175 b.025	-	-	Marine 63 (ship non-US)
+156.2	b.025	-	-	Marine 4 (ship)
+156.225 b.025	-	-	Marine 64 (ship non-US)
+156.25	b.025	-	-       Marine 5 (ship)
+156.275	b.025	-	-	Marine 65 (ship)
+156.3	b.025	-       -       Marine 6 (simplex)
+156.325 b.025	-	-	Marine 66 (ship)
+156.35  b.025   -       -       Marine 7 (ship)
+156.375	b.025	-	-	Marine 67 (ship)
+156.4   b.025   -       -       Marine 8 (simplex)
+156.425	b.025	-	-	Marine 68 (ship)
+156.45  b.025   -       -       Marine 9 (simplex)
+156.475	b.025	-	-	Marine 69 (ship)
+156.5   b.025   -       -       Marine 10 (simplex)
+156.525	b.025	-	-	Marine 70 (simplex - Selcal)
+156.55  b.025   -       -       Marine 11 (simplex)
+156.575	b.025	-	-	Marine 71 (simplex)
+156.6   b.025   -       -       Marine 12 (simplex)
+156.625 b.025	-	-	Marine 72 (simplex)
+156.65  b.025   -       -       Marine 13 (simplex)
+156.675	b.025	-	-	Marine 73 (simplex)
+156.7   b.025   -       -       Marine 14 (simplex)
+156.725 b.025	-	-	Marine 74 (simplex)
+156.75  b.025   -       -       Marine 15 (simplex)
+156.775	b.025	-	-	Marine 75 (simplex)
+156.8   b.025   -       -       Marine 16 (simplex calling & distress)
+156.825	b.025	-	-	Marine 76 (simplex)
+156.85  b.025   -       -       Marine 17 (simplex)
+156.875	b.025	-	-	Marine 77 (simplex)
+156.9   b.025   -       -       Marine 18 (ship)
+156.925	b.025	-	-	Marine 78 (ship)
+156.95  b.025   -       -       Marine 19 (ship)
+156.975	b.025	-	-	Marine 79 (ship)
+157.0   b.025   -       -       Marine 20 (ship)
+157.025 b.025	-	-	Marine 80 (ship)
+157.05  b.025   -	-	Marine 21 (ship)
+157.075	b.025	-	-	Marine 81 (ship US govt)
+157.1   b.025   -	-	Marine 22 (ship)
+157.125	b.025	-	-	Marine 82 (ship US govt)
+157.15  b.025 	-	-	Marine 23 (ship USCG)
+157.175	b.025	-	-	Marine 83 (ship USCG)
+157.2   b.025	-	-	Marine 24 (ship)
+157.225	b.025	-	-	Marine 84 (ship)
+157.25  b.025	-	-	Marine 25 (ship)
+157.275	b.025	-	-	Marine 85 (ship)
+157.3   b.025	-	-	Marine 26 (ship)
+157.325	b.025	-	-	Marine 86 (ship)
+157.35  b.025	-	-	Marine 27 (ship)
+157.375	b.025	-	-	Marine 87 (simplex)
+157.4   b.025	-	-	Marine 28 (ship)
+157.425	b.025	-	-	Marine 88 (simplex)
+
+157.55  b.025	-	-	Marine 31 (ship)
+
+157.85  b.025	-	-	Marine M1/37A (simplex)
+
+160.6	b.025	-	-	Marine 0 (land)
+160.625	b.025	-	-	Marine 60 (land)
+160.65	b.025	-	-	Marine 1 (land)
+160.675	b.025	-	-	Marine 61 (land)
+160.7	b.025	-	-	Marine 2 (land)
+160.725	b.025	-	-	Marine 62 (land)
+160.75	b.025	-	-	Marine 3 (land)
+160.775	b.025	-	-	Marine 63 (land)
+160.8	b.025	-	-	Marine 4 (land)
+160.825	b.025	-	-	Marine 64 (land)
+160.85	b.025	-	-	Marine 5 (land)
+160.875	b.025	-	-	Marine 65 (land)
+
+160.925	b.025	-	-	Marine 66 (land)
+160.95	b.025	-	-	Marine 7 (land)
+
+161.425	b.025	-	-	Marine M2/P4 (simplex)
+
+161.5	b.025	-	-	Marine 18 (land)
+161.525	b.025	-	-	Marine 78 (land)
+161.55	b.025	-	-	Marine 19 (land)
+161.575	b.025	-	-	Marine 79 (land)
+161.6	b.025	-	-	Marine 20 (land)
+161.625	b.025	-	-	Marine 80 (land)
+161.65	b.025	-	-	Marine 21/WX8 (land USCG)
+161.675	b.025	-	-	Marine 81 (land)
+161.7	b.025	-	-	Marine 22 (land USCG working)
+161.725	b.025	-	-	Marine 82 (land)
+161.75	b.025	-	-	Marine 23 (land USCG)
+161.775	b.025	-	-	Marine 83/WX9 (land)
+161.8	b.025	-	-	Marine 24 (land)
+161.825	b.025	-	-	Marine 84 (land)
+161.85	b.025	-	-	Marine 25 (land)
+161.875	b.025	-	-	Marine 85 (land)
+161.9	b.025	-	-	Marine 26 (land)
+161.925	b.025	-	-	Marine 86 (land)
+161.95	b.025	-	-	Marine 27 (land)
+161.975	b.025	-	-	Marine 87B (simplex AIS)
+162.0	b.025	-	-	Marine 28 (land)
+162.025	b.025	-	-	Marine 88B (simplex AIS)
+
+162.15	b.025	-	-	Marine 31 (land)
+
+
+162.4	b.025	-	-	Marine 36B/WX2
+162.425	b.025	-	-	Marine 96B/WX4
+162.45  b.025	-	-	Marine 37B/WX5
+162.475 b.025	-	-	Marine 97B/WX3
+162.5	b.025	-	-	Marine 38B/WX6
+162.525	b.025	-	-	Marine 98B/WX7
+162.55	b.025	-	-	Marine 39B/WX1
+
+163.275	b.025	-	-	Marine 113B/WX10
+
 219	220	EAGT	D	1.25m
 222	225	EAGTN	CDVI	1.25m
 
@@ -101,7 +218,5 @@
 134000	141000	EAGT	CDVI	134G
 241000	250000	EAGT	CDVI	241G
 275000	999999	EAGT	CDVI	275G
-
-
 
 
