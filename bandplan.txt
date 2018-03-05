@@ -1,4 +1,4 @@
-# $Id: bandplan.txt,v 1.4 2017/09/19 21:58:48 karn Exp karn $
+# $Id: bandplan.txt,v 1.5 2018/03/05 04:41:04 karn Exp karn $
 # Ham bandplans, for frequency checking
 # Note: Novices have special mode and power limits not shown here
 # bot   top     classes modes   name
@@ -8,7 +8,7 @@
 	
 1.8	2.0	EAG	VCI	160m
 
-2.405	2.505   -       -       WWV  
+2.5     b.010   -       -       WWV 2.5 MHz
 
 3.33	3.335	-	-	CHU
 
@@ -19,13 +19,13 @@
 3.7	3.8	EA	CVI	75m
 3.8	4.0	EAG	CVI	75m
 
-4.905	5.005	-	-	WWV
+5.000	b.010	-	-	WWV 5 MHz
 
-5.3305	5.3335	EAG	CVDI	60m
-5.3465	5.3495	EAG	CVDI	60m
-5.3570	5.3600	EAG	CVDI	60m
-5.3715	5.3745	EAG	CVDI	60m
-5.4035	5.4065	EAG	CVDI	60m
+5.3320  b.003	EAG	CVDI	60m chan 1
+5.3480	b.003	EAG	CVDI	60m chan 2
+5.3585	b.003	EAG	CVDI	60m chan 3
+5.3730	b.003	EAG	CVDI	60m chan 4
+5.4050	b.003	EAG	CVDI	60m chan 5
 
 7.0	7.025	E	CD	40m
 7.025	7.125	EAGTN	CD	40m
@@ -34,7 +34,7 @@
 
 7.850	7.855	-	-	CHU
 
-9.905	10.005	-	-	WWV
+10.0    b.010	-	-	WWV 10 MHz
 
 10.1	10.15	EAG	CD	30m
 
@@ -46,13 +46,13 @@
 
 14.670	14.675	-	-	CHU
 
-14.995	15.005	-	-	WWV
+15.0    b.010	-	-	WWV 15 MHz
 
 
 18.068	18.11	EAG	CD	17m
 18.11	18.168	EAG	CVI	17m
 
-19.995	20.005	-	-	WWV
+20.0    b.010	-	-	WWV 20 MHz
 
 
 21.0	21.025	E	CD	15m
@@ -64,7 +64,7 @@
 24.89	24.93	EAG	CD	12m
 24.93	24.99	EAG	CVI	12m
 
-24.995	25.005	-	-	WWV
+25.0	b.010	-	-	WWV 25 MHz
 
 
 28.0	28.3	EAGTN	CD	10m
