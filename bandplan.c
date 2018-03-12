@@ -73,7 +73,6 @@ int init_bandplan(){
       lower = center - bw/2;
       upper = center + bw/2;
     }
-    printf("lower %lf upper %lf\n",lower,upper);
 
     memset(&Bandplans[i],0,sizeof(struct bandplan));
     Bandplans[i].lower = lower;
