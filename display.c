@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.110 2018/02/26 22:50:47 karn Exp karn $
+// $Id: display.c,v 1.111 2018/03/05 04:35:21 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -277,10 +277,6 @@ double scrape_number(WINDOW *win, int y, int x, double **increment){
   return strtod(buf,NULL);
 }
 
-
-
-
-
 void increment(void){
   int c;
 
@@ -333,7 +329,9 @@ void *display(void *arg){
   pthread_create(&pthread_touch,NULL,touch,demod);   // Disable for now
 #endif
 
+#if FUNCTIONKEYS
   slk_init(3);
+#endif
   // talk directly to the terminal
   Tty = fopen("/dev/tty","r+");
   Term = newterm(NULL,Tty,Tty);
@@ -370,13 +368,13 @@ void *display(void *arg){
   WINDOW * const network = newwin(8,78,row,col); // Network status information
   col = 0;
   row += 8;
-  WINDOW * const debug = newwin(8,78,row,col);
+  WINDOW * const debug = newwin(8,78,row,col); // Note: overlaps function keys
   scrollok(debug,1);
 
   // A message from our sponsor...
   wprintw(debug,"KA9Q SDR Receiver v1.0; Copyright 2017 Phil Karn\n");
   wprintw(debug,"Compiled on %s at %s\n",__DATE__,__TIME__);
-  wnoutrefresh(debug);
+
 
   struct sockaddr old_input_source_address;
   char source[NI_MAXHOST];
@@ -442,7 +440,7 @@ void *display(void *arg){
 
     box(tuning,0,0);
     mvwaddstr(tuning,0,15,"Tuning");
-    wnoutrefresh(tuning);
+
 
     // Display ham band emission data, if available
     // Lines are variable length, so clear window before starting
@@ -496,7 +494,7 @@ void *display(void *arg){
 
     box(info,0,0);
     mvwaddstr(info,0,17,"Info");
-    wnoutrefresh(info);
+
 
     int const N = demod->L + demod->M - 1;
     // Filter window values
@@ -525,7 +523,7 @@ void *display(void *arg){
 
     box(filtering,0,0);
     mvwaddstr(filtering,0,6,"Filtering");
-    wnoutrefresh(filtering);
+
 
     // Signal data window
     float bw = 0;
@@ -551,7 +549,7 @@ void *display(void *arg){
     mvwaddstr(sig,row++,col,"SNR");
     box(sig,0,0);
     mvwaddstr(sig,0,9,"Signal");
-    wnoutrefresh(sig);
+
 
     // Demodulator info
     wmove(demodulator,0,0);
@@ -590,7 +588,7 @@ void *display(void *arg){
     }
     box(demodulator,0,0);
     mvwprintw(demodulator,0,5,"%s demodulator",demod->demod_name);
-    wnoutrefresh(demodulator);
+
 
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 1;
@@ -617,7 +615,7 @@ void *display(void *arg){
     mvwaddstr(sdr,row++,col,"IF gain");
     box(sdr,0,0);
     mvwaddstr(sdr,0,6,"SDR Hardware");
-    wnoutrefresh(sdr);
+
 
     // Demodulator options, can be set with mouse
     row = 1;
@@ -654,7 +652,7 @@ void *display(void *arg){
     
     box(options,0,0);
     mvwaddstr(options,0,2,"Options");
-    wnoutrefresh(options);
+
 
     // Display list of modes, underlining the active one
     // Can be selected with mouse
@@ -667,7 +665,7 @@ void *display(void *arg){
     }
     box(modes,0,0);
     mvwaddstr(modes,0,1,"Modes");
-    wnoutrefresh(modes);
+
 
     // Network status window
     if(memcmp(&old_input_source_address,&demod->input_source_address,sizeof(old_input_source_address)) != 0){
@@ -694,10 +692,10 @@ void *display(void *arg){
 
     box(network,0,0);
     mvwaddstr(network,0,35,"I/O");
-    wnoutrefresh(network);
+
 
     touchwin(debug); // since we're not redrawing it every cycle
-    wnoutrefresh(debug);
+
   
     // Highlight cursor for tuning step
     // A little messy because of the commas in the frequencies
@@ -718,7 +716,7 @@ void *display(void *arg){
     case 3:
       mod_y = demod->tuneitem + 1;
       mod_x = 24 + hcol; // units in column 24
-      wmouse_trafo(tuning,&mod_y,&mod_x,TRUE);
+      mvwchgat(tuning,mod_y,mod_x,1,A_STANDOUT,0,NULL);
       break;
     case 4:
     case 5:
@@ -726,12 +724,23 @@ void *display(void *arg){
     case 7:
       mod_y = demod->tuneitem - 3;
       mod_x = 13 + hcol; // units in column 13
-      wmouse_trafo(filtering,&mod_y,&mod_x,TRUE);
+      mvwchgat(filtering,mod_y,mod_x,1,A_STANDOUT,0,NULL);
       break;
     default:
       ;
       break;
     }
+    wnoutrefresh(tuning);
+    wnoutrefresh(debug);
+    wnoutrefresh(info);
+    wnoutrefresh(filtering);
+    wnoutrefresh(sig);
+    wnoutrefresh(demodulator);
+    wnoutrefresh(sdr);
+    wnoutrefresh(options);
+    wnoutrefresh(modes);
+    wnoutrefresh(network);
+#if FUNCTIONKEYS
     // Write function key labels for current mode
     slk_set(1,"FM",1);
     slk_set(2,"AM",1);
@@ -744,15 +753,16 @@ void *display(void *arg){
     slk_set(9,"ISB",1);
     slk_set(11,"STEREO",1);
     slk_set(12,"MONO",1);
-    slk_noutrefresh();
 
-    move(mod_y,mod_x);
+    slk_noutrefresh(); // Do this after debug refresh since debug can overlap us
+#endif
     doupdate();      // Right before we pause
     
     // Scan and process keyboard commands
     int c = getch(); // read keyboard with timeout; controls refresh rate
 
     switch(c){
+#if FUNCTIONKEYS
     case KEY_F(1):
       set_mode(demod,"FM",1);
       break;
@@ -792,6 +802,7 @@ void *display(void *arg){
     case KEY_F(12):
       demod->flags |= MONO;
       break;
+#endif
     case KEY_MOUSE: // Mouse event
       getmouse(&mouse_event);
       break;
