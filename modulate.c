@@ -1,4 +1,4 @@
-// $Id: modulate.c,v 1.7 2017/10/20 22:32:19 karn Exp karn $ AM modulator - will eventually support other modes
+// $Id: modulate.c,v 1.8 2018/02/06 11:46:44 karn Exp karn $ AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
 #include <stdio.h>
 #include <unistd.h>
@@ -33,15 +33,14 @@ int main(int argc,char *argv[]){
   // The sooner we do this, the fewer options there are for abuse
   seteuid(getuid());
 
-
-  int c;
-
   // Set defaults
   double frequency = 48000;
   double amplitude = -20;
   double sweep = 0;
 
-  while((c = getopt(argc,argv,"f:a:s:r:v")) != EOF){
+  char *modtype = "am";
+  int c;
+  while((c = getopt(argc,argv,"f:a:s:r:vm:")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
@@ -58,12 +57,45 @@ int main(int argc,char *argv[]){
     case 's':
       sweep = strtod(optarg,NULL); // sweep rate, Hz/sec
       break;
+    case 'm':
+      modtype = optarg;
+      break;
     }
   }
-  if(Verbose){
-    fprintf(stderr,"AM modulation on %.1f Hz IF, swept %.1f Hz/s, amplitude %5.1f dBFS, filter blocksize %'d\n",
-	    frequency,sweep,amplitude,BLOCKSIZE);
+  float low;
+  float high;
+  float carrier;
+
+  if(strcasecmp(modtype,"am") == 0){
+    carrier = 1;
+    high = +5000;
+    low = -5000;
+  } else if(strcasecmp(modtype,"usb") == 0){
+    carrier = 0;
+    high = +3000;
+    low = 0;
+  } else if(strcasecmp(modtype,"lsb") == 0){
+    carrier = 0;
+    high = 0;
+    low = -3000;
+  } else if(strcasecmp(modtype,"ame") == 0){
+    // AM enhanced: upper sideband + carrier (as in CHU)
+    carrier = 1;
+    high = +3000;
+    low = 0;
+  } else {
+    fprintf(stderr,"Unknown modulation %s\n",modtype);
+    exit(1);
   }
+  if(Verbose){
+    fprintf(stderr,"%s modulation on %.1f Hz IF, swept %.1f Hz/s, amplitude %5.1f dBFS, filter blocksize %'d\n",
+	    modtype,frequency,sweep,amplitude,BLOCKSIZE);
+  }
+  if(-frequency > low && -frequency < high){
+    fprintf(stderr,"Warning: low carrier frequency may interfere with receiver DC suppression\n");
+  }
+
+
 
   frequency *= 2*M_PI/Samprate;       // radians/sample
   amplitude = pow(10.,amplitude/20.); // Convert to amplitude ratio
@@ -77,6 +109,7 @@ int main(int argc,char *argv[]){
   int const N = L + M - 1;
 
   complex float * const response = fftwf_alloc_complex(N);
+  memset(response,0,N*sizeof(response[0]));
   {
     float gain = 4./N; // Compensate for FFT/IFFT scaling and 4x upsampling
     for(int i=0;i<N;i++){
@@ -84,8 +117,10 @@ int main(int argc,char *argv[]){
       f = Samprate * ((float)i/N);
       if(f > Samprate/2)
 	f -= Samprate;
-      if(f >= -8000 && f <= +8000)
+      if(f >= low && f <= high)
 	response[i] = gain;
+      else
+	response[i] = 0;
     }
   }
   window_filter(L,M,response,3.0);
@@ -108,10 +143,11 @@ int main(int argc,char *argv[]){
     execute_filter_input(filter_in);
     execute_filter_output(filter_out);
     
-    // Add AM carrier
-    for(int i=0;i<L;i++)
-      filter_out->output.c[i] += 1;
-
+    // Add carrier, if present
+    if(carrier != 0){
+      for(int i=0;i<L;i++)
+	filter_out->output.c[i] += carrier;
+    }
     // Spin up to chosen carrier frequency
     for(int i=0;i<L;i++){
       filter_out->output.c[i] *= phase * amplitude;
