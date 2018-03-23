@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.35 2018/03/01 19:09:58 karn Exp karn $
+// $Id: monitor.c,v 1.36 2018/03/05 04:36:06 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -26,7 +26,7 @@
 #include "multicast.h"
 
 // Global config variables
-char *Mcast_address_text = "audio-opus-mcast.local";     // Multicast address we're listening to
+char *Mcast_address_text[10]; // Multicast address(es) we're listening to
 char Audiodev[256];           // Name of audio device; empty means portaudio's default
 const int Slop = 480;         // Playout delay in samples to add after an underrun
 #define Aud_bufsize (1<<18)   // make this a power of 2 for efficiency
@@ -35,10 +35,13 @@ const int Samprate = 48000;   // Too hard to handle other sample rates right now
 int List_audio;               // List audio output devices and exit
 int Verbose;                  // Verbosity flag (currently unused)
 int Update_interval = 100;    // Time in ms between display updates
-int Age_limit = 100;          // Delete after 10 sec
+int Age_limit = 1000;          // Delete after 100 sec
 int Highlight_limit = 10;     // Dim after 1 second
+#define NCHAN 2               // 2 channels (stereo)
 
-int Input_fd = -1;            // Multicast receive socket
+
+
+int Nfds;                    // Number of streams
 struct audio *Audio;          // Link to head of session structure chain
 PaStream *Pa_Stream;          // Portaudio stream handle
 int inDevNum;                 // Portaudio's audio output device index
@@ -46,23 +49,37 @@ int inDevNum;                 // Portaudio's audio output device index
 // The portaudio callback continuously plays out this single buffer, into which multiple streams sum their audio
 // and the callback zeroes out each sample as played
 float Audio_buffer[Aud_bufsize]; // Audio playout buffer
-volatile int Read_ptr;           // read_pointer, modified in callback (hence volatile)
 float const SCALE = 1./SHRT_MAX;
 WINDOW *Mainscr;
-struct audio *Current = NULL;
+
+pthread_cond_t Upcall_cond;
+pthread_mutex_t Upcall_mutex;
+pthread_mutex_t Buffer_mutex;
+
+
+struct queue {
+  struct queue *next;
+  struct rtp_header rtp;
+  unsigned char *data;
+  int len;
+};
+
 
 
 struct audio {
   struct audio *prev;       // Linked list pointers
   struct audio *next; 
   uint32_t ssrc;            // RTP Sending Source ID
-  int eseq;                 // Next expected RTP sequence number
+  uint16_t eseq;                 // Next expected RTP sequence number
   int etime;                // Next expected RTP timestamp
   int type;                 // RTP type (10,11,20)
   
+  struct queue *queue;
+
   float gain;               // Gain for this channel; 1 -> 0 db (nominal)
 
   struct sockaddr sender;
+  char *dest;
   char addr[NI_MAXHOST];    // RTP Sender IP address
   char port[NI_MAXSERV];    // RTP Sender source port
   OpusDecoder *opus;        // Opus codec decoder handle, if needed
@@ -70,8 +87,10 @@ struct audio {
   int channels;             // Channels (1 or 2)
   int opus_bandwidth;       // Opus stream audio bandwidth
 
-  int write_ptr;   // Playout buffer write pointer
-  PaTime last_write_time;
+  pthread_t task;
+  pthread_mutex_t qmutex;
+
+
 
   unsigned long packets;    // RTP packets for this session
   unsigned long drops;      // Apparent rtp packet drops
@@ -82,7 +101,7 @@ struct audio {
   unsigned long underruns;  // Callback count of underruns (stereo samples) replaced with silence
   int hw_delay;             // Estimated playout delay in samples
 };
-
+struct audio *Current = NULL;
 
 void closedown(int);
 void display();
@@ -90,8 +109,8 @@ struct audio *lookup_session(const struct sockaddr *,uint32_t);
 struct audio *create_session(struct sockaddr const *,uint32_t);
 int close_session(struct audio *);
 static int pa_callback(const void *,void *,unsigned long,const PaStreamCallbackTimeInfo*,PaStreamCallbackFlags,void *);
-int write_is_ahead(int write_ptr,int read_ptr);
 
+void *opus_task(void *x);
 
 
 int main(int argc,char * const argv[]){
@@ -117,7 +136,7 @@ int main(int argc,char * const argv[]){
       Verbose++;
       break;
     case 'I':
-      Mcast_address_text = optarg;
+      Mcast_address_text[Nfds++] = optarg;
       break;
     case 'E':
       Highlight_limit = strtol(optarg,NULL,0);
@@ -127,10 +146,19 @@ int main(int argc,char * const argv[]){
       break;
     default:
       fprintf(stderr,"Usage: %s [-v] [-I mcast_address]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -I %s\n",argv[0],Mcast_address_text);
       exit(1);
     }
   }
+  if(Nfds == 0){
+    fprintf(stderr,"At least one -I option required\n");
+    exit(1);
+  }
+
+
+  pthread_cond_init(&Upcall_cond,NULL);
+  pthread_mutex_init(&Upcall_mutex,NULL);
+  pthread_mutex_init(&Buffer_mutex,NULL);
+
 
   PaError r = Pa_Initialize();
   if(r != paNoError){
@@ -166,12 +194,6 @@ int main(int argc,char * const argv[]){
     fprintf(stderr,"Portaudio: no available devices\n");
     return -1;
   }
-  // Set up multicast input
-  Input_fd = setup_mcast(Mcast_address_text,0);
-  if(Input_fd == -1){
-    fprintf(stderr,"Can't set up input\n");
-    exit(1);
-  }
   struct iovec iovec[2];
   struct rtp_header rtp;
   //  int16_t data[Bufsize];
@@ -192,26 +214,40 @@ int main(int argc,char * const argv[]){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
-  // Temporarily put socket in nonblocking state
-  // and flush any pending packets to avoid unnecessary long buffer delays
-  int flags;
-  if((flags = fcntl(Input_fd,F_GETFL)) != -1){
-    flags |= O_NONBLOCK;
-    if(fcntl(Input_fd,F_SETFL,flags) == 0){
-      int flushed = 0;
-      while(recvmsg(Input_fd,&message,0) >= 0)
-	flushed++;
-      flags &= ~O_NONBLOCK;
-      fcntl(Input_fd,F_SETFL,flags);
+  // Set up multicast input
+  fd_set fdset_template; // Mask for select()
+  FD_ZERO(&fdset_template);
+  int max_fd = 2;        // Highest number fd for select()
+  int input_fd[Nfds];    // Multicast receive sockets
+
+  for(int i=0;i<Nfds;i++){
+    input_fd[i] = setup_mcast(Mcast_address_text[i],0);
+    if(input_fd[i] == -1){
+      fprintf(stderr,"Can't set up input %s\n",Mcast_address_text[i]);
+    }
+    if(input_fd[i] > max_fd)
+      max_fd = input_fd[i];
+    FD_SET(input_fd[i],&fdset_template);
+    // Temporarily put socket in nonblocking state
+    // and flush any pending packets to avoid unnecessary long buffer delays
+    int flags;
+    if((flags = fcntl(input_fd[i],F_GETFL)) != -1){
+      flags |= O_NONBLOCK;
+      if(fcntl(input_fd[i],F_SETFL,flags) == 0){
+	int flushed = 0;
+	while(recvmsg(input_fd[i],&message,0) >= 0)
+	  flushed++;
+	flags &= ~O_NONBLOCK;
+	fcntl(input_fd[i],F_SETFL,flags);
+      }
     }
   }
-
   // Create and start portaudio stream.
   // Runs continuously, playing silence until audio arrives.
   // This allows multiple streams to be played on hosts that only support one
   PaStreamParameters outputParameters;
   memset(&outputParameters,0,sizeof(outputParameters));
-  outputParameters.channelCount = 2;
+  outputParameters.channelCount = NCHAN;
   outputParameters.device = inDevNum;
   outputParameters.sampleFormat = paFloat32;
   outputParameters.suggestedLatency = 0.010; // 0 doesn't seem to be a good value on OSX, lots of underruns and stutters
@@ -225,11 +261,7 @@ int main(int argc,char * const argv[]){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
     exit(1);
   }
-  r = Pa_StartStream(Pa_Stream);
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
-    exit(1);
-  }
+
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -250,6 +282,14 @@ int main(int argc,char * const argv[]){
   struct timeval last_update_time;
   gettimeofday(&last_update_time,NULL);
 
+  // Do this last since the upcall will come quickly
+  r = Pa_StartStream(Pa_Stream);
+  if(r != paNoError){
+    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
+    exit(1);
+  }
+
+
   while(1){
     struct timeval tp;
     
@@ -265,149 +305,100 @@ int main(int argc,char * const argv[]){
     timeout.tv_usec = 1000 * Update_interval;
 
     fd_set fdset;
-    FD_ZERO(&fdset);
-    FD_SET(Input_fd,&fdset);
-    int s = select(Input_fd+1,&fdset,NULL,NULL,&timeout);
+    fdset = fdset_template;
+    //    FD_COPY(&fdset_template,&fdset); // not on Linux; simple assign seems to work
+    int s = select(max_fd+1,&fdset,NULL,NULL,&timeout);
     if(s < 0 && errno != EAGAIN && errno != EINTR)
       break;
-    if(s == 0){
-      continue;
-    }
-    if(!FD_ISSET(Input_fd,&fdset))
+    if(s == 0)
       continue;
 
-    int size = recvmsg(Input_fd,&message,0);
-    if(size == -1){
-      if(errno != EINTR){ // Happens routinely
-	perror("recvmsg");
-	usleep(1000);
-      }
+    for(int fd_index = 0;fd_index < Nfds;fd_index++){
+      if(!FD_ISSET(input_fd[fd_index],&fdset))
       continue;
-    }
-    if(size < sizeof(rtp)){
-      usleep(500); // Avoid tight loop
-      continue; // Too small to be valid RTP
-    }
-    // To host order
-    rtp.ssrc = ntohl(rtp.ssrc);
-    rtp.seq = ntohs(rtp.seq);
-    rtp.timestamp = ntohl(rtp.timestamp);
 
-    if(rtp.mpt != 10 && rtp.mpt != 20 && rtp.mpt != 11) // 1 byte, no need to byte swap
-      continue; // Discard unknown RTP types to avoid polluting session table
-
-    struct audio *sp = lookup_session(&sender,rtp.ssrc);
-    if(sp == NULL){
-      // Not found
-      if((sp = create_session(&sender,rtp.ssrc)) == NULL){
-	fprintf(stderr,"No room!!\n");
+      int size = recvmsg(input_fd[fd_index],&message,0);
+      if(size == -1){
+	if(errno != EINTR){ // Happens routinely
+	  perror("recvmsg");
+	  usleep(1000);
+	}
 	continue;
       }
-      getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
-		  //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
+      if(size < sizeof(rtp)){
+	usleep(500); // Avoid tight loop
+	continue; // Too small to be valid RTP
+      }
+      // To host order
+      rtp.ssrc = ntohl(rtp.ssrc);
+      rtp.seq = ntohs(rtp.seq);
+      rtp.timestamp = ntohl(rtp.timestamp);
+      size -= sizeof(rtp); // Bytes in payload
+      
+      if(rtp.mpt != 10 && rtp.mpt != 20 && rtp.mpt != 11) // 1 byte, no need to byte swap
+	continue; // Discard unknown RTP types to avoid polluting session table
+      
+      struct audio *sp = lookup_session(&sender,rtp.ssrc);
+      if(sp == NULL){
+	// Not found
+	if((sp = create_session(&sender,rtp.ssrc)) == NULL){
+	  fprintf(stderr,"No room!!\n");
+	  continue;
+	}
+	getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
+		    //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
-      sp->write_ptr = Read_ptr;
-      sp->etime = rtp.timestamp;
-      sp->eseq = rtp.seq;
-
-      sp->gain = 1; // 0 dB by default
-      sp->dupes = 0;
-    }
-    sp->age = 0;
-    int drop = 0;
-
-    sp->packets++;
-    if(rtp.seq != sp->eseq){
-      int const diff = (int)(rtp.seq - sp->eseq);
-      //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
-      if(diff < 0 && diff > -10){
-	sp->dupes++;
-	continue;	// Drop probable duplicate
+	sp->dest = Mcast_address_text[fd_index];
+	sp->etime = rtp.timestamp;
+	sp->eseq = rtp.seq;
+	
+	sp->gain = 1; // 0 dB by default
+	sp->dupes = 0;
+	pthread_mutex_init(&sp->qmutex,NULL);
+	pthread_create(&sp->task,NULL,opus_task,sp);
       }
-      drop = diff; // Apparent # packets dropped
-      sp->drops += abs(drop);
-    }
-    sp->eseq = (rtp.seq + 1) & 0xffff;
-
-    sp->type = rtp.mpt;
-    size -= sizeof(rtp); // Bytes in payload
-    if(size <= 0){
-      sp->empties++;
-      continue; // empty?!
-    }
-    int samples = 0;
-
-    switch(rtp.mpt){
-    case 10: // Stereo
-      sp->channels = 2;
-      samples = size / 4;  // # 32-bit word samples
-      if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
-	// Past deadline, skip forward
-	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
-	sp->underruns++;
-      }
-      for(int i=0;i<2*samples;i++){
-	Audio_buffer[sp->write_ptr++] += sp->gain * SCALE * (signed short)ntohs(data[i]); // RTP profile specifies big-endian samples; back to floating point
-	sp->write_ptr %= Aud_bufsize;
-      }
-      sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
-      sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
-      break;
-    case 11: // Mono; send to both stereo channels
-      sp->channels = 1;
-      samples = size / 2;
-      if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
-	// Past deadline, skip forward
-	sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
-	sp->underruns++;
-      }
-      for(int i=0;i<samples;i++){
-	Audio_buffer[sp->write_ptr++] += sp->gain * SCALE * (signed short)ntohs(data[i]); // Back to floating point range -1 to +1
-	Audio_buffer[sp->write_ptr++] += sp->gain * SCALE * (signed short)ntohs(data[i]);
-	sp->write_ptr %= Aud_bufsize;
-      }
-      sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
-      sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
-      break;
-    case 20: // Opus codec decode - arbitrary choice
-      if(sp->opus == NULL){ // Create if it doesn't already exist
-	int error;
-	sp->opus = opus_decoder_create(Samprate,2,&error);
-	if(sp->opus == NULL)
-	  fprintf(stderr,"Opus decoder error %d\n",error);
+      sp->age = 0;
+      sp->packets++;
+      sp->type = rtp.mpt;
+      switch(rtp.mpt){
+      case 10:
+	sp->channels = 2;
+	break;
+      case 11:
+	sp->channels = 1;
+	break;
+      case 20:
+	sp->channels = opus_packet_get_nb_channels((unsigned char *)data);
+	sp->opus_bandwidth = opus_packet_get_bandwidth((unsigned char *)data);
+	sp->opus_frame_size = opus_packet_get_nb_samples((unsigned char *)data,size,Samprate);
 	break;
       }
-      sp->channels = opus_packet_get_nb_channels((unsigned char *)data);
-      sp->opus_bandwidth = opus_packet_get_bandwidth((unsigned char *)data);
-      int nb_frames = opus_packet_get_nb_frames((unsigned char *)data,size);
-      sp->opus_frame_size = nb_frames * opus_packet_get_samples_per_frame((unsigned char *)data,Samprate);
-      {
-	float outsamps[2*Bufsize];
-	if(drop != 0){
-	  // previous packet(s) dropped; have codec tell us how much silence to emit
-	  drop = opus_decode_float(sp->opus,NULL,rtp.timestamp - sp->etime,outsamps,Bufsize,0);
-	  sp->write_ptr += (2 * drop);
-	  sp->write_ptr %= Aud_bufsize;
-	}
-	samples = opus_decode_float(sp->opus,(unsigned char *)data,size,outsamps,Bufsize,0);
-	if(Pa_GetStreamTime(Pa_Stream) > sp->last_write_time + 0.5 || !write_is_ahead(sp->write_ptr,Read_ptr)){
-	  // Past deadline, skip forward
-	  sp->underruns++;
-	  sp->write_ptr = (Read_ptr + Slop) % Aud_bufsize;
-	}
-	for(int i=0; i < 2*samples; i++){
-	  Audio_buffer[sp->write_ptr++] += sp->gain * outsamps[i];
-	  sp->write_ptr %= Aud_bufsize;
-	}
-	sp->hw_delay = (sp->write_ptr - Read_ptr + Aud_bufsize) % Aud_bufsize;
-	sp->last_write_time = Pa_GetStreamTime(Pa_Stream);
+      if((signed short)(rtp.seq - sp->eseq) < 0){
+	sp->dupes++;
+	continue;      // Discard old duplicate
       }
-      break;
-    default:
-      samples = 0;
-      break; // ignore
-    }
-    sp->etime = rtp.timestamp + samples;
+      struct queue *qentry = calloc(1,sizeof(*qentry));
+      qentry->rtp = rtp;
+      qentry->data = malloc(size);
+      memcpy(qentry->data,data,size);
+      qentry->len = size;
+      
+      // Sort onto list
+      struct queue *q_prev = NULL;
+      struct queue *qp = NULL;
+      pthread_mutex_lock(&sp->qmutex);
+      
+      for(qp = sp->queue;qp != NULL; q_prev = qp,qp = qp->next){
+	if(rtp.seq < qp->rtp.seq)
+	  break;
+      }
+      qentry->next = qp;
+      if(q_prev != NULL)
+	q_prev->next = qentry;
+      else
+	sp->queue = qentry; // Front of list
+      pthread_mutex_unlock(&sp->qmutex);
+    }      
   }
   echo();
   nocbreak();
@@ -421,7 +412,7 @@ void display(){
     int row = 1;
     wmove(Mainscr,row,0);
     wclrtobot(Mainscr);
-    mvwprintw(Mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops Underruns  Delay Source");
+    mvwprintw(Mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops Underruns  Queue Source                Dest");
     // Age out idle sessions
     struct audio *nextsp; // Save in case we close the current one
     for(struct audio *sp = Audio; sp != NULL; sp = nextsp){
@@ -477,12 +468,28 @@ void display(){
       wclrtoeol(Mainscr);
       if(sp->age < Highlight_limit)
 	wattr_on(Mainscr,A_BOLD,NULL); // Embolden active streams
-      mvwprintw(Mainscr,row,0,"%-15s%2d%3d%+7.0lf%10x%'12lu%7lu%7lu%'10lu%7.3lf %s:%s",
-		type,sp->channels,bw,
+
+      int qlen = 0;
+      pthread_mutex_lock(&sp->qmutex);
+      for(struct queue *qp = sp->queue; qp != NULL; qp = qp->next)
+	qlen++;
+      pthread_mutex_unlock(&sp->qmutex);
+
+      char source_text[256];
+      snprintf(source_text,sizeof(source_text),"%s:%s",sp->addr,sp->port);
+      mvwprintw(Mainscr,row,0,"%-15s%2d%3d%+7.0lf%10x%'12lu%7lu%7lu%'10lu%7d %-22s%-16s",
+		type,
+		sp->channels,
+		bw,
 		20*log10(sp->gain),
 		sp->ssrc,
-		sp->packets,sp->dupes,sp->drops,sp->underruns,
-		(double)0.5*sp->hw_delay/Samprate,sp->addr,sp->port);
+		sp->packets,
+		sp->dupes,
+		sp->drops,
+		sp->underruns,
+		qlen,
+		source_text,
+		sp->dest);
       wattr_off(Mainscr,A_BOLD,NULL);
       if(Current == NULL)
 	Current = sp;
@@ -493,7 +500,10 @@ void display(){
     }
     move(row,1);
     clrtobot();
-    mvwprintw(Mainscr,0,15,"KA9Q Multicast Audio Monitor - %s",Mcast_address_text);
+    mvwprintw(Mainscr,0,0,"KA9Q Multicast Audio Monitor:");
+    for(int i=0;i<Nfds;i++)
+      wprintw(Mainscr," %s",Mcast_address_text[i]);
+    wprintw(Mainscr,"\n");
     wnoutrefresh(Mainscr);
     doupdate();
     if(Current != NULL){ // process commands only if there's something to act on
@@ -539,6 +549,7 @@ struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   for(sp = Audio; sp != NULL; sp = sp->next){
     if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
       // Found it
+#if 0  // Disable this - confuses user doing menu selections
       if(sp->prev != NULL){
 	// Not at top of bucket chain; move it there
 	if(sp->next != NULL)
@@ -549,6 +560,7 @@ struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
 	sp->next = Audio;
 	Audio = sp;
       }
+#endif
       return sp;
     }
   }
@@ -576,10 +588,27 @@ int close_session(struct audio *sp){
   if(sp == NULL)
     return -1;
   
+  pthread_cancel(sp->task);
+  pthread_join(sp->task,NULL);
+
+  // This isn't really right -- if the mutex is locked by the thread we're cancelling
+  // this won't work if the mutex is the error-checking type. We should get the thread
+  // itself to free the mutex
+  if(pthread_mutex_trylock(&Upcall_mutex) == EBUSY)
+    pthread_mutex_unlock(&Upcall_mutex); // Task is probably blocked here, so free lock
+  pthread_mutex_destroy(&sp->qmutex);
+
   if(sp->opus != NULL){
     opus_decoder_destroy(sp->opus);
     sp->opus = NULL;
   }
+  struct queue *qp_next;
+  for(struct queue *qp = sp->queue; qp != NULL; qp = qp_next){
+    qp_next = qp->next;
+    free(qp->data);
+    free(qp);
+  }
+
   // Remove from linked list
   if(sp->next != NULL)
     sp->next->prev = sp->prev;
@@ -602,37 +631,149 @@ void closedown(int s){
 
 // Portaudio callback - transfer data (if any) to provided buffer
 // When buffer is empty, pad with silence
+
+#define Output_size 5760 // Max output samples: 120 ms @ 48 kHz
+
+float * volatile Output_buffer; // Copy of pointer to callback buffer so decoder thread can write to it
+
+int32_t Last_frame;
+
 static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       unsigned long framesPerBuffer,
 		       const PaStreamCallbackTimeInfo* timeInfo,
 		       PaStreamCallbackFlags statusFlags,
 		       void *userData){
-  float *op = outputBuffer;
-  if(op == NULL)
+  if(outputBuffer == NULL)
     return paAbort; // can this happen??
   
+  Output_buffer = outputBuffer;
+  memset(Output_buffer,0,sizeof(float)*framesPerBuffer* NCHAN); // where do we get #channels?
 
-  int samples_left = 2 * framesPerBuffer; // A stereo frame is two samples
-  while(samples_left > 0){
-    // chunk is the smaller of the samples needed and the amount available before wrap
-    int chunk = Aud_bufsize - Read_ptr;
-    if(chunk > samples_left)
-      chunk = samples_left;
-    memcpy(op,&Audio_buffer[Read_ptr],chunk * sizeof(*op));
-    memset(&Audio_buffer[Read_ptr],0,chunk * sizeof(*op)); // Zero buffer just read
-    // Atomic update of Read_ptr
-    Read_ptr = (Read_ptr + chunk) % Aud_bufsize;
-    op += chunk;
-    samples_left -= chunk;
-  }
+  pthread_mutex_lock(&Upcall_mutex);
+  Last_frame += framesPerBuffer;
+  pthread_cond_broadcast(&Upcall_cond);
+  pthread_mutex_unlock(&Upcall_mutex);  
+
+  // Allow time for decoder threads to add their stuff to the buffer
+  // 750 == 3/4 of frame interval; 500 = 1/2 of frame interval, etc
+  Pa_Sleep(750*framesPerBuffer/(Samprate)); // Compute this better
   return paContinue;
 }
 
-// Check for underrun
-int write_is_ahead(int write_ptr,int read_ptr){
-  int n = (write_ptr - read_ptr + Aud_bufsize) % Aud_bufsize;
-  if(n < Aud_bufsize/2)
-    return 1; // OK
-  else
-    return 0; // Underrun has occurred
+
+
+
+void *opus_task(void *arg){
+  struct audio *sp = (struct audio *)arg;
+  assert(sp != NULL);
+
+  pthread_setname("opusdec");
+
+  int32_t frame_no = Last_frame;
+
+  float residual[NCHAN*Output_size];
+  int residual_frames = 0;
+
+  int error;
+  sp->opus = opus_decoder_create(Samprate,NCHAN,&error);
+
+
+  while(1){
+    // Wait for callback to wake us up
+    pthread_mutex_lock(&Upcall_mutex);
+    while(frame_no == Last_frame)
+      pthread_cond_wait(&Upcall_cond,&Upcall_mutex);
+
+    int frames_needed = Last_frame - frame_no; // #frames needed
+    frame_no = Last_frame;
+    pthread_mutex_unlock(&Upcall_mutex);
+
+    int opp = 0;
+    // All this must complete before the Pa_Sleep() in the callback finishes
+    while(frames_needed > 0){
+      if(residual_frames){
+	// Leftover frames from last decoder call
+	int frame_count = min(frames_needed,residual_frames);
+	
+	// Lock access to upcall buffer so multiple threads don't do this all at once
+	pthread_mutex_lock(&Buffer_mutex);
+	for(int i=0; i < NCHAN*frame_count; i++)
+	  Output_buffer[opp++] += residual[i] * sp->gain;
+	pthread_mutex_unlock(&Buffer_mutex);      
+	
+	residual_frames -= frame_count;
+	frames_needed -= frame_count;
+	if(residual_frames != 0){
+	  // Not completely exhaused; save for next iteration
+	  memmove(residual,
+		  &residual[NCHAN*frame_count],
+		  NCHAN*residual_frames*sizeof(float));
+	}
+      }
+      if(frames_needed <= 0) // Residual met the need
+	break;
+      
+      // Need more, run the decoder
+      assert(residual_frames == 0);
+
+      // Extract block from queue, if any
+      pthread_mutex_lock(&sp->qmutex);
+      struct queue *qp = sp->queue;
+      if(qp != NULL){
+	sp->queue = qp->next;
+	if(sp->eseq != qp->rtp.seq){
+	  int drops = (signed short)(qp->rtp.seq - sp->eseq); // Sequence numbers are 16 bits
+	  if(drops > 0 && drops < 1000) // Arbitrary sanity check
+	    sp->drops += drops;
+	}
+	sp->eseq = qp->rtp.seq + 1;
+      } else
+	qp = NULL;
+      pthread_mutex_unlock(&sp->qmutex);
+
+      int size;
+      if(qp != NULL){
+	switch(qp->rtp.mpt){
+	case 10: // Stereo PCM; 2 bytes = 1/2 frame
+	  for(int i=0; i<qp->len/2; i++){
+	    signed short s = (qp->data[2*i] << 8) + qp->data[2*i+1];
+	    residual[i] = s * SCALE;
+	  }
+	  size = qp->len/4;
+	  break;
+	case 11: // Mono PCM, convert to "stereo"; 2 bytes = 1 frame
+	  for(int i=0; i<qp->len/2; i++){
+	    signed short s = (qp->data[2*i] << 8) + qp->data[2*i+1];
+	    residual[2*i] = s * SCALE;
+	    residual[2*i+1] = residual[2*i];
+	  }
+	  size = qp->len/2;
+	  break;
+	case 20: // Opus
+	  size = opus_decode_float(sp->opus,qp->data,qp->len,residual,Output_size,0);
+	  break;
+	}
+	free(qp->data);
+	free(qp);
+      } else {
+	// Call decoder with erasure
+	sp->underruns++;
+	// Assume one lost packet of same size as before
+	switch(sp->type){
+	case 10:
+	  size = 0;
+	  break;
+	case 11:
+	  size = 0;
+	  break;
+	case 20:
+	  size = opus_decode_float(sp->opus,NULL,0,residual,sp->opus_frame_size,0);
+	  break;
+	}
+      }
+      if(size <= 0) // Decoder error; give up
+	break;
+      residual_frames = size;
+    }      
+  }
 }
