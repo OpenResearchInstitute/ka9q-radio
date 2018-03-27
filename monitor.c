@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.37 2018/03/23 22:30:12 karn Exp karn $
+// $Id: monitor.c,v 1.39 2018/03/27 08:01:08 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -400,12 +400,13 @@ void *display(void *arg){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
       char *type,typebuf[30];
       switch(sp->type){
-      case 10:
-      case 11:
+      case PCM_STEREO_PT:
+      case PCM_MONO_PT:
 	type = "PCM";
 	bw = Samprate / 2000;
 	break;
-      case 20:
+      case 20: // for temporary backward compatibility
+      case OPUS_PT:
 	switch(sp->opus_bandwidth){
 	case OPUS_BANDWIDTH_NARROWBAND:
 	  bw = 4;
@@ -638,7 +639,7 @@ void *opus_task(void *arg){
   pthread_cleanup_push(opus_task_cleanup,arg);
 
   int error;
-  sp->opus = opus_decoder_create(Samprate,NCHAN,&error);
+
   sp->rptr = sp->wptr = 0;
   sp->offset = 0;
   sp->pause = 0;
@@ -681,10 +682,21 @@ void *opus_task(void *arg){
     sp->packets++;
     // Look at this, check for PCM
     sp->type = pkt->rtp.mpt;
+    switch(sp->type){
+    case PCM_STEREO_PT:
+      break;
+    case PCM_MONO_PT:
+      break;
+    case 20: // Backward compat, temporary
+    case OPUS_PT:
+      if(sp->opus == NULL)
+	sp->opus = opus_decoder_create(Samprate,NCHAN,&error);
+      sp->channels = opus_packet_get_nb_channels((unsigned char *)pkt->data);
+      sp->opus_bandwidth = opus_packet_get_bandwidth((unsigned char *)pkt->data);
+      sp->opus_frame_size = opus_packet_get_nb_samples((unsigned char *)pkt->data,pkt->len,Samprate);
+      break;
+    }
 
-    sp->channels = opus_packet_get_nb_channels((unsigned char *)pkt->data);
-    sp->opus_bandwidth = opus_packet_get_bandwidth((unsigned char *)pkt->data);
-    sp->opus_frame_size = opus_packet_get_nb_samples((unsigned char *)pkt->data,pkt->len,Samprate);
 
     int tjump = (signed int)(pkt->rtp.timestamp - sp->etimestamp);
     int sjump = (signed short)(pkt->rtp.seq - sp->eseq);
@@ -707,11 +719,43 @@ void *opus_task(void *arg){
 
     // Decode frame
     float tbuffer[16384]; // Biggest possible decode? should check this
-    int size = opus_decode_float(sp->opus,pkt->data,pkt->len,tbuffer,8192,0);
-    for(int i=0; i<NCHAN*size; i++){
-      sp->output_buffer[sp->wptr] = tbuffer[i] * sp->gain;
-      sp->wptr = addmod(sp->wptr,1);
+    int size = 0;
+    int samples;
+
+    switch(sp->type){
+    case PCM_STEREO_PT:
+      sp->channels = 2;
+      samples = pkt->len / 2; // Number of 16-bit samples
+      size = samples / 2;     // Only half as many stereo samples
+      for(int i=0; i < samples; i++){
+	sp->output_buffer[sp->wptr] = SCALE * ntohs(((signed short *)pkt->data)[i]) * sp->gain;
+	sp->wptr = addmod(sp->wptr,1);
+      }
+      break;
+    case PCM_MONO_PT:
+      sp->channels = 1;
+      samples = pkt->len / 2; // Number of 16-bit samples      
+      size = samples;         // Also number of "stereo" samples
+      for(int i=0; i < samples; i++){
+	sp->output_buffer[sp->wptr] = SCALE * ntohs(((signed short *)pkt->data)[i]) * sp->gain;
+	sp->output_buffer[sp->wptr+1] = sp->output_buffer[sp->wptr];
+	sp->wptr = addmod(sp->wptr,2);
+      }
+      break;
+    case OPUS_PT:
+      if(sp->opus == NULL)
+	sp->opus = opus_decoder_create(Samprate,NCHAN,&error);
+      sp->channels = opus_packet_get_nb_channels((unsigned char *)pkt->data);
+      sp->opus_bandwidth = opus_packet_get_bandwidth((unsigned char *)pkt->data);
+      sp->opus_frame_size = opus_packet_get_nb_samples((unsigned char *)pkt->data,pkt->len,Samprate);
+      size = opus_decode_float(sp->opus,pkt->data,pkt->len,tbuffer,8192,0);
+      for(int i=0; i<NCHAN*size; i++){
+	sp->output_buffer[sp->wptr] = tbuffer[i] * sp->gain;
+	sp->wptr = addmod(sp->wptr,1);
+      }
+      break;
     }
+
     sp->pause = 0; // We're rolling again
     sp->etimestamp = pkt->rtp.timestamp + size;
     sp->eseq = pkt->rtp.seq + 1;
