@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.5 2018/02/27 06:45:22 karn Exp karn $
+// $Id: opus.c,v 1.6 2018/03/01 21:28:59 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -286,7 +286,7 @@ int main(int argc,char * const argv[]){
     // Does opus need to know about missing input PCM frames?
     
     switch(rtp_in.mpt){
-    case 10: // Stereo
+    case PCM_STEREO_PT: // Stereo
       samples = size / (2*Channels);  // # 32-bit word samples
       for(int i=0;i<Channels*samples;i++){
 	sp->audio_buffer[sp->audio_index++] = SCALE * (signed short)ntohs(data_in[i]); // RTP profile specifies big-endian samples; back to floating point
@@ -297,7 +297,7 @@ int main(int argc,char * const argv[]){
 	  if(!Discontinuous || size > 2){
 	    iovec_out[1].iov_len = size;
 	    rtp_out.seq = htons(sp->oseq++);
-	    rtp_out.mpt = 20; // Opus
+	    rtp_out.mpt = OPUS_PT; // Opus
 	    rtp_out.ssrc = htonl(sp->ssrc);
 	    rtp_out.timestamp = htonl(sp->otimestamp);
 	    size = sendmsg(Output_fd,&message_out,0);
@@ -306,7 +306,7 @@ int main(int argc,char * const argv[]){
 	}
       }
       break;
-    case 11: // Mono; send to both stereo channels
+    case PCM_MONO_PT: // Mono; send to both stereo channels
       samples = size / 2;
       for(int i=0;i<samples;i++){
 	// Should use Channels here
@@ -319,7 +319,7 @@ int main(int argc,char * const argv[]){
 	  if(!Discontinuous || size > 2){
 	    iovec_out[1].iov_len = size;
 	    rtp_out.seq = htons(sp->oseq++);
-	    rtp_out.mpt = 20; // Opus
+	    rtp_out.mpt = OPUS_PT; // Opus
 	    rtp_out.ssrc = htonl(sp->ssrc);
 	    rtp_out.timestamp = htonl(sp->otimestamp);
 	    size = sendmsg(Output_fd,&message_out,0);

@@ -13,5 +13,10 @@ struct rtp_header {
 };
 #define RTP_VERS 2
 
+#define PCM_MONO_PT (11)
+#define PCM_STEREO_PT (10)
+// Hard-coded RTP payload type for OPUS (NOT STANDARD! should be dynamic with sdp)
+#define OPUS_PT (111)
+
 
 #endif
