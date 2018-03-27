@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.6 2018/03/01 21:28:59 karn Exp karn $
+// $Id: opus.c,v 1.7 2018/03/27 07:59:12 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -45,12 +45,12 @@ int Discontinuous = 0;        // Off by default
 float const SCALE = 1./SHRT_MAX;
 
 
-struct audio {
-  struct audio *prev;       // Linked list pointers
-  struct audio *next; 
+struct session {
+  struct session *prev;       // Linked list pointers
+  struct session *next; 
   uint32_t ssrc;            // RTP Sending Source ID
   int eseq;                 // Next expected RTP sequence number
-  int etime;                // Next expected RTP timestamp
+  int etimestamp;           // Next expected RTP timestamp
   int type;                 // RTP type (10,11)
   
   struct sockaddr sender;
@@ -68,17 +68,17 @@ struct audio {
   unsigned long invalids;   // Unknown RTP type
   unsigned long empties;    // RTP but no data
   unsigned long dupes;      // Duplicate or old serial numbers
-  int age;                  // Display cycles since last active
   unsigned long underruns;  // Callback count of underruns (stereo samples) replaced with silence
 };
-struct audio *Audio;
+struct session *Audio;
 
 
 
 void closedown(int);
-struct audio *lookup_session(const struct sockaddr *,uint32_t);
-struct audio *make_session(struct sockaddr const *r,uint32_t,uint16_t,uint32_t);
-int close_session(struct audio *);
+struct session *lookup_session(const struct sockaddr *,uint32_t);
+struct session *make_session(struct sockaddr const *r,uint32_t,uint16_t,uint32_t);
+int close_session(struct session *);
+int send_samples(struct session *sp,float left,float right);
 
 
 int main(int argc,char * const argv[]){
@@ -167,28 +167,6 @@ int main(int argc,char * const argv[]){
   message_in.msg_controllen = 0;
   message_in.msg_flags = 0;
 
-  // Set up to transmit Opus RTP/UDP/IP
-  struct iovec iovec_out[2];
-  struct rtp_header rtp_out;
-  unsigned char data_out[Bufsize];
-  
-  rtp_out.vpxcc = RTP_VERS << 6;
-
-  iovec_out[0].iov_base = &rtp_out;
-  iovec_out[0].iov_len = sizeof(rtp_out);
-  iovec_out[1].iov_base = data_out;
-  // iovec_out[1].iov_len varies
-
-  struct msghdr message_out;
-  message_out.msg_name = NULL; // connected-mode socket already has destination
-  message_out.msg_namelen = 0;
-  message_out.msg_iov = &iovec_out[0];
-  message_out.msg_iovlen = 2;
-  message_out.msg_control = NULL;
-  message_out.msg_controllen = 0;
-  message_out.msg_flags = 0;
-
-
   // Graceful signal catch
   signal(SIGPIPE,closedown);
   signal(SIGINT,closedown);
@@ -218,10 +196,10 @@ int main(int argc,char * const argv[]){
     rtp_in.timestamp = ntohl(rtp_in.timestamp);
 
     // Only accept mono and stereo PCM at implied 48 kHz sample rate
-    if(rtp_in.mpt != 10 && rtp_in.mpt != 11) // 1 byte, no need to byte swap
+    if(rtp_in.mpt != PCM_STEREO_PT && rtp_in.mpt != PCM_MONO_PT) // 1 byte, no need to byte swap
       goto endloop; // Discard all but mono and stereo PCM to avoid polluting session table
 
-    struct audio *sp = lookup_session(&sender,rtp_in.ssrc);
+    struct session *sp = lookup_session(&sender,rtp_in.ssrc);
     if(sp == NULL){
       // Not found
       if((sp = make_session(&sender,rtp_in.ssrc,rtp_in.seq,rtp_in.timestamp)) == NULL){
@@ -259,10 +237,8 @@ int main(int argc,char * const argv[]){
 	exit(1);
       }
     }
-    sp->age = 0;
-    int drop = 0;
-
     sp->packets++;
+    sp->type = rtp_in.mpt;
     if(rtp_in.seq != sp->eseq){
       int const diff = (int)(rtp_in.seq - sp->eseq);
       //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
@@ -270,77 +246,56 @@ int main(int argc,char * const argv[]){
 	sp->dupes++;
 	goto endloop;	// Drop probable duplicate
       }
-      drop = diff; // Apparent # packets dropped
-      sp->drops += abs(drop);
+      sp->drops += abs(diff); // Apparent # packets dropped
     }
     sp->eseq = (rtp_in.seq + 1) & 0xffff;
 
-    sp->type = rtp_in.mpt;
     size -= sizeof(rtp_in); // Bytes in payload
     if(size <= 0){
       sp->empties++;
       goto endloop; // empty?!
     }
-    int samples = 0;
 
-    // Does opus need to know about missing input PCM frames?
-    
+    int samples_skipped = (signed int)(rtp_in.timestamp - sp->etimestamp);
+    if(samples_skipped > 0){
+      printf("skipped %d PCM samples\n",samples_skipped);
+      sp->underruns += samples_skipped;
+      // Insert zeroes
+      for(int i=0; i < samples_skipped; i++)
+	send_samples(sp,0,0);
+    }
+
+    int samples = 0;
     switch(rtp_in.mpt){
     case PCM_STEREO_PT: // Stereo
-      samples = size / (2*Channels);  // # 32-bit word samples
-      for(int i=0;i<Channels*samples;i++){
-	sp->audio_buffer[sp->audio_index++] = SCALE * (signed short)ntohs(data_in[i]); // RTP profile specifies big-endian samples; back to floating point
-	if(sp->audio_index >= Opus_frame_size * Channels){
-	  sp->audio_index = 0;
-	  // Encode and ship it
-	  size = opus_encode_float(sp->opus,sp->audio_buffer,Opus_frame_size,data_out,sizeof(data_out));
-	  if(!Discontinuous || size > 2){
-	    iovec_out[1].iov_len = size;
-	    rtp_out.seq = htons(sp->oseq++);
-	    rtp_out.mpt = OPUS_PT; // Opus
-	    rtp_out.ssrc = htonl(sp->ssrc);
-	    rtp_out.timestamp = htonl(sp->otimestamp);
-	    size = sendmsg(Output_fd,&message_out,0);
-	  }
-	  sp->otimestamp += Opus_frame_size;
-	}
+      samples = size / 4;  // # 32-bit word samples
+      for(int i=0; i < samples; i++){
+	float left = SCALE * (signed short)ntohs(data_in[2*i]);
+	float right = SCALE * (signed short)ntohs(data_in[2*i+1]);
+	send_samples(sp,left,right);
       }
       break;
     case PCM_MONO_PT: // Mono; send to both stereo channels
       samples = size / 2;
       for(int i=0;i<samples;i++){
-	// Should use Channels here
-	sp->audio_buffer[sp->audio_index+1] = sp->audio_buffer[sp->audio_index] = SCALE * (signed short)ntohs(data_in[i]);
-	sp->audio_index += Channels;
-	if(sp->audio_index >= Opus_frame_size * Channels){
-	  sp->audio_index = 0;
-	  // Encode and ship it
-	  size = opus_encode_float(sp->opus,sp->audio_buffer,Opus_frame_size,data_out,sizeof(data_out));
-	  if(!Discontinuous || size > 2){
-	    iovec_out[1].iov_len = size;
-	    rtp_out.seq = htons(sp->oseq++);
-	    rtp_out.mpt = OPUS_PT; // Opus
-	    rtp_out.ssrc = htonl(sp->ssrc);
-	    rtp_out.timestamp = htonl(sp->otimestamp);
-	    size = sendmsg(Output_fd,&message_out,0);
-	  }
-	  sp->otimestamp += Opus_frame_size;
-	}
+	float left = SCALE * (signed short)ntohs(data_in[i]);	
+	float right = left;
+	send_samples(sp,left,right);
       }
       break;
     default:
       samples = 0;
       break; // ignore
     }
-    sp->etime = rtp_in.timestamp + samples;
+    sp->etimestamp = rtp_in.timestamp + samples;
 
   endloop:;
   }
   exit(0);
 }
 
-struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
-  struct audio *sp;
+struct session *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
+  struct session *sp;
   for(sp = Audio; sp != NULL; sp = sp->next){
     if(sp->ssrc == ssrc && memcmp(&sp->sender,sender,sizeof(*sender)) == 0){
       // Found it
@@ -360,8 +315,8 @@ struct audio *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   return NULL;
 }
 // Create a new session, partly initialize
-struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t seq,uint32_t timestamp){
-  struct audio *sp;
+struct session *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t seq,uint32_t timestamp){
+  struct session *sp;
 
   if((sp = calloc(1,sizeof(*sp))) == NULL)
     return NULL; // Shouldn't happen on modern machines!
@@ -370,7 +325,7 @@ struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t 
   memcpy(&sp->sender,sender,sizeof(struct sockaddr));
   sp->ssrc = ssrc;
   sp->eseq = seq;
-  sp->etime = timestamp;
+  sp->etimestamp = timestamp;
 
   // Put at head of bucket chain
   sp->next = Audio;
@@ -380,7 +335,7 @@ struct audio *make_session(struct sockaddr const *sender,uint32_t ssrc,uint16_t 
   return sp;
 }
 
-int close_session(struct audio *sp){
+int close_session(struct session *sp){
   if(sp == NULL)
     return -1;
   
@@ -407,4 +362,47 @@ void closedown(int s){
     close_session(Audio);
 
   exit(0);
+}
+// Enqueue a stereo pair of samples for transmit, encode and send Opus
+// frame when we have enough
+int send_samples(struct session *sp,float left,float right){
+  int size = 0;
+  sp->audio_buffer[sp->audio_index++] = left;
+  sp->audio_buffer[sp->audio_index++] = right;  
+  if(sp->audio_index >= Opus_frame_size * Channels){
+    unsigned char data_out[Bufsize];
+    sp->audio_index = 0;
+    
+    size += opus_encode_float(sp->opus,sp->audio_buffer,Opus_frame_size,data_out,sizeof(data_out));
+    if(!Discontinuous || size > 2){
+      // ship it
+      // Set up to transmit Opus RTP/UDP/IP
+      struct iovec iovec_out[2];
+      struct rtp_header rtp_out;
+      
+      rtp_out.vpxcc = RTP_VERS << 6;
+      
+      iovec_out[0].iov_base = &rtp_out;
+      iovec_out[0].iov_len = sizeof(rtp_out);
+      iovec_out[1].iov_base = data_out;
+      iovec_out[1].iov_len = size;
+      
+      struct msghdr message_out;
+      message_out.msg_name = NULL; // connected-mode socket already has destination
+      message_out.msg_namelen = 0;
+      message_out.msg_iov = &iovec_out[0];
+      message_out.msg_iovlen = 2;
+      message_out.msg_control = NULL;
+      message_out.msg_controllen = 0;
+      message_out.msg_flags = 0;
+
+      rtp_out.seq = htons(sp->oseq++);
+      rtp_out.mpt = OPUS_PT; // Opus
+      rtp_out.ssrc = htonl(sp->ssrc);
+      rtp_out.timestamp = htonl(sp->otimestamp);
+      size = sendmsg(Output_fd,&message_out,0);
+    }
+    sp->otimestamp += Opus_frame_size;
+  }
+  return size;
 }
