@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.4 2018/02/27 07:30:25 karn Exp karn $
+// $Id: opussend.c,v 1.5 2018/03/01 21:28:59 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -27,7 +27,7 @@
 char *Input_device_text = "";
 char *Mcast_output_address_text = "audio-opus-mcast.local";     // Multicast address we're sending to
 
-#define BUFSIZE 65536         // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
+#define BUFFERSIZE (1<<18)    // Size of audio ring buffer in mono samples. 2^18 is 2.73 sec at 48 kHz stereo
                               // Defined as macro so the Audiodata[] declaration below won't bother some compilers
 int const Samprate = 48000;   // Too hard to handle other sample rates right now
                               // Opus will notice the actual audio bandwidth, so there's no real cost to this
@@ -42,10 +42,10 @@ int Discontinuous = 0;        // Off by default
 
 OpusEncoder *Opus;
 int Output_fd = -1;
-float Audiodata[BUFSIZE];
-pthread_mutex_t Buffer_mutex;
-pthread_cond_t Buffer_cond;
+float Audiodata[BUFFERSIZE];
 int Samples_available;
+int Wptr;   // Write pointer for callback
+
 
 static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       unsigned long framesPerBuffer,
@@ -159,9 +159,14 @@ int main(int argc,char * const argv[]){
   inputParameters.suggestedLatency = .001 * Opus_blocktime;
   
   PaStream *Pa_Stream;          // Portaudio stream handle
-  r = Pa_OpenStream(&Pa_Stream,&inputParameters,NULL,Samprate,
-		    Opus_frame_size,
-		     0,pa_callback,NULL);
+  r = Pa_OpenStream(&Pa_Stream,
+		    &inputParameters,
+		    NULL,       // No output stream
+		    Samprate,
+		    Opus_frame_size, // Read one Opus frame at a time
+		    0,
+		    pa_callback,
+		    NULL);
 
   if(r != paNoError){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
@@ -186,6 +191,7 @@ int main(int argc,char * const argv[]){
     exit(0);
   }
 
+  // Opus is specified to operate between 6 kb/s and 510 kb/s
   if(Opus_bitrate < 6000)
     Opus_bitrate *= 1000; // Assume it was given in kb/s
   if(Opus_bitrate > 510000)
@@ -206,20 +212,17 @@ int main(int argc,char * const argv[]){
   error = opus_encoder_ctl(Opus,OPUS_SET_DTX(Discontinuous));
   if(error != OPUS_OK){
     fprintf(stderr,"opus_encoder_ctl set discontinuous %d: error %d\n",Discontinuous,error);
-    exit(1);
   }
 
   error = opus_encoder_ctl(Opus,OPUS_SET_BITRATE(Opus_bitrate));
   if(error != OPUS_OK){
     fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
-    exit(1);
   }
 
   // Always seems to return error -5 even when OK??
   error = opus_encoder_ctl(Opus,OPUS_FRAMESIZE_ARG,(int)Opus_frame_size);
   if(0 && error != OPUS_OK){
     fprintf(stderr,"opus_encoder_ctl set framesize %d (%.1lf ms): error %d\n",Opus_frame_size,Opus_blocktime,error);
-    exit(1);
   }
 
 
@@ -232,7 +235,7 @@ int main(int argc,char * const argv[]){
   // Set up to transmit Opus RTP/UDP/IP
   struct iovec iovec_out[2];
   struct rtp_header rtp_out;
-  unsigned char data_out[BUFSIZE];
+  unsigned char data_out[2*est_packet_size]; // Allow room for Opus to peak over specified bit rate
   struct msghdr message_out;
 
   rtp_out.vpxcc = RTP_VERS << 6;
@@ -242,8 +245,8 @@ int main(int argc,char * const argv[]){
   iovec_out[1].iov_base = data_out;
   // iovec_out[1].iov_len varies
 
-  unsigned long otimestamp = 0;
-  unsigned short oseq = 0;
+  unsigned long timestamp = 0;
+  unsigned short seq = 0;
   unsigned long ssrc = time(0);
 
   message_out.msg_name = NULL; // connected-mode socket already has destination
@@ -262,34 +265,67 @@ int main(int argc,char * const argv[]){
   signal(SIGTERM,closedown);
   signal(SIGPIPE,SIG_IGN);
 
-  pthread_mutex_init(&Buffer_mutex,NULL);
-  pthread_cond_init(&Buffer_cond,NULL);
-  
-  int sampsize = sizeof(float)*Channels;
-  float fbuffer[Channels * Opus_frame_size];
+  int rptr = 0;
+
+  long long blocks = 0;
+  long long sleeps = 0;
+
+  long long sleepstat[10];
+  memset(sleepstat,0,sizeof(sleepstat));
+
 
   while(1){
-    // Wait for audio input
-    pthread_mutex_lock(&Buffer_mutex);
-    while(Samples_available < Opus_frame_size)
-      pthread_cond_wait(&Buffer_cond,&Buffer_mutex);
-    memcpy(fbuffer,Audiodata,sizeof(fbuffer));
-    Samples_available -= Opus_frame_size;
-    memmove(Audiodata,Audiodata+sampsize*Opus_frame_size,sampsize*Samples_available);
+    if((blocks % 128) == 0){
+      printf("Blocks %lld sleeps %lld avg %lf sleeps/block\n",blocks,sleeps,(double)sleeps/blocks);
+      for(int i=0;i<10;i++)
+	printf(" %d: %lld;",i,sleepstat[i]);
+      printf("\n");
       
-    pthread_mutex_unlock(&Buffer_mutex);    
-    
-    int size = opus_encode_float(Opus,fbuffer,Opus_frame_size,data_out,sizeof(data_out));
+    }
+    blocks++;
+    // Wait for audio input
+    // I'd rather use pthread condition variables and signaling, but the portaudio people
+    // say you shouldn't do that in a callback. So we poll.
+    // Experimental "Zeno's paradox" delays to minimize number of loops without being too late
+    // we first sleep for half the frame time, then a quarter, and so forth until we approach
+    // the expected time of a new frame
+
+    int delay = Opus_blocktime * 1000;
+    int i = 0;
+    while(((Wptr - rptr) & (BUFFERSIZE-1)) < Channels * Opus_frame_size){
+      if(delay >= 200)
+	delay /= 2; // Minimum sleep time 0.2 ms
+      sleeps++;
+      i++;
+      usleep(delay);
+    }
+    if(i < 10)
+      sleepstat[i]++;
+    float bouncebuffer[Channels * Opus_frame_size];
+    float *opus_input;
+    if(rptr + Channels * Opus_frame_size > BUFFERSIZE){
+      // wraps around; use bounce buffer
+      memcpy(bouncebuffer,Audiodata + rptr,sizeof(float)*(BUFFERSIZE-rptr));
+      memcpy(bouncebuffer + (BUFFERSIZE-rptr), Audiodata, sizeof(float) * (Channels * Opus_frame_size - (BUFFERSIZE-rptr)));
+      opus_input = bouncebuffer;
+    } else
+      opus_input = Audiodata + rptr;
+
+    rptr += Channels * Opus_frame_size;
+    if(rptr >= BUFFERSIZE)
+      rptr -= BUFFERSIZE;
+
+    int size = opus_encode_float(Opus,opus_input,Opus_frame_size,data_out,sizeof(data_out));
     if(!Discontinuous || size > 2){
       // This ought to source fragment if necessary
       iovec_out[1].iov_len = size;
-      rtp_out.seq = htons(oseq++);
-      rtp_out.mpt = 20; // Opus
+      rtp_out.seq = htons(seq++);
+      rtp_out.mpt = OPUS_PT; // Opus (not standard)
       rtp_out.ssrc = htonl(ssrc);
-      rtp_out.timestamp = htonl(otimestamp);
+      rtp_out.timestamp = htonl(timestamp);
       size = sendmsg(Output_fd,&message_out,0);
     }
-    otimestamp += Opus_frame_size;
+    timestamp += Opus_frame_size; // Always increments, even if we suppress the frame
   }
   opus_encoder_destroy(Opus);
   close(Output_fd);
@@ -297,23 +333,22 @@ int main(int argc,char * const argv[]){
 }
 
 // Portaudio callback - encode and transmit audio
+// You're supposed to avoid synchronization calls here, but they seem to work
 static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       unsigned long framesPerBuffer,
 		       const PaStreamCallbackTimeInfo* timeInfo,
 		       PaStreamCallbackFlags statusFlags,
 		       void *userData){
 
-  pthread_mutex_lock(&Buffer_mutex);
-  int space_available = sizeof(Audiodata) - Samples_available * Channels * sizeof(float);
-  // Simply discard any excess - not elegant, but it works and it's unlikely if the buffer is big enough
-  int copy_amount = min(space_available,framesPerBuffer*Channels*sizeof(float));
+  float *in = (float *)inputBuffer;
+  assert(in != NULL);
+    
+  int count = Channels*framesPerBuffer;
 
-  memcpy(Audiodata+Samples_available*Channels*sizeof(float),
-	 inputBuffer,
-	 copy_amount);
-  Samples_available += framesPerBuffer;
-  pthread_cond_broadcast(&Buffer_cond);
-  pthread_mutex_unlock(&Buffer_mutex);
-  
+  while(count--){
+    Audiodata[Wptr++] = *in++;
+    if(Wptr == BUFFERSIZE)
+      Wptr = 0;
+  }
   return paContinue;
 }
