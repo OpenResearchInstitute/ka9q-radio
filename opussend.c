@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.5 2018/03/01 21:28:59 karn Exp karn $
+// $Id: opussend.c,v 1.6 2018/03/27 07:59:33 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -267,22 +267,7 @@ int main(int argc,char * const argv[]){
 
   int rptr = 0;
 
-  long long blocks = 0;
-  long long sleeps = 0;
-
-  long long sleepstat[10];
-  memset(sleepstat,0,sizeof(sleepstat));
-
-
   while(1){
-    if((blocks % 128) == 0){
-      printf("Blocks %lld sleeps %lld avg %lf sleeps/block\n",blocks,sleeps,(double)sleeps/blocks);
-      for(int i=0;i<10;i++)
-	printf(" %d: %lld;",i,sleepstat[i]);
-      printf("\n");
-      
-    }
-    blocks++;
     // Wait for audio input
     // I'd rather use pthread condition variables and signaling, but the portaudio people
     // say you shouldn't do that in a callback. So we poll.
@@ -291,16 +276,11 @@ int main(int argc,char * const argv[]){
     // the expected time of a new frame
 
     int delay = Opus_blocktime * 1000;
-    int i = 0;
     while(((Wptr - rptr) & (BUFFERSIZE-1)) < Channels * Opus_frame_size){
       if(delay >= 200)
 	delay /= 2; // Minimum sleep time 0.2 ms
-      sleeps++;
-      i++;
       usleep(delay);
     }
-    if(i < 10)
-      sleepstat[i]++;
     float bouncebuffer[Channels * Opus_frame_size];
     float *opus_input;
     if(rptr + Channels * Opus_frame_size > BUFFERSIZE){
