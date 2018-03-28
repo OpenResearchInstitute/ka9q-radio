@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.7 2018/03/27 07:59:12 karn Exp karn $
+// $Id: opus.c,v 1.8 2018/03/27 18:10:00 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -84,7 +84,7 @@ int send_samples(struct session *sp,float left,float right);
 int main(int argc,char * const argv[]){
   // Try to improve our priority
   int prio = getpriority(PRIO_PROCESS,0);
-  prio = setpriority(PRIO_PROCESS,0,prio - 15);
+  prio = setpriority(PRIO_PROCESS,0,prio - 10);
 
   // Drop root if we have it
   seteuid(getuid());
