@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.98 2018/02/21 05:00:56 karn Exp karn $
+// $Id: main.c,v 1.99 2018/02/22 06:51:14 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -47,7 +47,6 @@ struct audio Audio;
 // Multicast receive statistics
 int Skips;
 int Delayed;
-
 
 // Parameters with default values
 char Libdir[] = "/usr/local/share/ka9q-radio";
@@ -375,6 +374,7 @@ void *input_loop(void *arg){
       // Pass PCM I/Q samples to corrector and input queue
       cnt -= sizeof(rtp) + sizeof(demod->status);
       // count 4-byte stereo samples
+      demod->samples += cnt/4;
       proc_samples(demod,samples,cnt/4);
     }
   }
