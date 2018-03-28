@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.111 2018/03/05 04:35:21 karn Exp karn $
+// $Id: display.c,v 1.112 2018/03/23 22:27:40 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -37,6 +37,7 @@
 #include "bandplan.h"
 
 float Spare; // General purpose knob for experiments
+struct timeval Start_time;
 
 int touch_x,touch_y;
 
@@ -386,6 +387,12 @@ void *display(void *arg){
   mousemask(mask,NULL);
   MEVENT mouse_event;
 
+  // Note starting time and reset sample count at the same time
+  // to avoid a starting transient in the sample rate estimate
+  gettimeofday(&Start_time,NULL);
+  demod->samples = 0;
+  
+
   for(;;){
     // update display
 
@@ -680,10 +687,19 @@ void *display(void *arg){
     extern int Delayed,Skips;
     extern uint32_t Ssrc;
 
+    struct timeval current_time;
+    gettimeofday(&current_time,NULL);
+    double run_time = current_time.tv_sec - Start_time.tv_sec
+      + (current_time.tv_usec - Start_time.tv_usec)/1.e6;
+
+    double sample_rate = demod->samples/run_time;
+
     wmove(network,0,0);
     mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
-    mvwprintw(network,row++,col,"IQ pkts: %'llu; late %'d; skips %'d",demod->iq_packets,
-	      Delayed,Skips);
+    mvwprintw(network,row++,col,"IQ pkts: %'llu; late %'d; skips %'d samples %'llu rate %'.3lf Hz",demod->iq_packets,
+	      Delayed,Skips,demod->samples,sample_rate);
+
+
     
     mvwprintw(network,row++,col,"Time: %s",lltime(demod->status.timestamp));
     mvwprintw(network,row++,col,"Sink: %s; ssrc %8x; TTL %d%s",audio->audio_mcast_address_text,
