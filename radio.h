@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.59 2018/02/21 05:04:42 karn Exp karn $
+// $Id: radio.h,v 1.60 2018/02/25 19:45:48 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -51,6 +51,7 @@ struct demod {
   struct sockaddr input_source_address;
   struct sockaddr ctl_address;
   unsigned long long iq_packets; // Count of I/Q input packets received
+  unsigned long long samples;    // Count of raw I/Q samples received
 
   // I/Q correction parameters
   float DC_i,DC_q;       // Average DC offsets
@@ -181,6 +182,7 @@ extern char Libdir[];
 extern int Tunestep;
 extern struct modetab Modes[];
 extern int Nmodes;
+
 
 void *filtert(void *arg);
 int fillbuf(struct demod *,complex float *,const int);
