@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.39 2018/03/27 08:01:08 karn Exp karn $
+// $Id: monitor.c,v 1.40 2018/03/27 18:09:44 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -26,7 +26,7 @@
 #include "multicast.h"
 
 // Global config variables
-#define MAX_MCAST 10          // Maximum number of multicast addresses
+#define MAX_MCAST 20          // Maximum number of multicast addresses
 #define PKTSIZE (16384)       // Maximum bytes per RTP packet - must be bigger than Ethernet MTU
 #define NCHAN 2               // 2 channels (stereo)
 #define SAMPPCALLBACK 480     // 10 ms @ 48 kHz
@@ -100,6 +100,10 @@ struct session {
   int pause;                       // Playback paused due to underrun
 };
 struct session *Current = NULL;
+
+unsigned long long Samples;
+unsigned long long Callbacks;
+
 
 void closedown(int);
 void *display(void *);
@@ -243,7 +247,8 @@ int main(int argc,char * const argv[]){
 		    NULL,
 		    &outputParameters,
 		    Samprate,
-                    SAMPPCALLBACK,		    //paFramesPerBufferUnspecified,
+		    //paFramesPerBufferUnspecified, // seems to be 31 on OSX
+		    SAMPPCALLBACK,
 		    0,
 		    pa_callback,
 		    NULL);
@@ -389,6 +394,12 @@ void *display(void *arg){
   noecho();
   
   Mainscr = stdscr;
+  // Reset sample count and take time of day to compute sample rate
+  struct timeval start_time;
+  gettimeofday(&start_time,NULL);
+  Samples = 0;
+
+
   while(1){
 
     int row = 1;
@@ -467,7 +478,18 @@ void *display(void *arg){
 
       row++;
     }
-    move(row,1);
+    struct timeval current_time;
+    gettimeofday(&current_time,NULL);
+    double seconds = (current_time.tv_sec - start_time.tv_sec)
+      + 1e-6 * (current_time.tv_usec - start_time.tv_usec);
+    double sample_rate = Samples / seconds;
+    int sampcall = 0;
+    if(Callbacks > 0)
+      sampcall = Samples / Callbacks;
+    row++;
+    mvwprintw(Mainscr,row++,0,"Samples: %'llu rate %'.3lf Hz samps/callback %'d",
+	      Samples,sample_rate,sampcall);
+    move(row,0);
     clrtobot();
     mvwprintw(Mainscr,0,0,"KA9Q Multicast Audio Monitor:");
     for(int i=0;i<Nfds;i++)
@@ -499,10 +521,10 @@ void *display(void *arg){
 	Current->gain /= 1.122018454; // 1 dB
 	break;
       case KEY_RIGHT:
-	Current->offset = submod(Current->offset,NCHAN*48); // 1 ms
+	Current->offset = submod(Current->offset,NCHAN*Samprate*10/1000); // 10 ms
 	break;
       case KEY_LEFT:
-	Current->offset = addmod(Current->offset,NCHAN*48); // 1 ms
+	Current->offset = addmod(Current->offset,NCHAN*Samprate*10/1000); // 10 ms
 	break;
       case 'd':
 	{
@@ -609,6 +631,8 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     }
     sp->rptr = addmod(sp->rptr,NCHAN*framesPerBuffer);
   }
+  Samples += framesPerBuffer;
+  Callbacks++;
   return paContinue;
 }
 
