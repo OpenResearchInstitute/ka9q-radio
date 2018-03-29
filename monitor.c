@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.40 2018/03/27 18:09:44 karn Exp karn $
+// $Id: monitor.c,v 1.41 2018/03/29 09:07:05 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -32,7 +32,7 @@
 #define SAMPPCALLBACK 480     // 10 ms @ 48 kHz
 #define BUFFERSIZE (NCHAN*524288)   // about 10.92 sec at 48 kHz stereo - must be power of 2!!
 #define PAUSETHRESH 96000     // Pause after 2 sec of starvation
-#define SLOP (.01)            // Wake up before buffer underrun to allow time for processing
+#define SLOP (.05)            // Wake up before buffer underrun to allow time for processing
 char *Mcast_address_text[MAX_MCAST]; // Multicast address(es) we're listening to
 char Audiodev[256];           // Name of audio device; empty means portaudio's default
 const int Samprate = 48000;   // Too hard to handle other sample rates right now
@@ -96,13 +96,14 @@ struct session {
   float output_buffer[BUFFERSIZE]; // Decoded audio output, written by processing thread and read by PA callback
   int wptr;                        // Write pointer into output_buffer
   int rptr;                        // Read pointer into output buffer
-  int offset;                      // playout delay offset
+  int offset;                      // playout delay offset, samples
   int pause;                       // Playback paused due to underrun
 };
 struct session *Current = NULL;
 
 unsigned long long Samples;
 unsigned long long Callbacks;
+int Started;
 
 
 void closedown(int);
@@ -271,12 +272,16 @@ int main(int argc,char * const argv[]){
   pthread_t display_task;
   pthread_create(&display_task,NULL,display,NULL);
 
-  // Do this last since the upcall will come quickly
-  r = Pa_StartStream(Pa_Stream);
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
-    exit(1);
+  if(!Started){
+    // Do this at the last minute at startup since the upcall will come quickly
+    int r = Pa_StartStream(Pa_Stream);
+    if(r != paNoError){
+      fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
+      exit(1);
+    }
+    Started = 1;
   }
+
 
   struct packet *pkt = NULL;
 
@@ -405,7 +410,7 @@ void *display(void *arg){
     int row = 1;
     wmove(Mainscr,row,0);
     wclrtobot(Mainscr);
-    mvwprintw(Mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops     Lates  Queue Source                Dest");
+    mvwprintw(Mainscr,row++,0,"Type        chans BW   Gain      SSRC     Packets  Dupes  Drops     Lates  Queue Playout Source                Dest");
 
     for(struct session *sp = Session; sp != NULL; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
@@ -453,11 +458,11 @@ void *display(void *arg){
 	wattr_on(Mainscr,A_BOLD,NULL); // Embolden active streams
 
       char source_text[256];
-      int qlen = submod(sp->wptr,addmod(sp->rptr,sp->offset));
+      int qlen = submod(sp->wptr,addmod(sp->rptr,-NCHAN*sp->offset));
       double qdelay = (double)qlen / (NCHAN*Samprate);
       
       snprintf(source_text,sizeof(source_text),"%s:%s",sp->addr,sp->port);
-      mvwprintw(Mainscr,row,0,"%-15s%2d%3d%+7.0lf%10x%'12lu%7lu%7lu%'10lu %6.3lf %-22s%-16s",
+      mvwprintw(Mainscr,row,0,"%-15s%2d%3d%+7.0lf%10x%'12lu%7lu%7lu%'10lu %6.3lf%8.3lf %-22s%-16s",
 		type,
 		sp->channels,
 		bw,
@@ -468,6 +473,7 @@ void *display(void *arg){
 		sp->drops,
 		sp->lates,
 		qdelay,
+		(double)sp->offset/Samprate,
 		source_text,
 		sp->dest);
       wattr_off(Mainscr,A_BOLD,NULL);
@@ -521,10 +527,10 @@ void *display(void *arg){
 	Current->gain /= 1.122018454; // 1 dB
 	break;
       case KEY_RIGHT:
-	Current->offset = submod(Current->offset,NCHAN*Samprate*10/1000); // 10 ms
+	Current->offset += (Samprate*10)/1000; // delay playback 10 ms
 	break;
       case KEY_LEFT:
-	Current->offset = addmod(Current->offset,NCHAN*Samprate*10/1000); // 10 ms
+	Current->offset -= (Samprate*10)/1000; // advance playback 10 ms
 	break;
       case 'd':
 	{
@@ -618,13 +624,13 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   for(sp=Session;sp != NULL; sp=sp->next){
     if(sp->pause)
       continue;
-    int sdelay = submod(sp->wptr,addmod(sp->rptr,sp->offset)) / NCHAN; // samples @ 48 kHz
-    if(sdelay < -PAUSETHRESH){
+    int sdelay = submod(addmod(sp->rptr,-NCHAN*sp->offset),sp->wptr) / NCHAN; // samples @ 48 kHz
+    if(sdelay > PAUSETHRESH){
       // Writer has fallen more than 2 seconds behind, pause
       sp->pause = 1;
       continue;
     }
-    int index = addmod(sp->rptr,sp->offset);
+    int index = addmod(sp->rptr,-NCHAN*sp->offset);
     for(int n=0;n < NCHAN*framesPerBuffer; n++){
       out[n] += sp->output_buffer[index];
       index = addmod(index,1);
@@ -666,7 +672,7 @@ void *opus_task(void *arg){
 
   sp->rptr = sp->wptr = 0;
   sp->offset = 0;
-  sp->pause = 0;
+  sp->pause = 1; // Start at last moment
   sp->gain = 1; // 0 dB by default
   sp->dupes = 0;
 
@@ -680,10 +686,11 @@ void *opus_task(void *arg){
     pthread_mutex_unlock(&sp->qmutex);    
 
     if(pkt == NULL || pkt->rtp.seq != sp->eseq){
+#if 1
       // No packets waiting, or first packet isn't the next we expect,
       // so sleep as long as we can so packets can arrive and get sorted
       // How much time do we have until the upcall catches up with us?
-      int sdelay = submod(sp->wptr,addmod(sp->rptr,sp->offset)) / NCHAN; // samples @ 48 kHz
+      int sdelay = submod(sp->wptr,addmod(sp->rptr,-NCHAN*sp->offset)) / NCHAN; // samples @ 48 kHz
       double qdelay = (double) sdelay / Samprate; // Seconds
 
       if(qdelay > SLOP){
@@ -693,6 +700,7 @@ void *opus_task(void *arg){
 	ts.tv_nsec = (int)(fmod(qdelay-SLOP,1.0) * 1e9);
 	nanosleep(&ts,&ts);
       }
+#endif
     }
     // Wait for packet
     pthread_mutex_lock(&sp->qmutex);
@@ -733,7 +741,6 @@ void *opus_task(void *arg){
 
     if(sp->pause){
       // We were stuck too long, reset and restart
-      sp->wptr = sp->rptr = sp->offset = 0;
       tjump = 0;
     }
 
@@ -779,16 +786,14 @@ void *opus_task(void *arg){
       }
       break;
     }
-
     sp->pause = 0; // We're rolling again
     sp->etimestamp = pkt->rtp.timestamp + size;
     sp->eseq = pkt->rtp.seq + 1;
     free(pkt); pkt = NULL;
 
-    int delay = submod(sp->wptr,addmod(sp->rptr,sp->offset));
+    int delay = submod(sp->wptr,addmod(sp->rptr,-NCHAN*sp->offset));
     if(delay < 0)
       sp->lates++;
-
 
     // Wipe old region of buffer to prevent delayed playbacks if we're late
     int write_len = submod(sp->wptr,start_wptr);
