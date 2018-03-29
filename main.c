@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.99 2018/02/22 06:51:14 karn Exp karn $
+// $Id: main.c,v 1.100 2018/03/28 07:07:06 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -326,7 +326,9 @@ void *input_loop(void *arg){
   message.msg_controllen = 0;
   message.msg_flags = 0;
 
-  int eseq = -1;
+  uint16_t eseq;
+  uint32_t etimestamp;
+  int init = 0;
 
   while(1){
     // Listen for an I/Q packet
@@ -356,26 +358,49 @@ void *input_loop(void *arg){
       if(cnt < sizeof(rtp) + sizeof(demod->status))
 	continue; // Too small, ignore
       
+      cnt -= sizeof(rtp) + sizeof(demod->status);
+      int nsamples = cnt/4;      // count of 4-byte stereo samples
+
       // Convert RTP header to host byte order
       demod->iq_packets++;
       rtp.ssrc = ntohl(rtp.ssrc);
       rtp.seq = ntohs(rtp.seq);
       rtp.timestamp = ntohl(rtp.timestamp);
-      if(eseq != -1){
-	if((int16_t)(eseq - rtp.seq) < 0){
-	  Skips++;
-	} else if((int16_t)(eseq - rtp.seq) > 0){
-	  Delayed++;
-	}
+      if(!init){
+	// First packet
+	eseq = rtp.seq;
+	etimestamp = rtp.timestamp;
+	init = 1;
+      }
+      short seq_step = (short)(rtp.seq - eseq);
+      if(seq_step > 0)
+	Skips++;
+      else if(seq_step < 0){
+	// Duplicate or delayed; drop
+	Delayed++;
+	continue;
       }
       eseq = rtp.seq + 1;
 
+      int time_step = (int)(rtp.timestamp - etimestamp);
+      if(time_step < 0){
+	// Old samples; drop. Shouldn't happen if sequence number isn't old
+	continue;
+      } else if(time_step > 0 && time_step < DATASIZE/2){
+	  // Inject enough zeroes to keep the sample count correct
+	  // Arbitrary limit of 1/2 input ring buffer just to keep things from blowing up
+	  // Good enough for the occasional lost packet or two
+	  // May upset the I/Q DC offset and channel balance estimates, but hey you can't win 'em all
+	  short zeroes[2*time_step];
+	  memset(zeroes,0,sizeof(zeroes));
+	  demod->samples += time_step;
+	  proc_samples(demod,zeroes,time_step);
+      }
       update_status(demod,&new_status);
       // Pass PCM I/Q samples to corrector and input queue
-      cnt -= sizeof(rtp) + sizeof(demod->status);
-      // count 4-byte stereo samples
-      demod->samples += cnt/4;
-      proc_samples(demod,samples,cnt/4);
+      demod->samples += nsamples;
+      proc_samples(demod,samples,nsamples);
+      etimestamp = rtp.timestamp + nsamples;
     }
   }
   return NULL;
