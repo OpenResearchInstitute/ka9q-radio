@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.100 2018/03/28 07:07:06 karn Exp karn $
+// $Id: main.c,v 1.101 2018/03/29 09:05:56 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -43,10 +43,6 @@ pthread_t Display_thread;
 // Note: initialized to all zeroes, like all global variables
 struct demod Demod;
 struct audio Audio;
-
-// Multicast receive statistics
-int Skips;
-int Delayed;
 
 // Parameters with default values
 char Libdir[] = "/usr/local/share/ka9q-radio";
@@ -368,20 +364,21 @@ void *input_loop(void *arg){
       rtp.timestamp = ntohl(rtp.timestamp);
       if(!init){
 	// First packet
+	gettimeofday(&demod->start_time,NULL);
+	demod->samples = -nsamples; // Don't count this packet
 	eseq = rtp.seq;
 	etimestamp = rtp.timestamp;
 	init = 1;
       }
+      gettimeofday(&demod->current_time,NULL);
       short seq_step = (short)(rtp.seq - eseq);
       if(seq_step > 0)
-	Skips++;
+	demod->drops++;
       else if(seq_step < 0){
 	// Duplicate or delayed; drop
-	Delayed++;
+	demod->dupes++;
 	continue;
       }
-      eseq = rtp.seq + 1;
-
       int time_step = (int)(rtp.timestamp - etimestamp);
       if(time_step < 0){
 	// Old samples; drop. Shouldn't happen if sequence number isn't old
@@ -396,11 +393,13 @@ void *input_loop(void *arg){
 	  demod->samples += time_step;
 	  proc_samples(demod,zeroes,time_step);
       }
+      demod->samples += nsamples;
+      eseq = rtp.seq + 1;
+      etimestamp = rtp.timestamp + nsamples;
       update_status(demod,&new_status);
       // Pass PCM I/Q samples to corrector and input queue
-      demod->samples += nsamples;
       proc_samples(demod,samples,nsamples);
-      etimestamp = rtp.timestamp + nsamples;
+
     }
   }
   return NULL;

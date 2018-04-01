@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.60 2018/02/25 19:45:48 karn Exp karn $
+// $Id: radio.h,v 1.61 2018/03/28 07:07:41 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -52,6 +52,10 @@ struct demod {
   struct sockaddr ctl_address;
   unsigned long long iq_packets; // Count of I/Q input packets received
   unsigned long long samples;    // Count of raw I/Q samples received
+  unsigned long long dupes;
+  unsigned long long drops;
+  struct timeval start_time;
+  struct timeval current_time;
 
   // I/Q correction parameters
   float DC_i,DC_q;       // Average DC offsets
