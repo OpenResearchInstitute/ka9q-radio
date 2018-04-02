@@ -12,6 +12,7 @@ struct rtp_header {
   uint32_t ssrc;
 };
 #define RTP_VERS 2
+#define RTP_MARKER 0x80  // Marker flag in mpt field
 
 #define PCM_MONO_PT (11)
 #define PCM_STEREO_PT (10)

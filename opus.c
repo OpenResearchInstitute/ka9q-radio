@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.8 2018/03/27 18:10:00 karn Exp karn $
+// $Id: opus.c,v 1.9 2018/03/28 07:07:23 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -49,14 +49,15 @@ struct session {
   struct session *prev;       // Linked list pointers
   struct session *next; 
   uint32_t ssrc;            // RTP Sending Source ID
-  int eseq;                 // Next expected RTP sequence number
-  int etimestamp;           // Next expected RTP timestamp
-  int type;                 // RTP type (10,11)
+  int eseq;                 // Next expected RTP input sequence number
+  int etimestamp;           // Next expected RTP input timestamp
+  int type;                 // input RTP type (10,11)
   
   struct sockaddr sender;
   char addr[NI_MAXHOST];    // RTP Sender IP address
   char port[NI_MAXSERV];    // RTP Sender source port
   OpusEncoder *opus;        // Opus encoder handle
+  int silence;              // Currently suppressing silence
 
   int oseq;                 // Output sequence number
   int otimestamp;           // Output timestamp
@@ -398,10 +399,16 @@ int send_samples(struct session *sp,float left,float right){
 
       rtp_out.seq = htons(sp->oseq++);
       rtp_out.mpt = OPUS_PT; // Opus
+      if(sp->silence){
+	// Beginning of talk spurt after silence, set marker bit
+	rtp_out.mpt |= RTP_MARKER;
+	sp->silence = 0;
+      }
       rtp_out.ssrc = htonl(sp->ssrc);
       rtp_out.timestamp = htonl(sp->otimestamp);
       size = sendmsg(Output_fd,&message_out,0);
-    }
+    } else
+      sp->silence = 1;
     sp->otimestamp += Opus_frame_size;
   }
   return size;
