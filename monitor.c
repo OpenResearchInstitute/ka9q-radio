@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.42 2018/03/29 14:48:54 karn Exp karn $
+// $Id: monitor.c,v 1.43 2018/04/02 10:26:20 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -26,23 +26,23 @@
 #include "multicast.h"
 
 // Global config variables
+#define USE_COND 1            // Use pthread condition to signal from callback (portaudio deprecates this)
 #define SAMPRATE 48000        // Too hard to handle other sample rates right now
 #define MAX_MCAST 20          // Maximum number of multicast addresses
-#define PKTSIZE (16384)       // Maximum bytes per RTP packet - must be bigger than Ethernet MTU
+#define PKTSIZE 16384         // Maximum bytes per RTP packet - must be bigger than Ethernet MTU
 #define NCHAN 2               // 2 channels (stereo)
 #define SAMPPCALLBACK (SAMPRATE/100)     // 10 ms @ 48 kHz
-#define BUFFERSIZE (524288)   // about 10.92 sec at 48 kHz stereo - must be power of 2!!
+#define BUFFERSIZE (1<<19)    // about 10.92 sec at 48 kHz stereo - must be power of 2!!
 #define PAUSETHRESH (4*SAMPRATE)     // Pause after this many seconds of starvation
-#define SLOP (.05)            // Wake up before buffer underrun to allow time for processing (seconds)
+
 char *Mcast_address_text[MAX_MCAST]; // Multicast address(es) we're listening to
 char Audiodev[256];           // Name of audio device; empty means portaudio's default
-
 int Update_interval = 100;    // Default time in ms between display updates
 int List_audio;               // List audio output devices and exit
 int Verbose;                  // Verbosity flag (currently unused)
 int Quiet;                    // Disable curses
-int Nfds;                    // Number of streams
-struct session *Session;          // Link to head of session structure chain
+int Nfds;                     // Number of streams
+struct session *Session;      // Link to head of session structure chain
 PaStream *Pa_Stream;          // Portaudio stream handle
 int inDevNum;                 // Portaudio's audio output device index
 
@@ -51,8 +51,11 @@ int inDevNum;                 // Portaudio's audio output device index
 float const SCALE = 1./SHRT_MAX;
 WINDOW *Mainscr;
 
+#if USE_COND
 pthread_cond_t Upcall_cond;
 pthread_mutex_t Buffer_mutex;
+#endif
+
 struct timeval Start_unix_time;
 PaTime Start_pa_time;
 
@@ -69,7 +72,7 @@ struct session {
   struct session *next; 
   uint32_t ssrc;            // RTP Sending Source ID
   uint16_t eseq;            // Next expected RTP sequence number
-  int basetimestamp;        // RTP timestamp corresponding to current playback time (approx)
+  int basetime;        // RTP timestamp corresponding to approx current playback time
   int etimestamp;           // Next expected RTP timestamp
   int type;                 // RTP type (10,11,20,111)
   int reseq_count;
@@ -101,7 +104,7 @@ struct session {
   float output_buffer[BUFFERSIZE][NCHAN]; // Decoded audio output, written by processing thread and read by PA callback
   int wptr;                        // Write pointer into output_buffer
   int rptr;                        // Read pointer into output buffer
-  int offset;                      // Playout delay
+  int playout;                      // Playout delay
   int running;                     // Callback is reading our output buffer and advancing rptr
 };
 struct session *Current;
@@ -247,8 +250,10 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
 
+#if USE_COND
   pthread_cond_init(&Upcall_cond,NULL);
   pthread_mutex_init(&Buffer_mutex,NULL);
+#endif
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -321,10 +326,11 @@ int main(int argc,char * const argv[]){
       if(size <= sizeof(pkt->rtp))
 	continue; // Must be big enough for RTP header and at least some data
 
-      if(pkt->rtp.mpt != PCM_STEREO_PT
-	 && pkt->rtp.mpt != OPUS_PT
-	 && pkt->rtp.mpt != 20           // Old fixed value for Opus, take this out eventually
-	 && pkt->rtp.mpt != PCM_MONO_PT) // 1 byte, no need to byte swap
+      int type = pkt->rtp.mpt & ~RTP_MARKER;
+      if(type != PCM_STEREO_PT
+	 && type != OPUS_PT
+	 && type != 20           // Old fixed value for Opus, take this out eventually
+	 && type != PCM_MONO_PT) // 1 byte, no need to byte swap
 	continue; // Discard unknown RTP types to avoid polluting session table
       
       // Convert RTP header to host order
@@ -403,17 +409,26 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     if(!sp->running)
       continue;
 
+    // Use temp for index so rptr is updated in steps
+    // This is important so the sleep in the decoder sleeps the entire interval
+    int index = sp->rptr;
     for(int n=0;n < framesPerBuffer; n++){
       for(int j = 0; j < NCHAN; j++){
-	out[n][j] += sp->output_buffer[sp->rptr][j];
-	sp->output_buffer[sp->rptr][j] = 0; // Burn after reading
+	out[n][j] += sp->output_buffer[index][j];
+	sp->output_buffer[index][j] = 0; // Burn after reading
       }
-      sp->rptr++;
-      sp->rptr &= (BUFFERSIZE-1);
+      index++;
+      index &= (BUFFERSIZE-1);
     }
+    sp->rptr = index;
   }
   Samples += framesPerBuffer;
   Callbacks++;
+#if USE_COND
+  pthread_mutex_lock(&Buffer_mutex);
+  pthread_cond_broadcast(&Upcall_cond);
+  pthread_mutex_unlock(&Buffer_mutex);  
+#endif
   return paContinue;
 }
 
@@ -443,7 +458,7 @@ void *decode_task(void *arg){
   pthread_cleanup_push(decode_task_cleanup,arg);
 
   sp->gain = 1;    // 0 dB by default
-  sp->offset = 0;  // Bad things can happen if this is negative during the first packet, as sp->frame_size may not get set
+  sp->playout = 0;  // Bad things can happen if this is negative during the first packet, as sp->frame_size may not get set
   sp->wptr = SAMPPCALLBACK; // Ahead of the D/A by one callback block, since it can happen at any time
 
   struct packet *pkt = NULL;
@@ -456,7 +471,9 @@ void *decode_task(void *arg){
   sp->queue = pkt->next;
   pkt->next = NULL;
   pthread_mutex_unlock(&sp->qmutex);
-  sp->basetimestamp = sp->etimestamp = pkt->rtp.timestamp; // note: sp->eseq is already initialized
+  sp->basetime = sp->etimestamp = pkt->rtp.timestamp; // note: sp->eseq is already initialized
+
+  int lastmarker;
 
   // Main loop; run until canceled
   while(1){
@@ -469,8 +486,8 @@ void *decode_task(void *arg){
 	if(++sp->reseq_count >= 3){
 	  //resynch
 	  sp->eseq = pkt->rtp.seq;
-	  sp->basetimestamp = sp->etimestamp = pkt->rtp.timestamp;
-	  sp->offset = 0;
+	  sp->basetime = sp->etimestamp = pkt->rtp.timestamp;
+	  sp->playout = 0;
 	} else {
 	  // Discard wildly different sequence numbers
 	  sp->dupes++;
@@ -479,31 +496,37 @@ void *decode_task(void *arg){
 	}
       }
       sp->reseq_count = 0;
-      sp->type = pkt->rtp.mpt;      
+      sp->type = pkt->rtp.mpt & ~RTP_MARKER;
+      int marker = pkt->rtp.mpt & RTP_MARKER;
       if(seq_offset > 0)
 	sp->drops += seq_offset;
 
       sp->eseq = pkt->rtp.seq + 1;
-      int time_offset = (int)(pkt->rtp.timestamp - sp->basetimestamp);
 
-      if(!seq_offset && (int)(pkt->rtp.timestamp - sp->etimestamp) > 0){
-	// Beginning of talk spurt after silence suppression
+      int time_offset = (int)(pkt->rtp.timestamp - sp->basetime);
+      
+      if(!seq_offset && (marker || (int)(pkt->rtp.timestamp - sp->etimestamp) > 0)){
+	// In sequence, beginning of talk spurt after silence suppression
 	// Good time to shrink the playout buffer
 	int silence = (int)(pkt->rtp.timestamp - sp->etimestamp);
-	sp->offset = max(0,sp->offset - silence);
-      }
-      if(time_offset < -sp->offset){
+	lastmarker = pkt->rtp.timestamp;
+	sp->playout = max(-time_offset,sp->playout - silence);
+	//	printf("marker, base %d time offset %d silence %d new playout %d\n",sp->basetime,
+	//	       time_offset,silence,sp->playout);
+      } else if(time_offset < -sp->playout){
 	// This shouldn't happen if we just shrank the playout buffer...
 	// Late packet during talk spurt, drop as late
+	//	printf("late: base %d since last marker %d time offset %d playout %d\n",
+	//	       sp->basetime,(int)(pkt->rtp.timestamp - lastmarker),time_offset,sp->playout);
 	sp->lates++;
-	sp->offset += SAMPPCALLBACK; // increase playout in quanta of callback blocks
+	sp->playout += sp->frame_size; // increase playout in quanta of frames
 	sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
 	free(pkt); pkt = NULL;
 	goto nextpacket;
       }
       // Decode frame, write into output buffer
       //    printf("Processing at %d\n",pkt->rtp.timestamp);
-      int wp = (time_offset + sp->offset + sp->wptr) & (BUFFERSIZE-1);
+      int wp = (time_offset + sp->playout + sp->wptr) & (BUFFERSIZE-1);
       switch(sp->type){
       case PCM_STEREO_PT:
 	sp->channels = 2;
@@ -557,7 +580,7 @@ void *decode_task(void *arg){
       sp->erasures++;
       //      printf("erasure at etimestamp %d\n",sp->etimestamp);
       // We didn't get what we wanted in time; insert erasures
-      int wp = (sp->offset + sp->wptr) & (BUFFERSIZE-1);
+      int wp = (sp->playout + sp->wptr) & (BUFFERSIZE-1);
       switch(sp->type){
 #if 0 // not really needed for PCM since it'll already be zeroed 
       case PCM_STEREO_PT:
@@ -609,12 +632,19 @@ void *decode_task(void *arg){
       assert(sp->frame_size != 0); // Should have been set by now
 
       // Nothing on queue; wait for the D/A to catch up and look again
-      while(signmod(sp->wptr - sp->rptr) > SAMPPCALLBACK)
-	usleep(1000);  // Nothing else to do; wait for the D/A to catch up with us
-	
-      sp->basetimestamp += sp->frame_size;
       sp->wptr += sp->frame_size;
       sp->wptr &= (BUFFERSIZE-1);
+
+#if USE_COND
+      pthread_mutex_lock(&Buffer_mutex);
+      while(signmod(sp->wptr - sp->rptr) > SAMPPCALLBACK)
+	pthread_cond_wait(&Upcall_cond,&Buffer_mutex);
+      pthread_mutex_unlock(&Buffer_mutex);      
+#else // use timer
+      while(signmod(sp->wptr - sp->rptr) > SAMPPCALLBACK)
+	usleep(1000);  // Nothing else to do; wait for the D/A to catch up with us
+#endif
+      sp->basetime += sp->frame_size;
     }
 
   }
@@ -637,7 +667,7 @@ void *display(void *arg){
     int row = 2;
     wmove(Mainscr,row,0);
     wclrtobot(Mainscr);
-    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain      SSRC     Packets   Dupe   Drop      Late  Erasures Delay Source                Dest");
+    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain      SSRC     Packets   Dupe   Drop      Late  Erasures Queue Source                Dest");
 
     for(struct session *sp = Session; sp; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
@@ -699,7 +729,7 @@ void *display(void *arg){
 		sp->drops,
 		sp->lates,
 		sp->erasures,
-		(double)sp->offset/SAMPRATE,
+		(double)signmod(sp->etimestamp - sp->basetime)/SAMPRATE,
 		source_text,
 		sp->dest);
       wattr_off(Mainscr,A_BOLD,NULL);
@@ -749,10 +779,10 @@ void *display(void *arg){
 	Current->gain /= 1.122018454; // 1 dB
 	break;
       case KEY_RIGHT:
-	Current->offset += 480; // 10 ms
+	Current->playout += 480; // 10 ms
 	break;
       case KEY_LEFT:
-	Current->offset = max(0,Current->offset - 480);
+	Current->playout = max(0,Current->playout - 480);
 	break;
       case 'd':
 	{
@@ -760,6 +790,9 @@ void *display(void *arg){
 	  close_session(Current);
 	  Current = next;
 	}
+	break;
+      case '\f':  // Screen repaint (formfeed, aka control-L)
+	clearok(curscr,TRUE);
 	break;
       default:
 	break;
