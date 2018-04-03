@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.43 2018/04/02 10:26:20 karn Exp karn $
+// $Id: monitor.c,v 1.45 2018/04/03 05:28:27 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -473,14 +473,25 @@ void *decode_task(void *arg){
   pthread_mutex_unlock(&sp->qmutex);
   sp->basetime = sp->etimestamp = pkt->rtp.timestamp; // note: sp->eseq is already initialized
 
-  //  int lastmarker;
-
   // Main loop; run until canceled
   while(1){
 
-    if(pkt){
+    int packets_processed_in_loop;
+    for(packets_processed_in_loop = 0; ; packets_processed_in_loop++){
+      // Poll the queue
+      pthread_mutex_lock(&sp->qmutex);
+      if(sp->queue){
+	// Grab it
+	pkt = sp->queue;
+	sp->queue = pkt->next;
+	pkt->next = NULL;
+      }
+      pthread_mutex_unlock(&sp->qmutex);    
+      if(!pkt)
+	break; // Nothing else left on queue
+      
       sp->packets++;
-
+      
       int seq_offset = (signed short)(pkt->rtp.seq - sp->eseq);
       if(seq_offset < -5 || seq_offset > 50){
 	if(++sp->reseq_count >= 3){
@@ -492,22 +503,19 @@ void *decode_task(void *arg){
 	  // Discard wildly different sequence numbers
 	  sp->dupes++;
 	  free(pkt);  pkt = NULL;
-	  goto nextpacket;
+	  continue;
 	}
       }
       sp->reseq_count = 0;
       sp->type = pkt->rtp.mpt & ~RTP_MARKER;
       int marker = pkt->rtp.mpt & RTP_MARKER;
-
+      
       if(seq_offset > 0)
 	sp->drops += seq_offset;
-
-      sp->eseq = pkt->rtp.seq + 1;
-
       
-
-
-      // extract these here since frame_size might change
+      sp->eseq = pkt->rtp.seq + 1;
+      
+      // extract these here since frame_size might change (especially with PCM)
       // and we need it for etimestamp updates
       switch(sp->type){
       case PCM_STEREO_PT:
@@ -524,13 +532,31 @@ void *decode_task(void *arg){
 	sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
 	break;
       }
-
+      
       int time_offset = (int)(pkt->rtp.timestamp - sp->basetime);
-      if(!seq_offset && (marker || (int)(pkt->rtp.timestamp - sp->etimestamp) > 0)){
+      int lost_offset = (int)(sp->etimestamp - sp->basetime);
+      int lost_interval = (int)(pkt->rtp.timestamp - sp->etimestamp);
+
+      if(sp->type == OPUS_PT && seq_offset > 3 && (int)(pkt->rtp.timestamp - sp->etimestamp) > 0){
+	// Lost packet - do Opus FEC/error concealment
+	sp->erasures += seq_offset;
+	int wp = (lost_offset + sp->playout + sp->wptr) & (BUFFERSIZE-1);
+	// Opus erasure handling - should also support FEC through look-ahead
+	float bounce[lost_interval][NCHAN];
+	// Decode any FEC, otherwise interpolate or create comfort noise
+	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
+	assert(samples == lost_interval);
+	if(samples > 0){
+	  for(int i=0; i<samples; i++){
+	    for(int j=0; j < NCHAN; j++)
+	      sp->output_buffer[wp][j] = bounce[i][j] * sp->gain;
+	    wp++; wp &= (BUFFERSIZE-1);
+	  }
+	}
+      } else if(!seq_offset && (marker || lost_interval > 0)){
 	// In sequence, beginning of talk spurt after silence suppression
 	// Good time to shrink the playout buffer
-	int silence = (int)(pkt->rtp.timestamp - sp->etimestamp);
-	sp->playout = max(-time_offset,sp->playout - silence);
+	sp->playout = max(-time_offset,sp->playout - lost_interval);
       } else if(time_offset < -sp->playout){
 	// This shouldn't happen if we just shrank the playout buffer...
 	// Late packet during talk spurt, drop as late
@@ -538,7 +564,7 @@ void *decode_task(void *arg){
 	sp->playout += sp->frame_size; // increase playout in quanta of frames
 	sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
 	free(pkt); pkt = NULL;
-	goto nextpacket;
+	continue;
       }
       // Decode frame, write into output buffer
       int wp = (time_offset + sp->playout + sp->wptr) & (BUFFERSIZE-1);
@@ -582,77 +608,23 @@ void *decode_task(void *arg){
       sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
       free(pkt); pkt = NULL;
       sp->running = 1; // Start at last moment
-    } else if (sp->frame_size){
-      // pkt == NULL; Nothing arrived in time, but only if we have earlier packets to tell us the frame size
-      sp->erasures++;
-      // We didn't get what we wanted in time; insert erasures
-      int wp = (sp->playout + sp->wptr) & (BUFFERSIZE-1);
-      switch(sp->type){
-#if 0 // not really needed for PCM since it'll already be zeroed 
-      case PCM_STEREO_PT:
-      case PCM_MONO_PT:
-	if(wp + sp->frame_size <= BUFFERSIZE)
-	  memset(sp->output_buffer[wp],0,sp->frame_size * sizeof(sp->output_buffer[wp]));
-	else {
-	  memset(sp->output_buffer[wp],0,(BUFFERSIZE - wp) * sizeof(sp->output_buffer[wp]));	  
-	  memset(sp->output_buffer[0],0,(wp + sp->frame_size - BUFFERSIZE) * sizeof(sp->output_buffer[wp]));	  
-	}
-	break;
-#endif
-      case OPUS_PT:
-      case 20:
-	{
-	  // Opus erasure handling - should also support FEC through look-ahead
-	  float bounce[sp->frame_size][NCHAN];
-	  int samples = opus_decode_float(sp->opus,NULL,0,&bounce[0][0],sp->frame_size,0);	
-	  assert(samples == sp->frame_size);
-	  if(samples > 0){
-	    for(int i=0; i<samples; i++){
-	      for(int j=0; j < NCHAN; j++)
-		sp->output_buffer[wp][j] = bounce[i][j] * sp->gain;
-	      wp++; wp &= (BUFFERSIZE-1);
-	    }
-	  }
-	}
-	break;
-      }
-      sp->running = 1; // Start at last moment
     }
-    // We must always go through here on every loop iteration to advance the time by one frame
-    // i.e., avoid continue statements above
-  nextpacket: ;
-    assert(!pkt); // any packet must be consumed by this point
-    while(1){
-      // Poll the queue
-      pthread_mutex_lock(&sp->qmutex);
-      if(sp->queue){
-	// Grab it
-	pkt = sp->queue;
-	sp->queue = pkt->next;
-	pkt->next = NULL;
-      }
-      pthread_mutex_unlock(&sp->qmutex);    
-      if(pkt)
-	break;
-
-      assert(sp->frame_size != 0); // Should have been set by now
-
-      // Nothing on queue; wait for the D/A to catch up and look again
-      sp->wptr += sp->frame_size;
-      sp->wptr &= (BUFFERSIZE-1);
+    // advance time by one frame to let the D/A catch up
+    sp->wptr += sp->frame_size;
+    sp->wptr &= (BUFFERSIZE-1);
 
 #if USE_COND
-      pthread_mutex_lock(&Buffer_mutex);
-      while(signmod(sp->wptr - sp->rptr) > SAMPPCALLBACK)
-	pthread_cond_wait(&Upcall_cond,&Buffer_mutex);
-      pthread_mutex_unlock(&Buffer_mutex);      
+    pthread_mutex_lock(&Buffer_mutex);
+    while(signmod(sp->wptr - sp->rptr) > SAMPPCALLBACK)
+      pthread_cond_wait(&Upcall_cond,&Buffer_mutex);
+    pthread_mutex_unlock(&Buffer_mutex);      
 #else // use timer
-      while(signmod(sp->wptr - sp->rptr) > SAMPPCALLBACK)
-	usleep(1000);  // Nothing else to do; wait for the D/A to catch up with us
+    while(signmod(sp->wptr - sp->rptr) > SAMPPCALLBACK)
+      usleep(1000);  // Nothing else to do; wait for the D/A to catch up with us
 #endif
-      sp->basetime += sp->frame_size;
-    }
-
+    sp->basetime += sp->frame_size;
+    if(signmod(sp->etimestamp - sp->basetime + sp->playout) > PAUSETHRESH)
+      sp->running = 0;
   }
   pthread_cleanup_pop(1);
   return NULL;
