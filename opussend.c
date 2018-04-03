@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.6 2018/03/27 07:59:33 karn Exp karn $
+// $Id: opussend.c,v 1.7 2018/03/27 21:12:49 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -38,6 +38,7 @@ float Opus_blocktime = 20;    // 20 ms, a reasonable default
 int Opus_bitrate = 32;        // Opus stream audio bandwidth; default 32 kb/s
 int const Channels = 2;       // Stereo - no penalty if the audio is actually mono, Opus will figure it out
 int Discontinuous = 0;        // Off by default
+int Fec = 0;
 // End of config stuff
 
 OpusEncoder *Opus;
@@ -103,6 +104,9 @@ int main(int argc,char * const argv[]){
       break;
     case 'x':
       Discontinuous = 1;
+      break;
+    case 'f':
+      Fec = 1;
       break;
     default:
       fprintf(stderr,"Usage: %s [-x] [-v] [-o bitrate] [-B blocktime] [-I input_mcast_address] [-R output_mcast_address][-T mcast_ttl]\n",argv[0]);
@@ -218,6 +222,12 @@ int main(int argc,char * const argv[]){
   if(error != OPUS_OK){
     fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
   }
+
+  error = opus_encoder_ctl(Opus,OPUS_SET_INBAND_FEC(Fec));
+  if(error != OPUS_OK){
+    fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
+  }
+
 
   // Always seems to return error -5 even when OK??
   error = opus_encoder_ctl(Opus,OPUS_FRAMESIZE_ARG,(int)Opus_frame_size);

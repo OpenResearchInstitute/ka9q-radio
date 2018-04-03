@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.9 2018/03/28 07:07:23 karn Exp karn $
+// $Id: opus.c,v 1.10 2018/04/02 21:05:27 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -40,6 +40,7 @@ int Opus_frame_size;
 int Opus_bitrate = 32;        // Opus stream audio bandwidth; default 32 kb/s
 int const Channels = 2;       // Stereo - no penalty if the audio is actually mono, Opus will figure it out
 int Discontinuous = 0;        // Off by default
+int Fec = 0;                  // Use forward error correction
 
 
 float const SCALE = 1./SHRT_MAX;
@@ -94,8 +95,11 @@ int main(int argc,char * const argv[]){
 
   int c;
   Mcast_ttl = 5; // By default, let Opus be routed
-  while((c = getopt(argc,argv,"I:vR:B:o:xT:")) != EOF){
+  while((c = getopt(argc,argv,"fI:vR:B:o:xT:")) != EOF){
     switch(c){
+    case 'f':
+      Fec = 1;
+      break;
     case 'T':
       Mcast_ttl = strtol(optarg,NULL,0);
       break;
@@ -228,6 +232,12 @@ int main(int argc,char * const argv[]){
       error = opus_encoder_ctl(sp->opus,OPUS_SET_BITRATE(Opus_bitrate));
       if(error != OPUS_OK){
 	fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
+	exit(1);
+      }
+
+      error = opus_encoder_ctl(sp->opus,OPUS_SET_INBAND_FEC(Fec));
+      if(error != OPUS_OK){
+	fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
 	exit(1);
       }
 
