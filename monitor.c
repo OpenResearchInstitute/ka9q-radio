@@ -367,7 +367,7 @@ int main(int argc,char * const argv[]){
       struct packet *q_prev = NULL;
       struct packet *qe = NULL;
       pthread_mutex_lock(&sp->qmutex);
-      for(qe = sp->queue;qe; q_prev = qe,qe = qe->next){
+      for(qe = sp->queue; qe; q_prev = qe,qe = qe->next){
 	if(pkt->rtp.seq < qe->rtp.seq)
 	  break;
       }
@@ -473,7 +473,7 @@ void *decode_task(void *arg){
   pthread_mutex_unlock(&sp->qmutex);
   sp->basetime = sp->etimestamp = pkt->rtp.timestamp; // note: sp->eseq is already initialized
 
-  int lastmarker;
+  //  int lastmarker;
 
   // Main loop; run until canceled
   while(1){
@@ -498,26 +498,42 @@ void *decode_task(void *arg){
       sp->reseq_count = 0;
       sp->type = pkt->rtp.mpt & ~RTP_MARKER;
       int marker = pkt->rtp.mpt & RTP_MARKER;
+
       if(seq_offset > 0)
 	sp->drops += seq_offset;
 
       sp->eseq = pkt->rtp.seq + 1;
 
-      int time_offset = (int)(pkt->rtp.timestamp - sp->basetime);
       
+
+
+      // extract these here since frame_size might change
+      // and we need it for etimestamp updates
+      switch(sp->type){
+      case PCM_STEREO_PT:
+	sp->channels = 2;
+	sp->frame_size = pkt->len / 4; // Number of stereo samples
+	break;
+      case PCM_MONO_PT:
+	sp->channels = 1;
+	sp->frame_size = pkt->len / 2; // Number of stereo samples
+	break;
+      case OPUS_PT:
+	sp->channels = opus_packet_get_nb_channels(pkt->data);
+	sp->opus_bandwidth = opus_packet_get_bandwidth(pkt->data);
+	sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
+	break;
+      }
+
+      int time_offset = (int)(pkt->rtp.timestamp - sp->basetime);
       if(!seq_offset && (marker || (int)(pkt->rtp.timestamp - sp->etimestamp) > 0)){
 	// In sequence, beginning of talk spurt after silence suppression
 	// Good time to shrink the playout buffer
 	int silence = (int)(pkt->rtp.timestamp - sp->etimestamp);
-	lastmarker = pkt->rtp.timestamp;
 	sp->playout = max(-time_offset,sp->playout - silence);
-	//	printf("marker, base %d time offset %d silence %d new playout %d\n",sp->basetime,
-	//	       time_offset,silence,sp->playout);
       } else if(time_offset < -sp->playout){
 	// This shouldn't happen if we just shrank the playout buffer...
 	// Late packet during talk spurt, drop as late
-	//	printf("late: base %d since last marker %d time offset %d playout %d\n",
-	//	       sp->basetime,(int)(pkt->rtp.timestamp - lastmarker),time_offset,sp->playout);
 	sp->lates++;
 	sp->playout += sp->frame_size; // increase playout in quanta of frames
 	sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
@@ -525,25 +541,19 @@ void *decode_task(void *arg){
 	goto nextpacket;
       }
       // Decode frame, write into output buffer
-      //    printf("Processing at %d\n",pkt->rtp.timestamp);
       int wp = (time_offset + sp->playout + sp->wptr) & (BUFFERSIZE-1);
+      signed short *data_ints = (signed short *)&pkt->data[0];
       switch(sp->type){
       case PCM_STEREO_PT:
-	sp->channels = 2;
-	sp->frame_size = pkt->len / 4; // Number of stereo samples
-	signed short (*data_stereo_ints)[NCHAN] = (signed short (*)[NCHAN])pkt->data;
 	for(int i=0; i < sp->frame_size; i++){
 	  for(int j=0; j < NCHAN; j++)
-	    sp->output_buffer[wp][j] = SCALE * ntohs(data_stereo_ints[i][j]) * sp->gain;
+	    sp->output_buffer[wp][j] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
 	  wp++; wp &= (BUFFERSIZE-1);
 	}
 	break;
       case PCM_MONO_PT:
-	sp->channels = 1;
-	sp->frame_size = pkt->len / 2; // Number of mono samples      
-	signed short *data_ints = (signed short *)pkt->data;
 	for(int i=0; i < sp->frame_size; i++){
-	  sp->output_buffer[wp][0] = SCALE * ntohs(data_ints[i]) * sp->gain;
+	  sp->output_buffer[wp][0] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
 	  for(int j=1; j < NCHAN; j++)
 	    sp->output_buffer[wp][j] = sp->output_buffer[wp][0];
 	  wp++; wp &= (BUFFERSIZE-1);
@@ -555,9 +565,6 @@ void *decode_task(void *arg){
 	  int error;
 	  sp->opus = opus_decoder_create(SAMPRATE,NCHAN,&error);
 	}
-	sp->channels = opus_packet_get_nb_channels(pkt->data);
-	sp->opus_bandwidth = opus_packet_get_bandwidth(pkt->data);
-	sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
 	{
 	  float bounce[sp->frame_size][NCHAN];
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);	
@@ -578,7 +585,6 @@ void *decode_task(void *arg){
     } else if (sp->frame_size){
       // pkt == NULL; Nothing arrived in time, but only if we have earlier packets to tell us the frame size
       sp->erasures++;
-      //      printf("erasure at etimestamp %d\n",sp->etimestamp);
       // We didn't get what we wanted in time; insert erasures
       int wp = (sp->playout + sp->wptr) & (BUFFERSIZE-1);
       switch(sp->type){
@@ -729,7 +735,7 @@ void *display(void *arg){
 		sp->drops,
 		sp->lates,
 		sp->erasures,
-		(double)signmod(sp->etimestamp - sp->basetime)/SAMPRATE,
+		(double)signmod(sp->etimestamp - sp->basetime + sp->playout)/SAMPRATE,
 		source_text,
 		sp->dest);
       wattr_off(Mainscr,A_BOLD,NULL);
