@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.10 2018/04/02 21:05:27 karn Exp karn $
+// $Id: opus.c,v 1.11 2018/04/03 20:58:39 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -95,10 +95,10 @@ int main(int argc,char * const argv[]){
 
   int c;
   Mcast_ttl = 5; // By default, let Opus be routed
-  while((c = getopt(argc,argv,"fI:vR:B:o:xT:")) != EOF){
+  while((c = getopt(argc,argv,"f:I:vR:B:o:xT:")) != EOF){
     switch(c){
     case 'f':
-      Fec = 1;
+      Fec = strtol(optarg,NULL,0);
       break;
     case 'T':
       Mcast_ttl = strtol(optarg,NULL,0);
@@ -219,34 +219,31 @@ int main(int argc,char * const argv[]){
       sp->audio_index = 0;
       int error = 0;
       sp->opus = opus_encoder_create(Samprate,Channels,OPUS_APPLICATION_AUDIO,&error);
-      if(error != OPUS_OK){
+      if(error != OPUS_OK || !sp->opus){
 	fprintf(stderr,"opus_encoder_create error %d\n",error);
 	exit(1);
       }
       error = opus_encoder_ctl(sp->opus,OPUS_SET_DTX(Discontinuous));
-      if(error != OPUS_OK){
+      if(error != OPUS_OK)
 	fprintf(stderr,"opus_encoder_ctl set discontinuous %d: error %d\n",Discontinuous,error);
-	exit(1);
-      }
 
       error = opus_encoder_ctl(sp->opus,OPUS_SET_BITRATE(Opus_bitrate));
-      if(error != OPUS_OK){
+      if(error != OPUS_OK)
 	fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
-	exit(1);
-      }
 
-      error = opus_encoder_ctl(sp->opus,OPUS_SET_INBAND_FEC(Fec));
-      if(error != OPUS_OK){
-	fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
-	exit(1);
+      if(Fec){
+	error = opus_encoder_ctl(sp->opus,OPUS_SET_INBAND_FEC(Fec));
+	if(error != OPUS_OK)
+	  fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
+	error = opus_encoder_ctl(sp->opus,OPUS_SET_PACKET_LOSS_PERC(Fec));
+	if(error != OPUS_OK)
+	  fprintf(stderr,"opus_encoder_ctl set FEC loss rate %d%% error %d\n",Fec,error);
       }
 
       // Always seems to return error -5 even when OK??
       error = opus_encoder_ctl(sp->opus,OPUS_FRAMESIZE_ARG,Opus_blocktime);
-      if(0 && error != OPUS_OK){
+      if(0 && error != OPUS_OK)
 	fprintf(stderr,"opus_encoder_ctl set framesize %d (%.1lf ms): error %d\n",Opus_frame_size,Opus_blocktime,error);
-	exit(1);
-      }
     }
     sp->packets++;
     sp->type = rtp_in.mpt;

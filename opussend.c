@@ -79,7 +79,7 @@ int main(int argc,char * const argv[]){
   int c;
   int List_audio = 0;
   Mcast_ttl = 5; // By default, let Opus be routed
-  while((c = getopt(argc,argv,"I:vR:B:o:xT:L")) != EOF){
+  while((c = getopt(argc,argv,"I:vR:B:o:xT:Lf:")) != EOF){
     switch(c){
     case 'L':
       List_audio++;
@@ -106,7 +106,7 @@ int main(int argc,char * const argv[]){
       Discontinuous = 1;
       break;
     case 'f':
-      Fec = 1;
+      Fec = strtol(optarg,NULL,0);
       break;
     default:
       fprintf(stderr,"Usage: %s [-x] [-v] [-o bitrate] [-B blocktime] [-I input_mcast_address] [-R output_mcast_address][-T mcast_ttl]\n",argv[0]);
@@ -223,9 +223,13 @@ int main(int argc,char * const argv[]){
     fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
   }
 
-  error = opus_encoder_ctl(Opus,OPUS_SET_INBAND_FEC(Fec));
-  if(error != OPUS_OK){
-    fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
+  if(Fec){
+    error = opus_encoder_ctl(Opus,OPUS_SET_INBAND_FEC(Fec != 0));
+    if(error != OPUS_OK)
+      fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
+    error = opus_encoder_ctl(Opus,OPUS_SET_PACKET_LOSS_PERC(Fec));
+    if(error != OPUS_OK)
+      fprintf(stderr,"opus_encoder_ctl set FEC loss rate %d%% error %d\n",Fec,error);
   }
 
 
