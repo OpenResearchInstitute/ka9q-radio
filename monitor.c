@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.45 2018/04/03 05:28:27 karn Exp karn $
+// $Id: monitor.c,v 1.46 2018/04/03 20:58:16 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -537,7 +537,7 @@ void *decode_task(void *arg){
       int lost_offset = (int)(sp->etimestamp - sp->basetime);
       int lost_interval = (int)(pkt->rtp.timestamp - sp->etimestamp);
 
-      if(sp->type == OPUS_PT && seq_offset > 3 && (int)(pkt->rtp.timestamp - sp->etimestamp) > 0){
+      if(sp->type == OPUS_PT && sp->opus && seq_offset < 3 && (int)(pkt->rtp.timestamp - sp->etimestamp) > 0){
 	// Lost packet - do Opus FEC/error concealment
 	sp->erasures += seq_offset;
 	int wp = (lost_offset + sp->playout + sp->wptr) & (BUFFERSIZE-1);

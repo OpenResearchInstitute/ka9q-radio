@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.7 2018/03/27 21:12:49 karn Exp karn $
+// $Id: opussend.c,v 1.9 2018/04/03 21:29:12 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -224,9 +224,9 @@ int main(int argc,char * const argv[]){
   }
 
   if(Fec){
-    error = opus_encoder_ctl(Opus,OPUS_SET_INBAND_FEC(Fec != 0));
+    error = opus_encoder_ctl(Opus,OPUS_SET_INBAND_FEC(1));
     if(error != OPUS_OK)
-      fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
+      fprintf(stderr,"opus_encoder_ctl set FEC on error %d\n",error);
     error = opus_encoder_ctl(Opus,OPUS_SET_PACKET_LOSS_PERC(Fec));
     if(error != OPUS_OK)
       fprintf(stderr,"opus_encoder_ctl set FEC loss rate %d%% error %d\n",Fec,error);

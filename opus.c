@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.11 2018/04/03 20:58:39 karn Exp karn $
+// $Id: opus.c,v 1.12 2018/04/03 21:28:50 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -232,9 +232,9 @@ int main(int argc,char * const argv[]){
 	fprintf(stderr,"opus_encoder_ctl set bitrate %d: error %d\n",Opus_bitrate,error);
 
       if(Fec){
-	error = opus_encoder_ctl(sp->opus,OPUS_SET_INBAND_FEC(Fec));
+	error = opus_encoder_ctl(sp->opus,OPUS_SET_INBAND_FEC(1));
 	if(error != OPUS_OK)
-	  fprintf(stderr,"opus_encoder_ctl set FEC %d error %d\n",Fec,error);
+	  fprintf(stderr,"opus_encoder_ctl set FEC on error %d\n",error);
 	error = opus_encoder_ctl(sp->opus,OPUS_SET_PACKET_LOSS_PERC(Fec));
 	if(error != OPUS_OK)
 	  fprintf(stderr,"opus_encoder_ctl set FEC loss rate %d%% error %d\n",Fec,error);
