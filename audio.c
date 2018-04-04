@@ -21,7 +21,7 @@
 #include "audio.h"
 #include "multicast.h"
 
-#define PCM_BUFSIZE 700        // 16-bit word count; must fit in Ethernet MTU
+#define PCM_BUFSIZE 480        // 16-bit word count; must fit in Ethernet MTU
 
 uint16_t Rtp_seq = 0;
 uint32_t Ssrc;
@@ -139,8 +139,8 @@ int send_mono_audio(struct audio * const audio,float const * buffer,int size){
 	perror("pcm: sendmsg");
 	break;
       }
-      size -= chunk;
     }
+    size -= chunk;
   }
   return 0;
 }
