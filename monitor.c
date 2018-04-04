@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.48 2018/04/04 01:24:55 karn Exp karn $
+// $Id: monitor.c,v 1.49 2018/04/04 05:58:26 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -518,29 +518,45 @@ void *decode_task(void *arg){
       sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
       break;
     }
-    
+    int wp = sp->wptr;    
     int lost_interval = (int)(pkt->rtp.timestamp - sp->etimestamp);
     sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
-    
-    if(sp->type == OPUS_PT && sp->opus && seq_offset < 3 && lost_interval > 0){
-      // Lost packet - do Opus FEC/error concealment
-      sp->erasures += seq_offset;
-      int wp = sp->wptr;
-      // Opus erasure handling - should also support FEC through look-ahead
-      float bounce[lost_interval][NCHAN];
-      // Decode any FEC, otherwise interpolate or create comfort noise
-      int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
-      assert(samples == lost_interval);
-      if(samples > 0){
-	for(int i=0; i<samples; i++){
-	  for(int j=0; j < NCHAN; j++)
-	    sp->output_buffer[wp][j] = bounce[i][j] * sp->gain;
-	  wp++; wp &= (BUFFERSIZE-1);
+    if(lost_interval > 0){
+      // Missing data -- if marker, just reset decoder and recover lost time
+      if(sp->type == OPUS_PT && sp->opus){
+	if(marker || seq_offset >= 3 || lost_interval >= 3840) {
+	  opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder and catch up
+	} else {
+	  // Opus error concealment with FEC
+	  sp->erasures += seq_offset;
+
+	  // Opus erasure handling - should also support FEC through look-ahead
+	  float bounce[lost_interval][NCHAN];
+	  // Decode any FEC, otherwise interpolate or create comfort noise
+	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
+	  assert(samples == lost_interval);
+	  if(samples > 0){
+	    for(int i=0; i<samples; i++){
+	      for(int j=0; j < NCHAN; j++)
+		sp->output_buffer[wp][j] = bounce[i][j] * sp->gain;
+	      wp++; wp &= (BUFFERSIZE-1);
+	    }
+	  }
 	}
-      }
+      } else {
+	// PCM
+	if(!marker && seq_offset < 3 && lost_interval < 3840){
+	  // Pad with zeroes
+	  sp->erasures += seq_offset;
+	  for(int i=0; i < lost_interval; i++){
+	    sp->output_buffer[wp][0] = 0;
+	    sp->output_buffer[wp][1] = 0;
+	    wp++; wp &= (BUFFERSIZE-1);
+	  }
+	}
+      }	  
     }
     // Decode frame, write into output buffer
-    int wp = sp->wptr & (BUFFERSIZE-1);
     signed short *data_ints = (signed short *)&pkt->data[0];
     switch(sp->type){
     case PCM_STEREO_PT:
@@ -580,7 +596,7 @@ void *decode_task(void *arg){
     }
     free(pkt); pkt = NULL;
     // advance time by one frame to let the D/A catch up
-    sp->wptr += sp->frame_size;
+    sp->wptr = wp;
     sp->wptr &= (BUFFERSIZE-1);
   }
   pthread_cleanup_pop(1);
@@ -602,7 +618,7 @@ void *display(void *arg){
     int row = 2;
     wmove(Mainscr,row,0);
     wclrtobot(Mainscr);
-    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain      SSRC Source/Dest");
+    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain      SSRC  Queue Source/Dest");
     for(struct session *sp = Session; sp; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
       char *type,typebuf[30];
