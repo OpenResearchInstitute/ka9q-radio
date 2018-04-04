@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.49 2018/04/04 05:58:26 karn Exp karn $
+// $Id: monitor.c,v 1.50 2018/04/04 06:20:37 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -260,6 +260,8 @@ int main(int argc,char * const argv[]){
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);
   signal(SIGHUP,closedown);  
+  signal(SIGABRT,closedown);
+  
   signal(SIGPIPE,SIG_IGN);
 
   if(!Quiet){
@@ -534,7 +536,6 @@ void *decode_task(void *arg){
 	  float bounce[lost_interval][NCHAN];
 	  // Decode any FEC, otherwise interpolate or create comfort noise
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
-	  assert(samples == lost_interval);
 	  if(samples > 0){
 	    for(int i=0; i<samples; i++){
 	      for(int j=0; j < NCHAN; j++)
@@ -583,7 +584,6 @@ void *decode_task(void *arg){
       {
 	float bounce[sp->frame_size][NCHAN];
 	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);	
-	assert(samples == sp->frame_size);
 	if(samples > 0){	// check for error of some kind
 	  for(int i=0; i<samples; i++){
 	    for(int j=0; j < NCHAN; j++)
