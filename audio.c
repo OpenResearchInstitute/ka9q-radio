@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.63 2018/04/04 01:38:40 karn Exp karn $
+// $Id: audio.c,v 1.64 2018/04/04 01:55:31 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -62,21 +62,19 @@ int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
   message.msg_controllen = 0;
   message.msg_flags = 0;
   
-  int silent_samples = 0;
+
   while(size > 0){
+    int not_silent = 0;
     int chunk = min(PCM_BUFSIZE,2*size);
     for(int i=0; i < chunk; i ++){
       float samp = *buffer++;
       PCM_buf[i] = htons(scaleclip(samp));
-      if(PCM_buf[i] == 0)
-	silent_samples++;
-      else
-	silent_samples = 0;
+      not_silent |= PCM_buf[i];
     }      
     // If packet is all zeroes, don't send it but still increase the timestamp
     rtp.timestamp = htonl(Timestamp);
     Timestamp += chunk/2; // Increase by sample count
-    if(!silent_samples){
+    if(not_silent){
       audio->audio_packets++;
       if(audio->silent){
 	audio->silent = 0;
@@ -121,21 +119,19 @@ int send_mono_audio(struct audio * const audio,float const * buffer,int size){
   message.msg_controllen = 0;
   message.msg_flags = 0;
   
-  int silent_samples = 0;
+
   while(size > 0){
+    int not_silent = 0;
     int chunk = min(PCM_BUFSIZE,size); // # of mono samples (frames)
     for(int i=0; i < chunk; i++){
       float samp = *buffer++;
       PCM_buf[i] = htons(scaleclip(samp));
-      if(PCM_buf[i] == 0)
-	silent_samples++;
-      else
-	silent_samples = 0;
+      not_silent |= PCM_buf[i];
     }      
     // If packet is all zeroes, don't send it but still increase the timestamp
     rtp.timestamp = htonl(Timestamp);
     Timestamp += chunk; // Increase by stereo sample count
-    if(!silent_samples){
+    if(not_silent){
       // Don't send silence, but timestamp is still incremented
       audio->audio_packets++;
       if(audio->silent){
