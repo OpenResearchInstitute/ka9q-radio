@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.18 2018/02/06 11:46:44 karn Exp karn $
+// $Id: iqplay.c,v 1.19 2018/02/20 22:30:20 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
@@ -137,13 +137,17 @@ int main(int argc,char *argv[]){
   char *dest = "playback-mcast.local"; // Default for testing
   locale = getenv("LANG");
 
-  while((c = getopt(argc,argv,"vl:b:R:f:r:")) != EOF){
+  Mcast_ttl = 1; // By default, don't let it route
+  while((c = getopt(argc,argv,"vl:b:R:f:r:T:")) != EOF){
     switch(c){
     case 'R':
       dest = optarg;
       break;
     case 'r':
       Default_samprate = strtol(optarg,NULL,0);
+      break;
+    case 'T':
+      Mcast_ttl = strtol(optarg,NULL,0);
       break;
     case 'v':
       Verbose++;
