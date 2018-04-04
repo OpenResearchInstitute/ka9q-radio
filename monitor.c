@@ -106,6 +106,7 @@ struct session {
   int rptr;                        // Read pointer into output buffer
   int playout;                      // Playout delay
   int running;                     // Callback is reading our output buffer and advancing rptr
+  int terminate;
 };
 struct session *Current;
 
@@ -474,7 +475,7 @@ void *decode_task(void *arg){
   sp->basetime = sp->etimestamp = pkt->rtp.timestamp; // note: sp->eseq is already initialized
 
   // Main loop; run until canceled
-  while(1){
+  while(!sp->terminate){
 
     int packets_processed_in_loop;
     for(packets_processed_in_loop = 0; ; packets_processed_in_loop++){
@@ -764,6 +765,8 @@ void *display(void *arg){
 	break;
       case 'd':
 	{
+	  Current->terminate = 1;
+	  pthread_join(Current->task,NULL);
 	  struct session *next = Current->next;
 	  close_session(Current);
 	  Current = next;
@@ -814,6 +817,7 @@ int close_session(struct session *sp){
   
   sp->running = 0;
   
+
   // Remove from linked list
   if(sp->next)
     sp->next->prev = sp->prev;
@@ -822,17 +826,16 @@ int close_session(struct session *sp){
   else
     Session = sp->next;
 
-  pthread_cancel(sp->task);
-  pthread_join(sp->task,NULL);
 
+  
   free(sp);
   return 0;
 }
 void closedown(int s){
-  while(Session)
-    close_session(Session);
 
   Pa_Terminate();
+  echo();
+  nocbreak();
   endwin();
 
   exit(0);
