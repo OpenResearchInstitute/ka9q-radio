@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.60 2018/02/06 11:45:42 karn Exp karn $
+// $Id: audio.c,v 1.61 2018/03/27 07:58:49 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -62,21 +62,29 @@ int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
   message.msg_controllen = 0;
   message.msg_flags = 0;
   
+  int silent_samples = 0;
   while(size > 0){
     int chunk = min(PCM_BUFSIZE,2*size);
     for(int i=0; i < chunk; i ++){
       float samp = *buffer++;
       PCM_buf[i] = htons(scaleclip(samp));
+      if(PCM_buf[i] == 0)
+	silent_samples++;
+      else
+	silent_samples = 0;
     }      
-    audio->audio_packets++;
-    rtp.seq = htons(Rtp_seq++);
+    // If packet is all zeroes, don't send it but still increase the timestamp
     rtp.timestamp = htonl(Timestamp);
-    Timestamp += chunk/2; // Increase by stereo sample count
-    iovec[1].iov_len = chunk * 2;
-    int r = sendmsg(audio->audio_mcast_fd,&message,0);
-    if(r < 0){
-      perror("pcm: sendmsg");
-      break;
+    Timestamp += chunk/2; // Increase by sample count
+    if(!silent_samples){
+      audio->audio_packets++;
+      rtp.seq = htons(Rtp_seq++);
+      iovec[1].iov_len = chunk * 2;
+      int r = sendmsg(audio->audio_mcast_fd,&message,0);
+      if(r < 0){
+	perror("pcm: sendmsg");
+	break;
+      }
     }
     size -= chunk/2;
   }
@@ -107,23 +115,32 @@ int send_mono_audio(struct audio * const audio,float const * buffer,int size){
   message.msg_controllen = 0;
   message.msg_flags = 0;
   
+  int silent_samples = 0;
   while(size > 0){
     int chunk = min(PCM_BUFSIZE,size); // # of mono samples (frames)
     for(int i=0; i < chunk; i++){
       float samp = *buffer++;
       PCM_buf[i] = htons(scaleclip(samp));
+      if(PCM_buf[i] == 0)
+	silent_samples++;
+      else
+	silent_samples = 0;
     }      
-    audio->audio_packets++;
-    rtp.seq = htons(Rtp_seq++);
+    // If packet is all zeroes, don't send it but still increase the timestamp
     rtp.timestamp = htonl(Timestamp);
     Timestamp += chunk; // Increase by stereo sample count
-    iovec[1].iov_len = chunk * 2;
-    int r = sendmsg(audio->audio_mcast_fd,&message,0);
-    if(r < 0){
-      perror("pcm: sendmsg");
-      break;
+    if(!silent_samples){
+      // Don't send silence, but timestamp is still incremented
+      audio->audio_packets++;
+      rtp.seq = htons(Rtp_seq++);
+      iovec[1].iov_len = chunk * 2;
+      int r = sendmsg(audio->audio_mcast_fd,&message,0);
+      if(r < 0){
+	perror("pcm: sendmsg");
+	break;
+      }
+      size -= chunk;
     }
-    size -= chunk;
   }
   return 0;
 }
