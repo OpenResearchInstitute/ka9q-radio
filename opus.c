@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.12 2018/04/03 21:28:50 karn Exp karn $
+// $Id: opus.c,v 1.13 2018/04/03 21:33:13 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -199,6 +199,8 @@ int main(int argc,char * const argv[]){
     rtp_in.ssrc = ntohl(rtp_in.ssrc);
     rtp_in.seq = ntohs(rtp_in.seq);
     rtp_in.timestamp = ntohl(rtp_in.timestamp);
+    int marker = rtp_in.mpt & RTP_MARKER;
+    rtp_in.mpt &= ~RTP_MARKER;
 
     // Only accept mono and stereo PCM at implied 48 kHz sample rate
     if(rtp_in.mpt != PCM_STEREO_PT && rtp_in.mpt != PCM_MONO_PT) // 1 byte, no need to byte swap
@@ -265,14 +267,13 @@ int main(int argc,char * const argv[]){
     }
 
     int samples_skipped = (signed int)(rtp_in.timestamp - sp->etimestamp);
-    if(samples_skipped > 0){
-      printf("skipped %d PCM samples\n",samples_skipped);
-      sp->underruns += samples_skipped;
-      // Insert zeroes
-      for(int i=0; i < samples_skipped; i++)
-	send_samples(sp,0,0);
-    }
 
+    sp->otimestamp += samples_skipped; // Track sender's timestamp jumps
+    if(marker || samples_skipped > 4*Opus_frame_size){
+      // reset encoder state after 4 frames of complete silence and set RTP marker bit
+      opus_encoder_ctl(sp->opus,OPUS_RESET_STATE);
+      sp->silence = 1;
+    }
     int samples = 0;
     switch(rtp_in.mpt){
     case PCM_STEREO_PT: // Stereo
