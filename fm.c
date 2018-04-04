@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.47 2018/02/22 00:09:27 karn Exp karn $
+// $Id: fm.c,v 1.48 2018/02/26 08:49:59 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -68,7 +68,8 @@ void *demod_fm(void *arg){
   }
   
   float lastaudio = 0; // state for impulse noise removal
-  int quiet = 0;
+  int snr_below_threshold = 0; // Number of blocks in which FM snr is below threshold, used for squelch
+  int silent_samples = 0;
 
   while(!demod->terminate){
 
@@ -105,16 +106,14 @@ void *demod_fm(void *arg){
 
     float samples[audio_master->ilen];
     // Let the filter tail leave after the squelch is closed, but don't send pure silence
-    int silent = 1;
-
 
     if(demod->snr > 2) {
-      quiet = 0;
+      snr_below_threshold = 0;
     } else {
-      if(++quiet > 1000)
-	quiet = 1000; // Could conceivably wrap if squelch is closed for long time
+      if(++snr_below_threshold > 1000)
+	snr_below_threshold = 1000; // Could conceivably wrap if squelch is closed for long time
     }
-    if(quiet < 2){ // keep the squelch open a little longer to make sure we don't chop something off
+    if(snr_below_threshold < 2){ // keep the squelch open a little longer to make sure we don't chop something off
       // Threshold extension by comparing sample amplitude to threshold
       // 0.55 is empirical constant, 0.5 to 0.6 seems to sound good
       // Square amplitudes are compared to avoid sqrt inside loop
@@ -143,7 +142,7 @@ void *demod_fm(void *arg){
 	avg_f += lastaudio;
       }
       avg_f /= filter->olen;  // freq offset
-      if(quiet < 1){
+      if(snr_below_threshold < 1){
 	demod->foffset = dsamprate  * avg_f * M_1_2PI;
 
 	// Find peak deviation allowing for frequency offset, scale for output
@@ -151,12 +150,10 @@ void *demod_fm(void *arg){
 	pdev_neg -= avg_f;
 	demod->pdeviation = dsamprate * max(pdev_pos,-pdev_neg) * M_1_2PI;
       }
-      silent = 0;
     } else {
       // Squelch is closed
       memset(samples,0,audio_master->ilen * sizeof(*samples));
       memset(audio_master->input.r,0,audio_master->ilen*sizeof(*audio_master->input.r));
-      silent = 1;
     }
     execute_filter_input(audio_master);
 
@@ -164,17 +161,12 @@ void *demod_fm(void *arg){
       execute_filter_output(audio_filter);
 
       // in FM flat mode there is no audio filter, and audio is already in samples[]
-      silent = 1;
       assert(audio_master->ilen == audio_filter->olen);
       for(int n=0; n < audio_filter->olen; n++){
 	samples[n] = audio_filter->output.r[n] * gain;
-	if(samples[n] != 0)
-	  silent = 0;
       }
     }
-    if(1 || !silent){ // test: stream silence
-      send_mono_audio(audio,samples,audio_master->ilen);
-    }
+    send_mono_audio(audio,samples,audio_master->ilen);
   }
   // Clean up subthreads
   pthread_join(pl_thread,NULL);
