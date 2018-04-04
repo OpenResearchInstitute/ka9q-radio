@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.61 2018/03/27 07:58:49 karn Exp karn $
+// $Id: audio.c,v 1.63 2018/04/04 01:38:40 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -78,6 +78,11 @@ int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
     Timestamp += chunk/2; // Increase by sample count
     if(!silent_samples){
       audio->audio_packets++;
+      if(audio->silent){
+	audio->silent = 0;
+	rtp.mpt |= RTP_MARKER;
+      } else
+	rtp.mpt &= ~RTP_MARKER;
       rtp.seq = htons(Rtp_seq++);
       iovec[1].iov_len = chunk * 2;
       int r = sendmsg(audio->audio_mcast_fd,&message,0);
@@ -85,7 +90,8 @@ int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
 	perror("pcm: sendmsg");
 	break;
       }
-    }
+    } else
+      audio->silent = 1;
     size -= chunk/2;
   }
   return 0;
@@ -132,6 +138,11 @@ int send_mono_audio(struct audio * const audio,float const * buffer,int size){
     if(!silent_samples){
       // Don't send silence, but timestamp is still incremented
       audio->audio_packets++;
+      if(audio->silent){
+	audio->silent = 0;
+	rtp.mpt |= RTP_MARKER;
+      } else
+	rtp.mpt &= ~RTP_MARKER;
       rtp.seq = htons(Rtp_seq++);
       iovec[1].iov_len = chunk * 2;
       int r = sendmsg(audio->audio_mcast_fd,&message,0);
@@ -139,7 +150,8 @@ int send_mono_audio(struct audio * const audio,float const * buffer,int size){
 	perror("pcm: sendmsg");
 	break;
       }
-    }
+    } else
+      audio->silent = 1;
     size -= chunk;
   }
   return 0;

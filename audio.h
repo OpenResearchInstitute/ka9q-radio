@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.29 2017/10/23 09:01:43 karn Exp karn $
+// $Id: audio.h,v 1.30 2018/02/06 11:45:38 karn Exp karn $
 // Variables and structures for KA9Q SDR receiver audio subsystem
 // Copyright 2017 Phil Karn, KA9Q
 
@@ -14,6 +14,7 @@ struct audio {
   int samprate;       // Audio D/A sample rate (usually decimated from SDR A/D)
 
   // RTP network streaming
+  int silent; // last packet was suppressed (used to generate RTP mark bit)
   char audio_mcast_address_text[256];
   int audio_mcast_fd; // File descriptor for multicast output
   unsigned long long audio_packets;
