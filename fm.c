@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.48 2018/02/26 08:49:59 karn Exp karn $
+// $Id: fm.c,v 1.49 2018/04/04 01:23:31 karn Exp karn $
 // FM demodulation and squelch
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -69,7 +69,6 @@ void *demod_fm(void *arg){
   
   float lastaudio = 0; // state for impulse noise removal
   int snr_below_threshold = 0; // Number of blocks in which FM snr is below threshold, used for squelch
-  int silent_samples = 0;
 
   while(!demod->terminate){
 
