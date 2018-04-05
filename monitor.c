@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.50 2018/04/04 06:20:37 karn Exp karn $
+// $Id: monitor.c,v 1.51 2018/04/04 20:33:39 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -26,12 +26,11 @@
 #include "multicast.h"
 
 // Global config variables
-#define USE_COND 1            // Use pthread condition to signal from callback (portaudio deprecates this)
 #define SAMPRATE 48000        // Too hard to handle other sample rates right now
 #define MAX_MCAST 20          // Maximum number of multicast addresses
 #define PKTSIZE 16384         // Maximum bytes per RTP packet - must be bigger than Ethernet MTU
 #define NCHAN 2               // 2 channels (stereo)
-#define SAMPPCALLBACK (SAMPRATE/500)     // 2 ms @ 48 kHz
+#define SAMPPCALLBACK (SAMPRATE/50)     // 20 ms @ 48 kHz
 #define BUFFERSIZE (1<<19)    // about 10.92 sec at 48 kHz stereo - must be power of 2!!
 #define PAUSETHRESH (4*SAMPRATE)     // Pause after this many seconds of starvation
 
@@ -50,11 +49,6 @@ int inDevNum;                 // Portaudio's audio output device index
 // and the callback zeroes out each sample as played
 float const SCALE = 1./SHRT_MAX;
 WINDOW *Mainscr;
-
-#if USE_COND
-pthread_cond_t Upcall_cond;
-pthread_mutex_t Buffer_mutex;
-#endif
 
 struct timeval Start_unix_time;
 PaTime Start_pa_time;
@@ -248,11 +242,6 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
 
-#if USE_COND
-  pthread_cond_init(&Upcall_cond,NULL);
-  pthread_mutex_init(&Buffer_mutex,NULL);
-#endif
-
   // Graceful signal catch
   signal(SIGPIPE,closedown);
   signal(SIGINT,closedown);
@@ -260,8 +249,6 @@ int main(int argc,char * const argv[]){
   signal(SIGQUIT,closedown);
   signal(SIGTERM,closedown);
   signal(SIGHUP,closedown);  
-  signal(SIGABRT,closedown);
-  
   signal(SIGPIPE,SIG_IGN);
 
   if(!Quiet){
@@ -294,16 +281,14 @@ int main(int argc,char * const argv[]){
   while(1){
     // Wait for traffic to arrive
     fd_set fdset = fdset_template;
-    int s = select(max_fd+1,& fdset,NULL,NULL,NULL);
+    int s = select(max_fd+1,&fdset,NULL,NULL,NULL);
     if(s < 0 && errno != EAGAIN && errno != EINTR)
       break;
-    if(s == 0)
+    if(s == 0){
       continue; // Nothing arrived; probably just an ignored signal
-
+    }
     for(int fd_index = 0;fd_index < Nfds;fd_index++){
-      if(input_fd[fd_index] == -1)
-	continue;
-      if(!FD_ISSET(input_fd[fd_index],&fdset))
+      if(input_fd[fd_index] == -1 || !FD_ISSET(input_fd[fd_index],&fdset))
 	continue;
 
       // Need a new packet buffer?
@@ -325,9 +310,9 @@ int main(int argc,char * const argv[]){
 	}
 	continue;
       }
-      if(size <= sizeof(pkt->rtp))
+      if(size <= sizeof(pkt->rtp)){
 	continue; // Must be big enough for RTP header and at least some data
-
+      }
       int type = pkt->rtp.mpt & ~RTP_MARKER;
       if(type != PCM_STEREO_PT
 	 && type != OPUS_PT
@@ -411,12 +396,11 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     
     int wptr = sp->wptr;
     if(signmod(wptr - sp->rptr) < framesPerBuffer)
-      continue; // Not enough; pause
+      continue; // Not enough; skip
 
     // Use temp for index so rptr is updated in steps
-    // This is important so the sleep in the decoder sleeps the entire interval
     int index = sp->rptr;
-    for(int n=0;n < framesPerBuffer; n++){
+    for(int n=0; n < framesPerBuffer; n++){
       for(int j = 0; j < NCHAN; j++){
 	out[n][j] += sp->output_buffer[index][j];
 	sp->output_buffer[index][j] = 0; // Burn after reading
@@ -428,11 +412,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   }
   Samples += framesPerBuffer;
   Callbacks++;
-#if USE_COND
-  pthread_mutex_lock(&Buffer_mutex);
-  pthread_cond_broadcast(&Upcall_cond);
-  pthread_mutex_unlock(&Buffer_mutex);  
-#endif
+
   return paContinue;
 }
 
@@ -462,13 +442,12 @@ void *decode_task(void *arg){
   pthread_cleanup_push(decode_task_cleanup,arg);
 
   sp->gain = 1;    // 0 dB by default
-  sp->wptr = SAMPPCALLBACK; // Ahead of the D/A by one callback block, since it can happen at any time
-
-  struct packet *pkt = NULL;
+  sp->wptr = 0;
 
   // Main loop; run until canceled
   while(!sp->terminate){
 
+    struct packet *pkt = NULL;
     // Wait for packet to appear on queue
     pthread_mutex_lock(&sp->qmutex);
     while(!sp->queue)
@@ -477,29 +456,27 @@ void *decode_task(void *arg){
     sp->queue = pkt->next;
     pkt->next = NULL;
     pthread_mutex_unlock(&sp->qmutex);
-    sp->etimestamp = pkt->rtp.timestamp; // note: sp->eseq is already initialized
 
     sp->packets++;
       
     int seq_offset = (signed short)(pkt->rtp.seq - sp->eseq);
     if(seq_offset < -5 || seq_offset > 50){
-      if(++sp->reseq_count >= 3){
-	//resynch
-	sp->eseq = pkt->rtp.seq;
-	sp->etimestamp = pkt->rtp.timestamp;
-      } else {
+      if(++sp->reseq_count < 3){
 	// Discard wildly different sequence numbers
 	sp->dupes++;
 	free(pkt);  pkt = NULL;
 	continue;
       }
+      //resynch      
+      sp->etimestamp = pkt->rtp.timestamp;
+      seq_offset = 0;
     }
     sp->reseq_count = 0;
     sp->type = pkt->rtp.mpt & ~RTP_MARKER;
     int marker = pkt->rtp.mpt & RTP_MARKER;
-    
+
     if(seq_offset > 0)
-	sp->drops += seq_offset;
+      sp->drops += seq_offset;
       
     sp->eseq = pkt->rtp.seq + 1;
       
@@ -520,7 +497,6 @@ void *decode_task(void *arg){
       sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
       break;
     }
-    int wp = sp->wptr;    
     int lost_interval = (int)(pkt->rtp.timestamp - sp->etimestamp);
     sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
     if(lost_interval > 0){
@@ -539,8 +515,8 @@ void *decode_task(void *arg){
 	  if(samples > 0){
 	    for(int i=0; i<samples; i++){
 	      for(int j=0; j < NCHAN; j++)
-		sp->output_buffer[wp][j] = bounce[i][j] * sp->gain;
-	      wp++; wp &= (BUFFERSIZE-1);
+		sp->output_buffer[sp->wptr][j] = bounce[i][j] * sp->gain;
+	      sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	    }
 	  }
 	}
@@ -550,9 +526,9 @@ void *decode_task(void *arg){
 	  // Pad with zeroes
 	  sp->erasures += seq_offset;
 	  for(int i=0; i < lost_interval; i++){
-	    sp->output_buffer[wp][0] = 0;
-	    sp->output_buffer[wp][1] = 0;
-	    wp++; wp &= (BUFFERSIZE-1);
+	    sp->output_buffer[sp->wptr][0] = 0;
+	    sp->output_buffer[sp->wptr][1] = 0;
+	    sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	  }
 	}
       }	  
@@ -563,16 +539,16 @@ void *decode_task(void *arg){
     case PCM_STEREO_PT:
       for(int i=0; i < sp->frame_size; i++){
 	for(int j=0; j < NCHAN; j++)
-	  sp->output_buffer[wp][j] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
-	wp++; wp &= (BUFFERSIZE-1);
+	  sp->output_buffer[sp->wptr][j] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
+	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
       }
       break;
     case PCM_MONO_PT:
       for(int i=0; i < sp->frame_size; i++){
-	sp->output_buffer[wp][0] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
+	sp->output_buffer[sp->wptr][0] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
 	for(int j=1; j < NCHAN; j++)
-	  sp->output_buffer[wp][j] = sp->output_buffer[wp][0];
-	wp++; wp &= (BUFFERSIZE-1);
+	  sp->output_buffer[sp->wptr][j] = sp->output_buffer[sp->wptr][0];
+	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
       }
       break;
     case OPUS_PT:
@@ -587,8 +563,8 @@ void *decode_task(void *arg){
 	if(samples > 0){	// check for error of some kind
 	  for(int i=0; i<samples; i++){
 	    for(int j=0; j < NCHAN; j++)
-	      sp->output_buffer[wp][j] = bounce[i][j] * sp->gain;
-	    wp++; wp &= (BUFFERSIZE-1);
+	      sp->output_buffer[sp->wptr][j] = bounce[i][j] * sp->gain;
+	    sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	  }
 	}
       }
@@ -596,8 +572,6 @@ void *decode_task(void *arg){
     }
     free(pkt); pkt = NULL;
     // advance time by one frame to let the D/A catch up
-    sp->wptr = wp;
-    sp->wptr &= (BUFFERSIZE-1);
   }
   pthread_cleanup_pop(1);
   return NULL;
@@ -710,44 +684,47 @@ void *display(void *arg){
     wprintw(Mainscr,"\n");
     wnoutrefresh(Mainscr);
     doupdate();
-    if(Current){ // process commands only if there's something to act on
-      int c = getch(); // Pauses here
-      switch(c){
-      case EOF:
-	break;
-      case KEY_NPAGE:
-      case '\t':
-	if(Current->next)
-	  Current = Current->next;
-	else if(Session)
-	  Current = Session; // Wrap around to top
-	break;
-      case KEY_BTAB:
-      case KEY_PPAGE:
-	if(Current->prev)
-	  Current = Current->prev;
-	break;
-      case KEY_UP:
-	Current->gain *= 1.122018454; // 1 dB
-	break;
-      case KEY_DOWN:
-	Current->gain /= 1.122018454; // 1 dB
-	break;
-      case 'd':
-	{
-	  Current->terminate = 1;
-	  pthread_join(Current->task,NULL);
-	  struct session *next = Current->next;
-	  close_session(Current);
-	  Current = next;
-	}
-	break;
-      case '\f':  // Screen repaint (formfeed, aka control-L)
-	clearok(curscr,TRUE);
-	break;
-      default:
-	break;
+    if(!Current){
+      usleep(1000*Update_interval);
+	continue;
+    }
+    // process commands only if there's something to act on
+    int c = getch(); // Pauses here
+    switch(c){
+    case EOF:
+      break;
+    case KEY_NPAGE:
+    case '\t':
+      if(Current->next)
+	Current = Current->next;
+      else if(Session)
+	Current = Session; // Wrap around to top
+      break;
+    case KEY_BTAB:
+    case KEY_PPAGE:
+      if(Current->prev)
+	Current = Current->prev;
+      break;
+    case KEY_UP:
+      Current->gain *= 1.122018454; // 1 dB
+      break;
+    case KEY_DOWN:
+      Current->gain /= 1.122018454; // 1 dB
+      break;
+    case 'd':
+      {
+	struct session *next = Current->next;
+	Current->terminate = 1;
+	pthread_join(Current->task,NULL);
+	close_session(Current);
+	Current = next;
       }
+      break;
+    case '\f':  // Screen repaint (formfeed, aka control-L)
+      clearok(curscr,TRUE);
+      break;
+    default:
+      break;
     }
   }
   return NULL;
@@ -792,8 +769,6 @@ int close_session(struct session *sp){
     sp->prev->next = sp->next;
   else
     Session = sp->next;
-
-
   
   free(sp);
   return 0;
