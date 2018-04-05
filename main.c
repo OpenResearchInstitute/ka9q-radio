@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.101 2018/03/29 09:05:56 karn Exp karn $
+// $Id: main.c,v 1.102 2018/04/01 10:18:07 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -325,6 +325,7 @@ void *input_loop(void *arg){
   uint16_t eseq;
   uint32_t etimestamp;
   int init = 0;
+  int reseq = 0;
 
   while(1){
     // Listen for an I/Q packet
@@ -362,6 +363,24 @@ void *input_loop(void *arg){
       rtp.ssrc = ntohl(rtp.ssrc);
       rtp.seq = ntohs(rtp.seq);
       rtp.timestamp = ntohl(rtp.timestamp);
+
+      if(init){
+	// Sequence number check
+	short seq_step = (short)(rtp.seq - eseq);
+	if(seq_step < 0 || seq_step > 10){
+	  if(++reseq >= 3){
+	    // Probably a new stream; start over with new sequence numbers
+	    reseq = init = 0;
+	  } else {
+	    if(seq_step > 0)
+	      demod->drops++;	  
+	    else if(seq_step < 0)
+	      demod->dupes++;
+	    continue;
+	  }
+	} else
+	  reseq = 0;
+      }
       if(!init){
 	// First packet
 	gettimeofday(&demod->start_time,NULL);
@@ -370,15 +389,9 @@ void *input_loop(void *arg){
 	etimestamp = rtp.timestamp;
 	init = 1;
       }
+      eseq = rtp.seq + 1;
+
       gettimeofday(&demod->current_time,NULL);
-      short seq_step = (short)(rtp.seq - eseq);
-      if(seq_step > 0)
-	demod->drops++;
-      else if(seq_step < 0){
-	// Duplicate or delayed; drop
-	demod->dupes++;
-	continue;
-      }
       int time_step = (int)(rtp.timestamp - etimestamp);
       if(time_step < 0){
 	// Old samples; drop. Shouldn't happen if sequence number isn't old
@@ -461,6 +474,7 @@ int savestate(struct demod *dp,char const *filename){
   fprintf(fp,"Source %s\n",dp->iq_mcast_address_text);
   if(audio){
     fprintf(fp,"Audio output %s\n",audio->audio_mcast_address_text);
+    fprintf(fp,"TTL %d\n",Mcast_ttl);
   }
   fprintf(fp,"Blocksize %d\n",dp->L);
   fprintf(fp,"Impulse len %d\n",dp->M);
@@ -508,6 +522,7 @@ int loadstate(struct demod *dp,char const *filename){
     } else if(sscanf(line,"Source %256s",dp->iq_mcast_address_text) > 0){
       // Array sizes defined elsewhere!
     } else if(audio && sscanf(line,"Audio output %256s",audio->audio_mcast_address_text) > 0){
+    } else if(sscanf(line,"TTL %d",&Mcast_ttl) > 0){
     } else if(sscanf(line,"Locale %256s",Locale)){
       setlocale(LC_ALL,Locale);
     }
