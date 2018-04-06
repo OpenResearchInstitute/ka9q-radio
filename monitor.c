@@ -174,18 +174,24 @@ int main(int argc,char * const argv[]){
     int numDevices = Pa_GetDeviceCount();
     for(int inDevNum=0; inDevNum < numDevices; inDevNum++){
       const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
-      printf("%s\n",deviceInfo->name);
+      printf("%d: %s\n",inDevNum,deviceInfo->name);
     }
     exit(0);
   }
 
+  char *nextp = NULL;
+  int d;
+  int numDevices = Pa_GetDeviceCount();
   if(strlen(Audiodev) == 0){
     // not specified; use default
     inDevNum = Pa_GetDefaultOutputDevice();
+  } else if(d = strtol(Audiodev,&nextp,0),nextp != Audiodev && *nextp == '\0'){
+    if(d >= numDevices){
+      fprintf(stderr,"%d is out of range, use %s -L for a list\n",d,argv[0]);
+      exit(1);
+    }
+    inDevNum = d;
   } else {
-    // Find requested audio device in the list
-    int numDevices = Pa_GetDeviceCount();
-    
     for(inDevNum=0; inDevNum < numDevices; inDevNum++){
       const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
       if(strcmp(deviceInfo->name,Audiodev) == 0)
@@ -232,8 +238,8 @@ int main(int argc,char * const argv[]){
 		    NULL,
 		    &outputParameters,
 		    SAMPRATE,
-		    //paFramesPerBufferUnspecified, // seems to be 31 on OSX
-		    SAMPPCALLBACK,
+		    paFramesPerBufferUnspecified, // seems to be 31 on OSX
+		    //SAMPPCALLBACK,
 		    0,
 		    pa_callback,
 		    NULL);
@@ -365,7 +371,7 @@ int main(int argc,char * const argv[]){
       else
 	sp->queue = pkt; // Front of list
       pkt = NULL;        // force new packet to be allocated
-      // wake up decoder thread (used first time only, after that it's timer polled)
+      // wake up decoder thread
       pthread_cond_signal(&sp->qcond);
       pthread_mutex_unlock(&sp->qmutex);
     }      
@@ -633,7 +639,9 @@ void *display(void *arg){
 
       if(sp == Current)
 	wattr_on(Mainscr,A_UNDERLINE,NULL);
-      char temp[1024];
+      if(!sp->dest) // Might not be allocated yet, if we got dispatched during the nameinfo() call
+	continue;
+      char temp[strlen(sp->addr)+strlen(sp->port)+strlen(sp->dest) + 20]; // Allow some room
       snprintf(temp,sizeof(temp),"%s:%s -> %s",sp->addr,sp->port,sp->dest);
       mvwprintw(Mainscr,row++,0,"%-12s%2d%3d%+5.0lf%10x%7.3lf %s",
 		type,
@@ -645,7 +653,7 @@ void *display(void *arg){
 		temp);
       wattr_off(Mainscr,A_BOLD,NULL);
       wattr_off(Mainscr,A_UNDERLINE,NULL);
-
+      
       if(sp->packets)
 	wprintw(Mainscr," packets %'lu",sp->packets);
       if(sp->dupes)
@@ -656,7 +664,7 @@ void *display(void *arg){
 	wprintw(Mainscr," late %lu",sp->lates);
       if(sp->erasures)
 	wprintw(Mainscr," erasures %lu",sp->erasures);
-
+      
       if(!Current)
 	Current = sp;
     }
