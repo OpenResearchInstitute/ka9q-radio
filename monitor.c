@@ -2,6 +2,7 @@
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
+#include <stdatomic.h>
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -391,24 +392,17 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   
   memset(out,0,sizeof(*out) * framesPerBuffer);
   // Walk through each decoder control block and add its decoded audio into output
-  struct session *sp;
-  for(sp=Session; sp; sp=sp->next){
-    
-    int wptr = sp->wptr;
-    if(signmod(wptr - sp->rptr) < framesPerBuffer)
+  for(struct session *sp=Session; sp; sp=sp->next){
+    if(signmod(sp->wptr - sp->rptr) < framesPerBuffer)
       continue; // Not enough; skip
 
-    // Use temp for index so rptr is updated in steps
-    int index = sp->rptr;
     for(int n=0; n < framesPerBuffer; n++){
       for(int j = 0; j < NCHAN; j++){
-	out[n][j] += sp->output_buffer[index][j];
-	sp->output_buffer[index][j] = 0; // Burn after reading
+	out[n][j] += sp->output_buffer[sp->rptr][j];
+	sp->output_buffer[sp->rptr][j] = 0; // Burn after reading
       }
-      index++;
-      index &= (BUFFERSIZE-1);
+      sp->rptr = (sp->rptr + 1) & (BUFFERSIZE-1);
     }
-    sp->rptr = index;
   }
   Samples += framesPerBuffer;
   Callbacks++;
@@ -579,6 +573,7 @@ void *decode_task(void *arg){
 // Use ncurses to display streams
 void *display(void *arg){
 
+  pthread_setname("display");
   initscr();
   keypad(stdscr,TRUE);
   timeout(Update_interval);
@@ -685,7 +680,7 @@ void *display(void *arg){
     wnoutrefresh(Mainscr);
     doupdate();
     if(!Current){
-      usleep(1000*Update_interval);
+      usleep(1000*Update_interval); // No getch() to slow us down!
 	continue;
     }
     // process commands only if there's something to act on
@@ -711,6 +706,11 @@ void *display(void *arg){
     case KEY_DOWN:
       Current->gain /= 1.122018454; // 1 dB
       break;
+    case 'r':
+      // Reset playout queue
+      Current->wptr = Current->rptr;
+      break;
+    break;
     case 'd':
       {
 	struct session *next = Current->next;
