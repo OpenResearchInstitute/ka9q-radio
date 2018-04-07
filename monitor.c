@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.54 2018/04/06 12:48:34 karn Exp karn $
+// $Id: monitor.c,v 1.55 2018/04/07 04:40:51 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -73,7 +73,8 @@ struct session {
   
   struct packet *queue;     // Incoming RTP packets
 
-  float left_gain,right_gain;// Gain for this channel; 1 -> 0 db (nominal)
+  float gain;               // Gain; 1 = 0 dB
+  float pan;                // Stereo position: 0 = center; -1 = full left; +1 = full right
 
   struct sockaddr sender;
   char *dest;
@@ -441,7 +442,8 @@ void *decode_task(void *arg){
   pthread_setname("decode");
   pthread_cleanup_push(decode_task_cleanup,arg);
 
-  sp->right_gain = sp->left_gain = 1;    // 0 dB by default
+  sp->gain = 1;    // 0 dB by default
+  sp->pan = 0;     // center by default
   sp->wptr = 0;
 
   // Main loop; run until canceled
@@ -497,6 +499,22 @@ void *decode_task(void *arg){
       sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
       break;
     }
+    // Compute gains and delays for stereo imaging
+    // -6dB for each channel in the center
+    // when full to one side or the other, that channel is +6 dB and the other is -inf dB
+    float left_gain = sp->gain * (1 - sp->pan)/2;
+    float right_gain = sp->gain * (1 + sp->pan)/2;
+    int left_delay = 0;
+    int right_delay = 0;
+    // Also delay less favored channel 1 ms max
+    if(sp->pan > 0){
+      // Delay left channel
+      left_delay = round(sp->pan * 1.0 * SAMPRATE/1000);
+    } else if(sp->pan < 0){
+      // Delay right channel
+      right_delay = round(-sp->pan * 1.0 * SAMPRATE/1000);
+    }
+
     int lost_interval = (int)(pkt->rtp.timestamp - sp->etimestamp);
     sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
     if(lost_interval > 0){
@@ -514,8 +532,8 @@ void *decode_task(void *arg){
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
 	  if(samples > 0){
 	    for(int i=0; i<samples; i++){
-	      sp->output_buffer[sp->wptr][0] = bounce[i][0] * sp->left_gain;	      
-	      sp->output_buffer[sp->wptr][1] = bounce[i][1] * sp->left_gain;	      
+	      sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
+	      sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
 	      sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	    }
 	  }
@@ -538,17 +556,16 @@ void *decode_task(void *arg){
     switch(sp->type){
     case PCM_STEREO_PT:
       for(int i=0; i < sp->frame_size; i++){
-	sp->output_buffer[sp->wptr][0] = SCALE * (signed short)ntohs(*data_ints++) * sp->left_gain;
-	sp->output_buffer[sp->wptr][1] = SCALE * (signed short)ntohs(*data_ints++) * sp->right_gain;
-
+	sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = SCALE * (signed short)ntohs(*data_ints++) * left_gain;
+	sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = SCALE * (signed short)ntohs(*data_ints++) * right_gain;
 	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
       }
       break;
     case PCM_MONO_PT:
       for(int i=0; i < sp->frame_size; i++){
 	float s = SCALE * (signed short)ntohs(*data_ints++);
-	sp->output_buffer[sp->wptr][0] = s * sp->left_gain;
-	sp->output_buffer[sp->wptr][1] = s * sp->right_gain;
+	sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = s * left_gain;
+	sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = s * right_gain;
 	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
       }
       break;
@@ -563,8 +580,8 @@ void *decode_task(void *arg){
 	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);	
 	if(samples > 0){	// check for error of some kind
 	  for(int i=0; i<samples; i++){
-	    sp->output_buffer[sp->wptr][0] = bounce[i][0] * sp->left_gain;
-	    sp->output_buffer[sp->wptr][1] = bounce[i][1] * sp->right_gain;
+	    sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
+	    sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
 	    sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	  }
 	}
@@ -594,7 +611,7 @@ void *display(void *arg){
     int row = 2;
     wmove(Mainscr,row,0);
     wclrtobot(Mainscr);
-    mvwprintw(Mainscr,row++,0,"Type        ch BW LGain RGain    SSRC  Queue Source/Dest");
+    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain   Pan      SSRC  Queue Source/Dest");
     for(struct session *sp = Session; sp; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
       char *type,typebuf[30];
@@ -644,12 +661,12 @@ void *display(void *arg){
 	continue;
       char temp[strlen(sp->addr)+strlen(sp->port)+strlen(sp->dest) + 20]; // Allow some room
       snprintf(temp,sizeof(temp),"%s:%s -> %s",sp->addr,sp->port,sp->dest);
-      mvwprintw(Mainscr,row++,0,"%-12s%2d%3d%+6.0lf%+6.0lf%10x%7.3lf %s",
+      mvwprintw(Mainscr,row++,0,"%-12s%2d%3d%+5.0lf%+6.2lf%10x%7.3lf %s",
 		type,
 		sp->channels,
 		bw,
-		20*log10(sp->left_gain),
-		20*log10(sp->right_gain),
+		20*log10(sp->gain),
+		sp->pan,
 		sp->ssrc,
 		(double)signmod(sp->wptr - sp->rptr)/SAMPRATE,
 		temp);
@@ -671,7 +688,7 @@ void *display(void *arg){
 	Current = sp;
     }
     row++;
-    mvwprintw(Mainscr,row++,0,"TAB: select next stream; d: delete stream; up/down arrow: volume +/-1 dB\n");
+    mvwprintw(Mainscr,row++,0,"\u2b72 select next stream\nd delete stream\nr reset playout buffer\n\u2b61 volume +1 dB\n\u2b63 volume -1 dB\n\u2b6c stereo position right\n\u2b6a stereo position left\n");
 
     if(Verbose){
       // Measure skew between sampling clock and UNIX real time (hopefully NTP synched)
@@ -711,20 +728,16 @@ void *display(void *arg){
 	Current = Current->prev;
       break;
     case KEY_UP:
-      Current->left_gain *= 1.122018454; // 1 dB
-      Current->right_gain *= 1.122018454; // 1 dB
+      Current->gain *= 1.122018454; // 1 dB
       break;
     case KEY_DOWN:
-      Current->left_gain /= 1.122018454;
-      Current->right_gain /= 1.122018454;
+      Current->gain /= 1.122018454;
       break;
     case KEY_LEFT:
-      Current->left_gain *= 1.122018454;
-      Current->right_gain /= 1.122018454;
+      Current->pan = max(Current->pan - .01,-1.0);
       break;
     case KEY_RIGHT:
-      Current->right_gain *= 1.122018454;
-      Current->left_gain /= 1.122018454;
+      Current->pan = min(Current->pan + .01,+1.0);
       break;
     case 'r':
       // Reset playout queue
