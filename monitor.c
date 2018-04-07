@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.51 2018/04/04 20:33:39 karn Exp karn $
+// $Id: monitor.c,v 1.54 2018/04/06 12:48:34 karn Exp karn $
 // Listen to multicast, send PCM audio to Linux ALSA driver
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -73,7 +73,7 @@ struct session {
   
   struct packet *queue;     // Incoming RTP packets
 
-  float gain;               // Gain for this channel; 1 -> 0 db (nominal)
+  float left_gain,right_gain;// Gain for this channel; 1 -> 0 db (nominal)
 
   struct sockaddr sender;
   char *dest;
@@ -441,7 +441,7 @@ void *decode_task(void *arg){
   pthread_setname("decode");
   pthread_cleanup_push(decode_task_cleanup,arg);
 
-  sp->gain = 1;    // 0 dB by default
+  sp->right_gain = sp->left_gain = 1;    // 0 dB by default
   sp->wptr = 0;
 
   // Main loop; run until canceled
@@ -514,8 +514,8 @@ void *decode_task(void *arg){
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
 	  if(samples > 0){
 	    for(int i=0; i<samples; i++){
-	      for(int j=0; j < NCHAN; j++)
-		sp->output_buffer[sp->wptr][j] = bounce[i][j] * sp->gain;
+	      sp->output_buffer[sp->wptr][0] = bounce[i][0] * sp->left_gain;	      
+	      sp->output_buffer[sp->wptr][1] = bounce[i][1] * sp->left_gain;	      
 	      sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	    }
 	  }
@@ -538,16 +538,17 @@ void *decode_task(void *arg){
     switch(sp->type){
     case PCM_STEREO_PT:
       for(int i=0; i < sp->frame_size; i++){
-	for(int j=0; j < NCHAN; j++)
-	  sp->output_buffer[sp->wptr][j] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
+	sp->output_buffer[sp->wptr][0] = SCALE * (signed short)ntohs(*data_ints++) * sp->left_gain;
+	sp->output_buffer[sp->wptr][1] = SCALE * (signed short)ntohs(*data_ints++) * sp->right_gain;
+
 	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
       }
       break;
     case PCM_MONO_PT:
       for(int i=0; i < sp->frame_size; i++){
-	sp->output_buffer[sp->wptr][0] = SCALE * (signed short)ntohs(*data_ints++) * sp->gain;
-	for(int j=1; j < NCHAN; j++)
-	  sp->output_buffer[sp->wptr][j] = sp->output_buffer[sp->wptr][0];
+	float s = SCALE * (signed short)ntohs(*data_ints++);
+	sp->output_buffer[sp->wptr][0] = s * sp->left_gain;
+	sp->output_buffer[sp->wptr][1] = s * sp->right_gain;
 	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
       }
       break;
@@ -562,8 +563,8 @@ void *decode_task(void *arg){
 	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);	
 	if(samples > 0){	// check for error of some kind
 	  for(int i=0; i<samples; i++){
-	    for(int j=0; j < NCHAN; j++)
-	      sp->output_buffer[sp->wptr][j] = bounce[i][j] * sp->gain;
+	    sp->output_buffer[sp->wptr][0] = bounce[i][0] * sp->left_gain;
+	    sp->output_buffer[sp->wptr][1] = bounce[i][1] * sp->right_gain;
 	    sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	  }
 	}
@@ -593,7 +594,7 @@ void *display(void *arg){
     int row = 2;
     wmove(Mainscr,row,0);
     wclrtobot(Mainscr);
-    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain      SSRC  Queue Source/Dest");
+    mvwprintw(Mainscr,row++,0,"Type        ch BW LGain RGain    SSRC  Queue Source/Dest");
     for(struct session *sp = Session; sp; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
       char *type,typebuf[30];
@@ -643,11 +644,12 @@ void *display(void *arg){
 	continue;
       char temp[strlen(sp->addr)+strlen(sp->port)+strlen(sp->dest) + 20]; // Allow some room
       snprintf(temp,sizeof(temp),"%s:%s -> %s",sp->addr,sp->port,sp->dest);
-      mvwprintw(Mainscr,row++,0,"%-12s%2d%3d%+5.0lf%10x%7.3lf %s",
+      mvwprintw(Mainscr,row++,0,"%-12s%2d%3d%+6.0lf%+6.0lf%10x%7.3lf %s",
 		type,
 		sp->channels,
 		bw,
-		20*log10(sp->gain),
+		20*log10(sp->left_gain),
+		20*log10(sp->right_gain),
 		sp->ssrc,
 		(double)signmod(sp->wptr - sp->rptr)/SAMPRATE,
 		temp);
@@ -669,7 +671,7 @@ void *display(void *arg){
 	Current = sp;
     }
     row++;
-    mvwprintw(Mainscr,row++,0,"TAB: select next stream; d: delete stream; up/down arrow: volume +/-1 dB; left/right arrow: playout delay -/+ 10 ms\n");
+    mvwprintw(Mainscr,row++,0,"TAB: select next stream; d: delete stream; up/down arrow: volume +/-1 dB\n");
 
     if(Verbose){
       // Measure skew between sampling clock and UNIX real time (hopefully NTP synched)
@@ -709,10 +711,20 @@ void *display(void *arg){
 	Current = Current->prev;
       break;
     case KEY_UP:
-      Current->gain *= 1.122018454; // 1 dB
+      Current->left_gain *= 1.122018454; // 1 dB
+      Current->right_gain *= 1.122018454; // 1 dB
       break;
     case KEY_DOWN:
-      Current->gain /= 1.122018454; // 1 dB
+      Current->left_gain /= 1.122018454;
+      Current->right_gain /= 1.122018454;
+      break;
+    case KEY_LEFT:
+      Current->left_gain *= 1.122018454;
+      Current->right_gain /= 1.122018454;
+      break;
+    case KEY_RIGHT:
+      Current->right_gain *= 1.122018454;
+      Current->left_gain /= 1.122018454;
       break;
     case 'r':
       // Reset playout queue
