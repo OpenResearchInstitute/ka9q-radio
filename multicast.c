@@ -150,3 +150,32 @@ int setup_mcast(char const *target,int output){
   freeaddrinfo(results);
   return fd;
 }
+
+unsigned char *ntoh_rtp(struct rtp_header *rtp,unsigned char *data){
+  rtp->vpxcc = data[0];
+  rtp->type = data[1] & ~RTP_MARKER;
+  rtp->marker = data[1] & RTP_MARKER;
+  rtp->seq = data[2] << 8 | data[3];
+  rtp->timestamp = data[4] << 24 | data[5] << 16 | data[6] << 8 | data[7];
+  rtp->ssrc = data[8] << 24 | data[9] << 16 | data[10] << 8 | data[11];
+  
+  return data + RTP_MIN_SIZE;
+}
+
+
+unsigned char *hton_rtp(unsigned char *data, struct rtp_header *rtp){
+  data[0] = rtp->vpxcc;
+  data[1] = rtp->type | (rtp->marker ? RTP_MARKER : 0);
+  data[2] = rtp->seq >> 8;
+  data[3] = rtp->seq & 0xff;
+  data[4] = rtp->timestamp >> 24;
+  data[5] = rtp->timestamp >> 16;
+  data[6] = rtp->timestamp >> 8;
+  data[7] = rtp->timestamp;
+  data[8] = rtp->ssrc >> 24;
+  data[9] = rtp->ssrc >> 16;
+  data[10] = rtp->ssrc >> 8;
+  data[11] = rtp->ssrc;
+  
+  return data + RTP_MIN_SIZE;
+}
