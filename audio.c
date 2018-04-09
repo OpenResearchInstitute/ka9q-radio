@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.64 2018/04/04 01:55:31 karn Exp karn $
+// $Id: audio.c,v 1.65 2018/04/04 14:17:51 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -42,26 +42,12 @@ static short const scaleclip(float const x){
 int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
 
   struct rtp_header rtp;
-  rtp.mpt = PCM_STEREO_PT;         // 16 bit linear, big endian, stereo
+  memset(&rtp,0,sizeof(rtp));
+  rtp.type = PCM_STEREO_PT;         // 16 bit linear, big endian, stereo
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-  rtp.ssrc = htonl(Ssrc);
+  rtp.ssrc = Ssrc;
 
   int16_t PCM_buf[PCM_BUFSIZE];
-
-  struct iovec iovec[2];      
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = PCM_buf;
-  
-  struct msghdr message;      
-  message.msg_name = NULL; // Set by connect() call in setup_output()
-  message.msg_namelen = 0;
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 2;
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
-  
 
   while(size > 0){
     int not_silent = 0;
@@ -72,20 +58,25 @@ int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
       not_silent |= PCM_buf[i];
     }      
     // If packet is all zeroes, don't send it but still increase the timestamp
-    rtp.timestamp = htonl(Timestamp);
+    rtp.timestamp = Timestamp;
     Timestamp += chunk/2; // Increase by sample count
     if(not_silent){
       audio->audio_packets++;
       if(audio->silent){
 	audio->silent = 0;
-	rtp.mpt |= RTP_MARKER;
+	rtp.marker = 1;
       } else
-	rtp.mpt &= ~RTP_MARKER;
-      rtp.seq = htons(Rtp_seq++);
-      iovec[1].iov_len = chunk * 2;
-      int r = sendmsg(audio->audio_mcast_fd,&message,0);
+	rtp.marker = 0;
+      rtp.seq = Rtp_seq++;
+      unsigned char packet[2048],*dp;
+      dp = packet;
+
+      dp = hton_rtp(dp,&rtp);
+      memcpy(dp,PCM_buf,2*chunk);
+      dp += 2*chunk;
+      int r = send(audio->audio_mcast_fd,&packet,dp - packet,0);
       if(r < 0){
-	perror("pcm: sendmsg");
+	perror("pcm: send");
 	break;
       }
     } else
@@ -98,27 +89,13 @@ int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
 // Send 'size' mono samples, each in a float
 int send_mono_audio(struct audio * const audio,float const * buffer,int size){
 
- struct rtp_header rtp;
-  rtp.mpt = PCM_MONO_PT;         // 16 bit linear, big endian, mono
+  struct rtp_header rtp;
+  memset(&rtp,0,sizeof(rtp));
+  rtp.type = PCM_MONO_PT;         // 16 bit linear, big endian, mono
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-  rtp.ssrc = htonl(Ssrc);
+  rtp.ssrc = Ssrc;
 
   int16_t PCM_buf[PCM_BUFSIZE];
-
-  struct iovec iovec[2];      
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = PCM_buf;
-  
-  struct msghdr message;      
-  message.msg_name = NULL; // Set by connect() call in setup_output()
-  message.msg_namelen = 0;
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 2;
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
-  
 
   while(size > 0){
     int not_silent = 0;
@@ -129,21 +106,27 @@ int send_mono_audio(struct audio * const audio,float const * buffer,int size){
       not_silent |= PCM_buf[i];
     }      
     // If packet is all zeroes, don't send it but still increase the timestamp
-    rtp.timestamp = htonl(Timestamp);
-    Timestamp += chunk; // Increase by stereo sample count
+    rtp.timestamp = Timestamp;
+    Timestamp += chunk; // Increase by sample count
     if(not_silent){
       // Don't send silence, but timestamp is still incremented
       audio->audio_packets++;
       if(audio->silent){
 	audio->silent = 0;
-	rtp.mpt |= RTP_MARKER;
+	rtp.marker = 1;
       } else
-	rtp.mpt &= ~RTP_MARKER;
-      rtp.seq = htons(Rtp_seq++);
-      iovec[1].iov_len = chunk * 2;
-      int r = sendmsg(audio->audio_mcast_fd,&message,0);
+	rtp.marker = 0;
+      rtp.seq = Rtp_seq++;
+      unsigned char packet[2048];
+      unsigned char *dp = packet;
+
+      dp = hton_rtp(dp,&rtp);
+      memcpy(dp,PCM_buf,2*chunk);
+      dp += 2 * chunk;
+
+      int r = send(audio->audio_mcast_fd,&packet,dp - packet,0);
       if(r < 0){
-	perror("pcm: sendmsg");
+	perror("pcm: send");
 	break;
       }
     } else
