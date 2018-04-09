@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.13 2018/04/03 21:33:13 karn Exp karn $
+// $Id: opus.c,v 1.14 2018/04/04 05:55:07 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -50,8 +50,8 @@ struct session {
   struct session *prev;       // Linked list pointers
   struct session *next; 
   uint32_t ssrc;            // RTP Sending Source ID
-  int eseq;                 // Next expected RTP input sequence number
-  int etimestamp;           // Next expected RTP input timestamp
+  uint16_t eseq;            // Next expected RTP input sequence number
+  uint32_t etimestamp;      // Next expected RTP input timestamp
   int type;                 // input RTP type (10,11)
   
   struct sockaddr sender;
@@ -60,8 +60,8 @@ struct session {
   OpusEncoder *opus;        // Opus encoder handle
   int silence;              // Currently suppressing silence
 
-  int oseq;                 // Output sequence number
-  int otimestamp;           // Output timestamp
+  uint16_t oseq;                 // Output sequence number
+  uint32_t otimestamp;           // Output timestamp
   float *audio_buffer;      // Buffer to accumulate PCM until enough for Opus frame
   int audio_index;          // Index of next sample to write into audio_buffer
 
@@ -153,24 +153,10 @@ int main(int argc,char * const argv[]){
   }
 
   // Set up to receive PCM in RTP/UDP/IP
-  struct iovec iovec_in[2];
   struct rtp_header rtp_in;
-  signed short data_in[Bufsize];
-  
-  iovec_in[0].iov_base = &rtp_in;
-  iovec_in[0].iov_len = sizeof(rtp_in);
-  iovec_in[1].iov_base = data_in;
-  iovec_in[1].iov_len = sizeof(data_in);
 
-  struct msghdr message_in;
+  
   struct sockaddr sender;
-  message_in.msg_name = &sender;
-  message_in.msg_namelen = sizeof(sender);
-  message_in.msg_iov = &iovec_in[0];
-  message_in.msg_iovlen = 2;
-  message_in.msg_control = NULL;
-  message_in.msg_controllen = 0;
-  message_in.msg_flags = 0;
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -181,29 +167,27 @@ int main(int argc,char * const argv[]){
   signal(SIGPIPE,SIG_IGN);
 
   while(1){
-    int size;
-
-    size = recvmsg(Input_fd,&message_in,0);
+    unsigned char buffer[Bufsize];
+    socklen_t socksize = sizeof(sender);
+    int size = recvfrom(Input_fd,buffer,sizeof(buffer),0,&sender,&socksize);
     if(size == -1){
       if(errno != EINTR){ // Happens routinely
-	perror("recvmsg");
+	perror("recvfrom");
 	usleep(1000);
       }
       continue;
     }
-    if(size < sizeof(rtp_in)){
+    if(size <= RTP_MIN_SIZE){
       usleep(500); // Avoid tight loop
       continue; // Too small to be valid RTP
     }
+    unsigned char *dp = buffer;
     // To host order
-    rtp_in.ssrc = ntohl(rtp_in.ssrc);
-    rtp_in.seq = ntohs(rtp_in.seq);
-    rtp_in.timestamp = ntohl(rtp_in.timestamp);
-    int marker = rtp_in.mpt & RTP_MARKER;
-    rtp_in.mpt &= ~RTP_MARKER;
+    dp = ntoh_rtp(&rtp_in,buffer);
+    size -= (dp - buffer);
 
     // Only accept mono and stereo PCM at implied 48 kHz sample rate
-    if(rtp_in.mpt != PCM_STEREO_PT && rtp_in.mpt != PCM_MONO_PT) // 1 byte, no need to byte swap
+    if(rtp_in.type != PCM_STEREO_PT && rtp_in.type != PCM_MONO_PT) // 1 byte, no need to byte swap
       goto endloop; // Discard all but mono and stereo PCM to avoid polluting session table
 
     struct session *sp = lookup_session(&sender,rtp_in.ssrc);
@@ -248,7 +232,7 @@ int main(int argc,char * const argv[]){
 	fprintf(stderr,"opus_encoder_ctl set framesize %d (%.1lf ms): error %d\n",Opus_frame_size,Opus_blocktime,error);
     }
     sp->packets++;
-    sp->type = rtp_in.mpt;
+    sp->type = rtp_in.type;
     if(rtp_in.seq != sp->eseq){
       int const diff = (int)(rtp_in.seq - sp->eseq);
       //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
@@ -258,45 +242,40 @@ int main(int argc,char * const argv[]){
       }
       sp->drops += abs(diff); // Apparent # packets dropped
     }
-    sp->eseq = (rtp_in.seq + 1) & 0xffff;
-
-    size -= sizeof(rtp_in); // Bytes in payload
-    if(size <= 0){
-      sp->empties++;
-      goto endloop; // empty?!
-    }
+    sp->eseq = rtp_in.seq + 1;
 
     int samples_skipped = (signed int)(rtp_in.timestamp - sp->etimestamp);
 
     sp->otimestamp += samples_skipped; // Track sender's timestamp jumps
-    if(marker || samples_skipped > 4*Opus_frame_size){
+    if(rtp_in.marker || samples_skipped > 4*Opus_frame_size){
       // reset encoder state after 4 frames of complete silence and set RTP marker bit
       opus_encoder_ctl(sp->opus,OPUS_RESET_STATE);
       sp->silence = 1;
     }
-    int samples = 0;
-    switch(rtp_in.mpt){
+    int sampcount = 0;
+    signed short *samples = (signed short *)dp;
+    switch(rtp_in.type){
     case PCM_STEREO_PT: // Stereo
-      samples = size / 4;  // # 32-bit word samples
-      for(int i=0; i < samples; i++){
-	float left = SCALE * (signed short)ntohs(data_in[2*i]);
-	float right = SCALE * (signed short)ntohs(data_in[2*i+1]);
+      sampcount = size / 4;  // # 32-bit word samples
+      for(int i=0; i < sampcount; i++){
+	float left = SCALE * (signed short)ntohs(samples[2*i]);
+	float right = SCALE * (signed short)ntohs(samples[2*i+1]);
 	send_samples(sp,left,right);
       }
       break;
     case PCM_MONO_PT: // Mono; send to both stereo channels
-      samples = size / 2;
-      for(int i=0;i<samples;i++){
-	float left = SCALE * (signed short)ntohs(data_in[i]);	
+      sampcount = size / 2;
+      for(int i=0;i<sampcount;i++){
+	float left = SCALE * (signed short)ntohs(samples[i]);
 	float right = left;
 	send_samples(sp,left,right);
       }
       break;
     default:
-      samples = 0;
+      sampcount = 0;
       break; // ignore
     }
-    sp->etimestamp = rtp_in.timestamp + samples;
+    sp->etimestamp = rtp_in.timestamp + sampcount;
 
   endloop:;
   }
@@ -379,45 +358,36 @@ int send_samples(struct session *sp,float left,float right){
   sp->audio_buffer[sp->audio_index++] = left;
   sp->audio_buffer[sp->audio_index++] = right;  
   if(sp->audio_index >= Opus_frame_size * Channels){
-    unsigned char data_out[Bufsize];
     sp->audio_index = 0;
+
+
+    // Set up to transmit Opus RTP/UDP/IP
+    struct rtp_header rtp_out;
+    rtp_out.vpxcc = RTP_VERS << 6;
+    rtp_out.seq = sp->oseq;
+    rtp_out.type = OPUS_PT; // Opus
+    if(sp->silence){
+      // Beginning of talk spurt after silence, set marker bit
+      rtp_out.marker = 1;
+      sp->silence = 0;
+    } else
+      rtp_out.marker = 0;
+    rtp_out.ssrc = sp->ssrc;
+    rtp_out.timestamp = sp->otimestamp;
+    sp->otimestamp += Opus_frame_size; // Always increase timestamp
     
-    size += opus_encode_float(sp->opus,sp->audio_buffer,Opus_frame_size,data_out,sizeof(data_out));
+    unsigned char outbuffer[16384]; // fix this to a more reasonable number
+    unsigned char *dp = outbuffer;
+    dp = hton_rtp(dp,&rtp_out);
+    size += opus_encode_float(sp->opus,sp->audio_buffer,Opus_frame_size,dp,sizeof(outbuffer) - (dp - outbuffer));
+    dp += size;
     if(!Discontinuous || size > 2){
       // ship it
-      // Set up to transmit Opus RTP/UDP/IP
-      struct iovec iovec_out[2];
-      struct rtp_header rtp_out;
-      
-      rtp_out.vpxcc = RTP_VERS << 6;
-      
-      iovec_out[0].iov_base = &rtp_out;
-      iovec_out[0].iov_len = sizeof(rtp_out);
-      iovec_out[1].iov_base = data_out;
-      iovec_out[1].iov_len = size;
-      
-      struct msghdr message_out;
-      message_out.msg_name = NULL; // connected-mode socket already has destination
-      message_out.msg_namelen = 0;
-      message_out.msg_iov = &iovec_out[0];
-      message_out.msg_iovlen = 2;
-      message_out.msg_control = NULL;
-      message_out.msg_controllen = 0;
-      message_out.msg_flags = 0;
-
-      rtp_out.seq = htons(sp->oseq++);
-      rtp_out.mpt = OPUS_PT; // Opus
-      if(sp->silence){
-	// Beginning of talk spurt after silence, set marker bit
-	rtp_out.mpt |= RTP_MARKER;
-	sp->silence = 0;
-      }
-      rtp_out.ssrc = htonl(sp->ssrc);
-      rtp_out.timestamp = htonl(sp->otimestamp);
-      size = sendmsg(Output_fd,&message_out,0);
+      size = send(Output_fd,outbuffer,dp-outbuffer,0);
+      sp->oseq++; // Increment only if packet is sent
     } else
       sp->silence = 1;
-    sp->otimestamp += Opus_frame_size;
+
   }
   return size;
 }
