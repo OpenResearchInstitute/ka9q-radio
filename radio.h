@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.61 2018/03/28 07:07:41 karn Exp karn $
+// $Id: radio.h,v 1.62 2018/04/01 10:18:14 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -10,6 +10,8 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+
+#include "sdr.h"
 
 struct modetab {
   char name[16];
@@ -23,20 +25,6 @@ struct modetab {
   float attack_rate;
   float recovery_rate;
   float hangtime;
-};
-
-// Sent in each RTP packet right after header
-// NB! because we just copy this into the network stream, it's important that the compiler
-// not add any extra padding.
-// To avoid this, the size must be a multiple of 8, the size of a double and long long
-struct status {
-  long long timestamp; // Nanoseconds since GPS epoch 6 Jan 1980 00:00:00 UTC
-  double frequency;
-  uint32_t samprate;
-  uint8_t lna_gain;
-  uint8_t mixer_gain;
-  uint8_t if_gain;
-  uint8_t unused; // pad to 16 bytes
 };
 
 // Demodulator state block
