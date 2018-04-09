@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.114 2018/04/01 10:18:29 karn Exp karn $
+// $Id: display.c,v 1.115 2018/04/05 20:32:53 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -685,6 +685,7 @@ void *display(void *arg){
     double sample_rate = demod->samples/run_time;
 
     wmove(network,0,0);
+    wclrtoeol(network);
     mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
     mvwprintw(network,row++,col,"IQ pkts %'llu samples %'llu rate %'.3lf Hz",
 	      demod->iq_packets,demod->samples,sample_rate);
