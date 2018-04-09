@@ -1,5 +1,6 @@
-// $Id: iqplay.c,v 1.19 2018/02/20 22:30:20 karn Exp karn $
+// $Id: iqplay.c,v 1.20 2018/04/04 21:21:25 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
+// Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
 #include <assert.h>
 #include <unistd.h>
@@ -48,19 +49,22 @@ int playfile(int sock,int fd,int blocksize){
   status.frequency = Default_frequency;
   attrscanf(fd,"samplerate","%ld",&status.samprate);
   attrscanf(fd,"frequency","%lf",&status.frequency);
-
-
+  if(attrscanf(fd,"source_timestamp","%lld",&status.timestamp) == -1){
+    double unixstarttime;
+    attrscanf(fd,"unixstarttime","%lf",&unixstarttime);
+    // Convert decimal seconds from UNIX epoch to integer nanoseconds from GPS epoch
+    status.timestamp = (unixstarttime  - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000000LL;
+  }
   if(Verbose)
-    fprintf(stderr," %'d samp/s, RF LO %'.1lf Hz\n",status.samprate,status.frequency);
+    fprintf(stderr,": start time %s, %'d samp/s, RF LO %'.1lf Hz\n",lltime(status.timestamp),status.samprate,status.frequency);
 
   struct rtp_header rtp;
   rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-  rtp.mpt = 97;         // ordinarily dynamically allocated
-
+  rtp.type = IQ_PT;         // ordinarily dynamically allocated
   
   struct timeval start_time;
   gettimeofday(&start_time,NULL);
-  rtp.ssrc = htonl(start_time.tv_sec);
+  rtp.ssrc = start_time.tv_sec;
   int timestamp = 0;
   int seq = 0;
   
@@ -70,27 +74,9 @@ int playfile(int sock,int fd,int blocksize){
   // Microseconds since start for next scheduled transmission; will transmit first immediately
   double sked_time = 0;
   
-  short sampbuf[2*blocksize];
-  struct iovec iovec[3];
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = &status;
-  iovec[1].iov_len = sizeof(status);
-  iovec[2].iov_base = sampbuf;
-  iovec[2].iov_len = sizeof(sampbuf);
-
-  struct msghdr message;
-  message.msg_name = NULL;
-  message.msg_namelen = 0;
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 3;
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
-
-  while(pipefill(fd,sampbuf,sizeof(sampbuf)) > 0){
-    rtp.seq = htons(seq++);
-    rtp.timestamp = htonl(timestamp);
+  while(1){
+    rtp.seq = seq++;
+    rtp.timestamp = timestamp;
     timestamp += blocksize;
     
     // Is it time yet?
@@ -108,11 +94,24 @@ int playfile(int sock,int fd,int blocksize){
 	usleep(s);
       }
     }
-    if(sendmsg(sock,&message,0) == -1)
-      perror("sendmsg");
+    unsigned char output_buffer[16384]; // fix
+    unsigned char *dp = output_buffer;
+    dp = hton_rtp(dp,&rtp);
+    dp = hton_status(dp,&status);
+
+    if(pipefill(fd,dp,4*blocksize) <= 0)
+      break;
+
+    dp += 4*blocksize;
+
+    int length = dp - output_buffer;
+    if(send(sock,output_buffer,length,0) == -1)
+      perror("send");
     
     // Update time of next scheduled transmission
     sked_time += dt;
+    // Update timestamp
+    status.timestamp += blocksize * (long long)1e9 / status.samprate;
   }
   return 0;
 }
@@ -134,7 +133,7 @@ int main(int argc,char *argv[]){
 
 
 
-  char *dest = "playback-mcast.local"; // Default for testing
+  char *dest = "iq.playback.mcast.local"; // Default for testing
   locale = getenv("LANG");
 
   Mcast_ttl = 1; // By default, don't let it route
@@ -182,7 +181,7 @@ int main(int argc,char *argv[]){
   if(optind == argc){
     // No file arguments, read from stdin
     if(Verbose)
-      fprintf(stderr,"Transmitting from stdin ");
+      fprintf(stderr,"Transmitting from stdin");
     playfile(Rtp_sock,0,Blocksize);
   } else {
     for(int i=optind;i<argc;i++){
@@ -193,7 +192,7 @@ int main(int argc,char *argv[]){
 	continue;
       }
       if(Verbose)
-	fprintf(stderr,"Transmitting %s ",argv[i]);
+	fprintf(stderr,"Transmitting %s",argv[i]);
       playfile(Rtp_sock,fd,Blocksize);
       close(fd);
       fd = -1;
