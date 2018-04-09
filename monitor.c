@@ -1,5 +1,7 @@
 // $Id: monitor.c,v 1.55 2018/04/07 04:40:51 karn Exp karn $
-// Listen to multicast, send PCM audio to Linux ALSA driver
+// Listen to multicast group(s), send audio to local sound device via portaudio
+// Known bugs: specifying same group more than once causes problems
+//             'd' command sometimes hangs display thread   
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <stdatomic.h>
@@ -29,11 +31,9 @@
 // Global config variables
 #define SAMPRATE 48000        // Too hard to handle other sample rates right now
 #define MAX_MCAST 20          // Maximum number of multicast addresses
-#define PKTSIZE 16384         // Maximum bytes per RTP packet - must be bigger than Ethernet MTU
-#define NCHAN 2               // 2 channels (stereo)
+#define PKTSIZE 16384         // Maximum bytes per RTP packet - must be bigger than Ethernet MTU (including offloaded reassembly)
 #define SAMPPCALLBACK (SAMPRATE/50)     // 20 ms @ 48 kHz
 #define BUFFERSIZE (1<<19)    // about 10.92 sec at 48 kHz stereo - must be power of 2!!
-#define PAUSETHRESH (4*SAMPRATE)     // Pause after this many seconds of starvation
 
 char *Mcast_address_text[MAX_MCAST]; // Multicast address(es) we're listening to
 char Audiodev[256];           // Name of audio device; empty means portaudio's default
@@ -58,8 +58,9 @@ PaTime Start_pa_time;
 struct packet {
   struct packet *next;
   struct rtp_header rtp;
-  unsigned char data[PKTSIZE];
+  unsigned char *data;
   int len;
+  unsigned char content[PKTSIZE];
 };
 
 struct session {
@@ -96,7 +97,7 @@ struct session {
   unsigned long lates;      // Callback count of underruns (stereo samples) replaced with silence
   unsigned long erasures;   // Erasure gaps
 
-  float output_buffer[BUFFERSIZE][NCHAN]; // Decoded audio output, written by processing thread and read by PA callback
+  float output_buffer[BUFFERSIZE][2]; // Decoded audio output, written by processing thread and read by PA callback
   int wptr;                        // Write pointer into output_buffer
   int rptr;                        // Read pointer into output buffer
   int terminate;
@@ -230,7 +231,7 @@ int main(int argc,char * const argv[]){
   // This allows multiple streams to be played on hosts that only support one
   PaStreamParameters outputParameters;
   memset(&outputParameters,0,sizeof(outputParameters));
-  outputParameters.channelCount = NCHAN;
+  outputParameters.channelCount = 2;
   outputParameters.device = inDevNum;
   outputParameters.sampleFormat = paFloat32;
   outputParameters.suggestedLatency = 0.010; // 0 doesn't seem to be a good value on OSX, lots of underruns and stutters
@@ -263,16 +264,7 @@ int main(int argc,char * const argv[]){
     pthread_t display_task;
     pthread_create(&display_task,NULL,display,NULL);
   }
-  struct iovec iovec[2]; // These contents are rewritten before every recvmsg()
-  struct msghdr message;
   struct sockaddr sender;
-  message.msg_name = &sender;
-  message.msg_namelen = sizeof(sender);
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 2;
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
 
   // Do this at the last minute at startup since the upcall will come quickly
   r = Pa_StartStream(Pa_Stream);
@@ -292,9 +284,9 @@ int main(int argc,char * const argv[]){
     int s = select(max_fd+1,&fdset,NULL,NULL,NULL);
     if(s < 0 && errno != EAGAIN && errno != EINTR)
       break;
-    if(s == 0){
+    if(s == 0)
       continue; // Nothing arrived; probably just an ignored signal
-    }
+
     for(int fd_index = 0;fd_index < Nfds;fd_index++){
       if(input_fd[fd_index] == -1 || !FD_ISSET(input_fd[fd_index],&fdset))
 	continue;
@@ -302,38 +294,37 @@ int main(int argc,char * const argv[]){
       // Need a new packet buffer?
       if(!pkt)
 	pkt = malloc(sizeof(*pkt));
-      pkt->next = NULL; // just to be safe
+      // Zero these out to catch any uninitialized derefs
+      pkt->next = NULL;
+      pkt->data = NULL;
+      pkt->len = 0;
 
-      // message points to iovec[]
-      iovec[0].iov_base = &pkt->rtp;
-      iovec[0].iov_len = sizeof(pkt->rtp);
-      iovec[1].iov_base = &pkt->data;
-      iovec[1].iov_len = sizeof(pkt->data);
+      socklen_t socksize = sizeof(sender);
+      int size = recvfrom(input_fd[fd_index],&pkt->content,sizeof(pkt->content),0,&sender,&socksize);
 
-      int size = recvmsg(input_fd[fd_index],&message,0);
       if(size == -1){
 	if(errno != EINTR){ // Happens routinely, e.g., when window resized
-	  perror("recvmsg");
+	  perror("recvfrom");
  	  usleep(1000);
 	}
-	continue;
+	continue;  // Reuse current buffer
       }
-      if(size <= sizeof(pkt->rtp)){
+      if(size <= RTP_MIN_SIZE)
 	continue; // Must be big enough for RTP header and at least some data
-      }
-      int type = pkt->rtp.mpt & ~RTP_MARKER;
-      if(type != PCM_STEREO_PT
-	 && type != OPUS_PT
-	 && type != 20           // Old fixed value for Opus, take this out eventually
-	 && type != PCM_MONO_PT) // 1 byte, no need to byte swap
+
+      // Convert RTP header to host order
+
+      unsigned char *dp = ntoh_rtp(&pkt->rtp,pkt->content);
+      pkt->data = dp;
+      pkt->len = size - (dp - pkt->content);
+      assert(pkt->len > 0);
+
+      if(pkt->rtp.type != PCM_STEREO_PT
+	 && pkt->rtp.type != OPUS_PT
+	 && pkt->rtp.type != 20           // Old fixed value for Opus, take this out eventually
+	 && pkt->rtp.type != PCM_MONO_PT) // 1 byte, no need to byte swap
 	continue; // Discard unknown RTP types to avoid polluting session table
       
-      // Convert RTP header to host order
-      pkt->rtp.ssrc = ntohl(pkt->rtp.ssrc);
-      pkt->rtp.seq = ntohs(pkt->rtp.seq);
-      pkt->rtp.timestamp = ntohl(pkt->rtp.timestamp);
-      pkt->len = size - sizeof(pkt->rtp); // Bytes in payload
-      assert(pkt->len > 0);
 
       // Find appropriate session; create new one if necessary
       struct session *sp = lookup_session(&sender,pkt->rtp.ssrc);
@@ -395,7 +386,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   
   assert(framesPerBuffer < BUFFERSIZE/2); // Make sure ring buffer is big enough
 
-  float (*out)[NCHAN] = outputBuffer;
+  float (*out)[2] = outputBuffer;
   
   memset(out,0,sizeof(*out) * framesPerBuffer);
   // Walk through each decoder control block and add its decoded audio into output
@@ -404,10 +395,11 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
       continue; // Not enough; skip
 
     for(int n=0; n < framesPerBuffer; n++){
-      for(int j = 0; j < NCHAN; j++){
-	out[n][j] += sp->output_buffer[sp->rptr][j];
-	sp->output_buffer[sp->rptr][j] = 0; // Burn after reading
-      }
+      // Burn after reading since writers may skip over silence, or the stream may stall
+      out[n][0] += sp->output_buffer[sp->rptr][0];
+      sp->output_buffer[sp->rptr][0] = 0;
+      out[n][1] += sp->output_buffer[sp->rptr][1];
+      sp->output_buffer[sp->rptr][1] = 0;
       sp->rptr = (sp->rptr + 1) & (BUFFERSIZE-1);
     }
   }
@@ -474,8 +466,7 @@ void *decode_task(void *arg){
       seq_offset = 0;
     }
     sp->reseq_count = 0;
-    sp->type = pkt->rtp.mpt & ~RTP_MARKER;
-    int marker = pkt->rtp.mpt & RTP_MARKER;
+    sp->type = pkt->rtp.type;
 
     if(seq_offset > 0)
       sp->drops += seq_offset;
@@ -520,14 +511,14 @@ void *decode_task(void *arg){
     if(lost_interval > 0){
       // Missing data -- if marker, just reset decoder and recover lost time
       if(sp->type == OPUS_PT && sp->opus){
-	if(marker || seq_offset >= 3 || lost_interval >= 3840) {
+	if(pkt->rtp.marker || seq_offset >= 3 || lost_interval >= 3840) {
 	  opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder and catch up
 	} else {
 	  // Opus error concealment with FEC
 	  sp->erasures += seq_offset;
 
 	  // Opus erasure handling - should also support FEC through look-ahead
-	  float bounce[lost_interval][NCHAN];
+	  float bounce[lost_interval][2];
 	  // Decode any FEC, otherwise interpolate or create comfort noise
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
 	  if(samples > 0){
@@ -540,7 +531,7 @@ void *decode_task(void *arg){
 	}
       } else {
 	// PCM
-	if(!marker && seq_offset < 3 && lost_interval < 3840){
+	if(!pkt->rtp.marker && seq_offset < 3 && lost_interval < 3840){
 	  // Pad with zeroes
 	  sp->erasures += seq_offset;
 	  for(int i=0; i < lost_interval; i++){
@@ -573,10 +564,10 @@ void *decode_task(void *arg){
     case 20:
       if(!sp->opus){
 	int error;
-	sp->opus = opus_decoder_create(SAMPRATE,NCHAN,&error);
+	sp->opus = opus_decoder_create(SAMPRATE,2,&error);
       }
       {
-	float bounce[sp->frame_size][NCHAN];
+	float bounce[sp->frame_size][2];
 	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);	
 	if(samples > 0){	// check for error of some kind
 	  for(int i=0; i<samples; i++){
@@ -688,7 +679,13 @@ void *display(void *arg){
 	Current = sp;
     }
     row++;
-    mvwprintw(Mainscr,row++,0,"\u2b72 select next stream\nd delete stream\nr reset playout buffer\n\u2b61 volume +1 dB\n\u2b63 volume -1 dB\n\u2b6c stereo position right\n\u2b6a stereo position left\n");
+    mvwprintw(Mainscr,row++,0,"\u21e5 select next stream");
+    mvwprintw(Mainscr,row++,0,"d delete stream");
+    mvwprintw(Mainscr,row++,0,"r reset playout buffer");
+    mvwprintw(Mainscr,row++,0,"\u2191 volume +1 dB");
+    mvwprintw(Mainscr,row++,0,"\u2193 volume -1 dB");
+    mvwprintw(Mainscr,row++,0,"\u2192 stereo position right");
+    mvwprintw(Mainscr,row++,0,"\u2190 stereo position left");
 
     if(Verbose){
       // Measure skew between sampling clock and UNIX real time (hopefully NTP synched)
