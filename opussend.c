@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.9 2018/04/03 21:29:12 karn Exp karn $
+// $Id: opussend.c,v 1.10 2018/04/03 21:33:13 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -247,29 +247,11 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
   // Set up to transmit Opus RTP/UDP/IP
-  struct iovec iovec_out[2];
-  struct rtp_header rtp_out;
-  unsigned char data_out[2*est_packet_size]; // Allow room for Opus to peak over specified bit rate
-  struct msghdr message_out;
 
-  rtp_out.vpxcc = RTP_VERS << 6;
-
-  iovec_out[0].iov_base = &rtp_out;
-  iovec_out[0].iov_len = sizeof(rtp_out);
-  iovec_out[1].iov_base = data_out;
-  // iovec_out[1].iov_len varies
 
   unsigned long timestamp = 0;
   unsigned short seq = 0;
   unsigned long ssrc = time(0);
-
-  message_out.msg_name = NULL; // connected-mode socket already has destination
-  message_out.msg_namelen = 0;
-  message_out.msg_iov = &iovec_out[0];
-  message_out.msg_iovlen = 2;
-  message_out.msg_control = NULL;
-  message_out.msg_controllen = 0;
-  message_out.msg_flags = 0;
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -309,15 +291,22 @@ int main(int argc,char * const argv[]){
     if(rptr >= BUFFERSIZE)
       rptr -= BUFFERSIZE;
 
-    int size = opus_encode_float(Opus,opus_input,Opus_frame_size,data_out,sizeof(data_out));
+    struct rtp_header rtp_out;
+    rtp_out.vpxcc = RTP_VERS << 6;
+    rtp_out.seq = seq;
+    rtp_out.type = OPUS_PT; // Opus (not standard)
+    rtp_out.ssrc = ssrc;
+    rtp_out.timestamp = timestamp;
+
+    unsigned char buffer[16384]; // Pick better number
+    unsigned char *dp = buffer;
+    dp = hton_rtp(dp,&rtp_out);
+
+    int size = opus_encode_float(Opus,opus_input,Opus_frame_size,dp,sizeof(buffer) - (dp - buffer));
     if(!Discontinuous || size > 2){
-      // This ought to source fragment if necessary
-      iovec_out[1].iov_len = size;
-      rtp_out.seq = htons(seq++);
-      rtp_out.mpt = OPUS_PT; // Opus (not standard)
-      rtp_out.ssrc = htonl(ssrc);
-      rtp_out.timestamp = htonl(timestamp);
-      size = sendmsg(Output_fd,&message_out,0);
+      dp += size;
+      send(Output_fd,buffer,dp - buffer,0);
+      seq++; // Increment RTP sequence number only if packet is sent
     }
     timestamp += Opus_frame_size; // Always increments, even if we suppress the frame
   }
