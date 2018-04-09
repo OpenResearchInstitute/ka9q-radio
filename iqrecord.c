@@ -1,5 +1,5 @@
-// $Id: iqrecord.c,v 1.10 2017/10/20 22:31:54 karn Exp karn $
-// Read complex float samples from stdin (e.g., from funcube.c)
+// $Id: iqrecord.c,v 1.11 2018/02/06 11:46:44 karn Exp karn $
+// Read and record complex I/Q stream or PCM baseband audio
 // write into file
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -25,6 +25,8 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #include "radio.h"
 #include "attr.h"
@@ -34,10 +36,12 @@
 struct session {
   struct session *next;
   FILE *fp;                  // File being recorded
+  int type;                  // RTP payload type (with marker stripped)
+  int channels;
   uint32_t ssrc;             // RTP stream source ID
   uint32_t start_timestamp;  // first timestamp seen in stream
-  uint32_t timestamp;        // next expected timestamp
   uint16_t seq;              // next expected sequence number
+  long long source_timestamp; // Timestamp from IQ status header
   double frequency;          // Tuner LO frequency
   struct sockaddr iq_sender; // Sender's IP address and source port
   unsigned int samprate;     // Nominal sampling rate indicated in packet header
@@ -146,50 +150,41 @@ void closedown(int a){
 
 // Read from RTP network socket, assemble blocks of samples
 void input_loop(){
-  int cnt;
-  char samples[MAXPKT];
-  struct rtp_header rtp;
-  struct status status;
-  struct iovec iovec[3];
-
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = &status;
-  iovec[1].iov_len = sizeof(status);
-  iovec[2].iov_base = samples;
-  iovec[2].iov_len = sizeof(samples);
-  
-  struct msghdr message;
-  message.msg_name = &Sender;
-  message.msg_namelen = sizeof(Sender);
-  message.msg_iov = iovec;
-  message.msg_iovlen = sizeof(iovec) / sizeof(struct iovec);
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
-
   char filename[PATH_MAX] = "";
   while(1){
     // Receive I/Q data from front end
-    cnt = recvmsg(Input_fd,&message,0);
-    if(cnt <= 0){    // ??
+    socklen_t socksize = sizeof(Sender);
+    unsigned char buffer[MAXPKT];
+    int size = recvfrom(Input_fd,buffer,sizeof(buffer),0,&Sender,&socksize);
+    if(size <= 0){    // ??
       perror("recvfrom");
       usleep(50000);
       continue;
     }
-    if(cnt < sizeof(rtp) + sizeof(status))
-      continue; // Too small, ignore
-      
+    if(size < RTP_MIN_SIZE)
+      continue; // Too small for RTP, ignore
+
+    unsigned char *dp = buffer;
+    struct rtp_header rtp;
+    dp = ntoh_rtp(&rtp,dp);
+
     // Host byte order
-    rtp.ssrc = ntohl(rtp.ssrc);
-    rtp.seq = ntohs(rtp.seq);
-    rtp.timestamp = ntohl(rtp.timestamp);
+    struct status status;
+    if(rtp.type == IQ_PT){
+      dp = ntoh_status(&status,dp);
+    } else {
+      memset(&status,0,sizeof(status));
+    }
+    signed short *samples = (signed short *)dp;
+    size -= (dp - buffer);
+    size /= sizeof(*samples); // Count of 16-bit samples
     
     struct session *sp;
     for(sp = Sessions;sp != NULL;sp=sp->next){
       if(sp->ssrc == rtp.ssrc
+	 && rtp.type  == sp->type
 	 && memcmp(&sp->iq_sender,&Sender,sizeof(sp->iq_sender)) == 0
-	 && sp->frequency == status.frequency){
+	 && (rtp.type != IQ_PT || sp->frequency == status.frequency)){
 	break;
       }
     }
@@ -201,14 +196,46 @@ void input_loop(){
       Sessions = sp;
 
       memcpy(&sp->iq_sender,&Sender,sizeof(sp->iq_sender));
+      sp->type = rtp.type;
       sp->ssrc = rtp.ssrc;
       sp->seq = rtp.seq;
       sp->start_timestamp = rtp.timestamp;
-      sp->timestamp = sp->start_timestamp;
-      sp->frequency = status.frequency;
 
-      // Create file with name iqrecord-frequency-ssrc
-      snprintf(filename,sizeof(filename),"iqrecord-%.1lfHz-%lx",status.frequency,(long unsigned)rtp.ssrc);
+      switch(sp->type){
+      case PCM_MONO_PT:
+	sp->channels = 1;
+	sp->samprate = 48000;
+	sp->frequency = 0; // Not applicable
+	break;
+      case PCM_STEREO_PT:
+	sp->channels = 2;
+	sp->samprate = 48000;
+	sp->frequency = 0; // Not applicable
+	break;
+      case IQ_PT:
+	sp->channels = 2;
+	sp->frequency = status.frequency;
+	sp->samprate = status.samprate;
+	sp->source_timestamp = status.timestamp; // Timestamp from IQ status header
+	break;
+      }
+
+      // Create file with name iqrecord-frequency-ssrc or pcmrecord-ssrc
+      int suffix;
+      for(suffix=0;suffix<100;suffix++){
+	struct stat statbuf;
+
+	if(status.frequency)
+	  snprintf(filename,sizeof(filename),"iqrecord-%.1lfHz-%lx-%d",sp->frequency,(long unsigned)sp->ssrc,suffix);
+	else
+	  snprintf(filename,sizeof(filename),"pcmrecord-%lx-%d",(long unsigned)sp->ssrc,suffix);
+	if(stat(filename,&statbuf) == -1 && errno == ENOENT)
+	  break;
+      }
+      if(suffix == 100){
+	fprintf(stderr,"Can't generate filename to write\n");
+	exit(1);
+      }
       sp->fp = fopen(filename,"w+");
 
       if(sp->fp == NULL){
@@ -224,9 +251,24 @@ void input_loop(){
 
       int const fd = fileno(sp->fp);
       fcntl(fd,F_SETFL,O_NONBLOCK); // Let's see if this keeps us from losing data
-      attrprintf(fd,"samplerate","%lu",(unsigned long)status.samprate);
-      attrprintf(fd,"frequency","%.1f",status.frequency);
+
+      attrprintf(fd,"samplerate","%lu",(unsigned long)sp->samprate);
+      attrprintf(fd,"channels","%d",sp->channels);
       attrprintf(fd,"ssrc","%lx",(long unsigned)rtp.ssrc);
+
+      switch(sp->type){
+      case IQ_PT:
+	attrprintf(fd,"sampleformat","s16le");
+	attrprintf(fd,"frequency","%.3lf",sp->frequency);
+	attrprintf(fd,"source_timestamp","%lld",sp->source_timestamp);
+	break;
+      case PCM_MONO_PT:
+      case PCM_STEREO_PT:
+	attrprintf(fd,"sampleformat","s16be");
+	break;
+      case OPUS_PT: // No support yet; should put in container
+	break;
+      }
 
       char sender_text[NI_MAXHOST];
       getnameinfo((struct sockaddr *)&Sender,sizeof(Sender),sender_text,sizeof(sender_text),NULL,0,NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
@@ -236,28 +278,18 @@ void input_loop(){
       struct timeval tv;
       gettimeofday(&tv,NULL);
       attrprintf(fd,"unixstarttime","%ld.%06ld",(long)tv.tv_sec,(long)tv.tv_usec);
-      
-      // 2 channels, I & Q
-      attrprintf(fd,"channels","2");
-
-      // Signed 16-bit integers, little-endian (Intel)
-      attrprintf(fd,"sampleformat","s16le");
     }
 
-    if(rtp.seq != sp->seq || rtp.timestamp != sp->timestamp){
+    if(rtp.seq != sp->seq){
       if(!Quiet)
-	fprintf(stderr,"iqrecord %s: Expected seq %d, got %d; expected timestamp %u, got %u\n",
-		filename,sp->seq,rtp.seq,sp->timestamp,rtp.timestamp);
+	fprintf(stderr,"iqrecord %s: expected seq %u, got %u\n",filename,sp->seq,rtp.seq);
       sp->seq = rtp.seq;
-      sp->timestamp = rtp.timestamp;
     }
     // Should I limit the range on this?
-    fseek(sp->fp,2 * sizeof(int16_t) * (rtp.timestamp - sp->start_timestamp),SEEK_SET);
+    fseek(sp->fp,sp->channels * sizeof(int16_t) * (rtp.timestamp - sp->start_timestamp),SEEK_SET);
 
-    cnt -= sizeof(rtp) + sizeof(status);
-    fwrite(samples,sizeof(*samples),cnt,sp->fp);
+    fwrite(samples,sizeof(*samples),size,sp->fp);
     sp->seq++;
-    sp->timestamp += cnt/4; // Assumes 2 channels of s16
   }
 }
  
