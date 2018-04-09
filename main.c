@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.102 2018/04/01 10:18:07 karn Exp karn $
+// $Id: main.c,v 1.103 2018/04/05 20:32:14 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -293,127 +293,106 @@ void *input_loop(void *arg){
   pthread_setname("input");
   assert(arg != NULL);
   struct demod * const demod = arg;
-		 
-  struct status new_status;
-  int16_t samples[MAXPKT];
-  struct rtp_header rtp;
-  struct iovec iovec[3];
-
-  // Packet consists of Ethernet, IP and UDP header (already stripped)
-  // then standard Real Time Protocol (RTP), a status header and the PCM
-  // I/Q data. RTP is an IETF standard, so it uses big endian numbers
-  // The status header and I/Q data are *not* standard, so we save time
-  // by using machine byte order (almost certainly little endian).
-  // Note this is a portability problem if this system and the one generating
-  // the data have opposite byte orders. But who's big endian anymore?
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = &new_status;
-  iovec[1].iov_len = sizeof(new_status);
-  iovec[2].iov_base = samples;
-  iovec[2].iov_len = sizeof(samples);
   
-  struct msghdr message;
-  message.msg_name = &demod->input_source_address;
-  message.msg_namelen = sizeof(demod->input_source_address);
-  message.msg_iov = iovec;
-  message.msg_iovlen = sizeof(iovec) / sizeof(struct iovec);
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
-
-  uint16_t eseq;
-  uint32_t etimestamp;
   int init = 0;
   int reseq = 0;
+  uint16_t eseq;
+  uint32_t etimestamp;
 
   while(1){
-    // Listen for an I/Q packet
-    fd_set mask,errmask;
-    FD_ZERO(&mask);
-    FD_ZERO(&errmask);
-    FD_SET(demod->input_fd,&mask);
-    FD_SET(demod->input_fd,&errmask);
-
-    // The timeout recovers us if demod->input_fd changes, e.g., from the interactive 'I' command in display.c
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 100000;
-    select(FD_SETSIZE,&mask,NULL,&errmask,&timeout);
-
-    if(FD_ISSET(demod->input_fd,&errmask))
-      break;
-
-    if(FD_ISSET(demod->input_fd,&mask)){
-      // Receive I/Q data from front end
-      int cnt = recvmsg(demod->input_fd,&message,0);
-      if(cnt == -1){
-	if(errno != EINTR) // probably happens routinely
-	  perror("recvfrom");
-	continue;
-      }
-      if(cnt < sizeof(rtp) + sizeof(demod->status))
-	continue; // Too small, ignore
-      
-      cnt -= sizeof(rtp) + sizeof(demod->status);
-      int nsamples = cnt/4;      // count of 4-byte stereo samples
-
-      // Convert RTP header to host byte order
-      demod->iq_packets++;
-      rtp.ssrc = ntohl(rtp.ssrc);
-      rtp.seq = ntohs(rtp.seq);
-      rtp.timestamp = ntohl(rtp.timestamp);
-
-      if(init){
-	// Sequence number check
-	short seq_step = (short)(rtp.seq - eseq);
-	if(seq_step < 0 || seq_step > 10){
-	  if(++reseq >= 3){
-	    // Probably a new stream; start over with new sequence numbers
-	    reseq = init = 0;
-	  } else {
-	    if(seq_step > 0)
-	      demod->drops++;	  
-	    else if(seq_step < 0)
-	      demod->dupes++;
-	    continue;
-	  }
-	} else
-	  reseq = 0;
-      }
-      if(!init){
-	// First packet
-	gettimeofday(&demod->start_time,NULL);
-	demod->samples = -nsamples; // Don't count this packet
-	eseq = rtp.seq;
-	etimestamp = rtp.timestamp;
-	init = 1;
-      }
-      eseq = rtp.seq + 1;
-
-      gettimeofday(&demod->current_time,NULL);
-      int time_step = (int)(rtp.timestamp - etimestamp);
-      if(time_step < 0){
-	// Old samples; drop. Shouldn't happen if sequence number isn't old
-	continue;
-      } else if(time_step > 0 && time_step < DATASIZE/2){
-	  // Inject enough zeroes to keep the sample count correct
-	  // Arbitrary limit of 1/2 input ring buffer just to keep things from blowing up
-	  // Good enough for the occasional lost packet or two
-	  // May upset the I/Q DC offset and channel balance estimates, but hey you can't win 'em all
-	  short zeroes[2*time_step];
-	  memset(zeroes,0,sizeof(zeroes));
-	  demod->samples += time_step;
-	  proc_samples(demod,zeroes,time_step);
-      }
-      demod->samples += nsamples;
-      eseq = rtp.seq + 1;
-      etimestamp = rtp.timestamp + nsamples;
-      update_status(demod,&new_status);
-      // Pass PCM I/Q samples to corrector and input queue
-      proc_samples(demod,samples,nsamples);
-
+    // Packet consists of Ethernet, IP and UDP header (already stripped)
+    // then standard Real Time Protocol (RTP), a status header and the PCM
+    // I/Q data. RTP is an IETF standard, so it uses big endian numbers
+    // The status header and I/Q data are *not* standard, so we save time
+    // by using machine byte order (almost certainly little endian).
+    // Note this is a portability problem if this system and the one generating
+    // the data have opposite byte orders. But who's big endian anymore?
+    // Receive I/Q data from front end
+    socklen_t socksize = sizeof(demod->input_source_address);
+    unsigned char data[MAXPKT];
+    int size = recvfrom(demod->input_fd,data,sizeof(data),0,&demod->input_source_address,&socksize);
+    if(size <= 0){    // ??
+      perror("recvfrom");
+      usleep(50000);
+      continue;
     }
+
+    
+    if(size < RTP_MIN_SIZE)
+      continue; // Too small for RTP, ignore
+    struct rtp_header rtp;
+    unsigned char *dp = data;
+    dp = ntoh_rtp(&rtp,dp);
+    size -= (dp - data);
+    
+    if(rtp.type != IQ_PT)
+      continue; // Wrong type
+
+    demod->iq_packets++;
+
+    // Host byte order
+    struct status new_status;
+    new_status.timestamp = *(long long *)dp;
+    new_status.frequency = *(double *)&dp[8];
+    new_status.samprate = *(uint32_t *)&dp[16];
+    new_status.lna_gain = dp[20];
+    new_status.mixer_gain = dp[21];
+    new_status.if_gain = dp[22];
+    dp += 24;
+    size -= 24;
+
+    signed short *samples = (signed short *)dp;
+    size /= 2*sizeof(*samples); // Count of 32-bit samples
+
+    if(init){
+      // Sequence number check
+      short seq_step = (short)(rtp.seq - eseq);
+      if(seq_step < 0 || seq_step > 10){
+	if(++reseq >= 3){
+	  // Probably a new stream; start over with new sequence numbers
+	  reseq = init = 0;
+	} else {
+	  if(seq_step > 0)
+	    demod->drops++;	  
+	  else if(seq_step < 0)
+	    demod->dupes++;
+	  continue;
+	}
+      } else
+	reseq = 0;
+    }
+    if(!init){
+      // First packet
+      gettimeofday(&demod->start_time,NULL);
+      demod->samples = -size; // Don't count this packet
+      eseq = rtp.seq;
+      etimestamp = rtp.timestamp;
+      init = 1;
+    }
+    eseq = rtp.seq + 1;
+    
+    gettimeofday(&demod->current_time,NULL);
+    int time_step = (int)(rtp.timestamp - etimestamp);
+    if(time_step < 0){
+      // Old samples; drop. Shouldn't happen if sequence number isn't old
+      continue;
+    } else if(time_step > 0 && time_step < DATASIZE/2){
+      // Inject enough zeroes to keep the sample count correct
+      // Arbitrary limit of 1/2 input ring buffer just to keep things from blowing up
+      // Good enough for the occasional lost packet or two
+      // May upset the I/Q DC offset and channel balance estimates, but hey you can't win 'em all
+      short zeroes[2*time_step];
+      memset(zeroes,0,sizeof(zeroes));
+      demod->samples += time_step;
+      proc_samples(demod,zeroes,time_step);
+    }
+    demod->samples += size;
+    eseq = rtp.seq + 1;
+    etimestamp = rtp.timestamp + size;
+    update_status(demod,&new_status);
+    // Pass PCM I/Q samples to corrector and input queue
+    proc_samples(demod,samples,size);
+    
   }
   return NULL;
 }
