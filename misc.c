@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.21 2018/02/06 11:46:44 karn Exp karn $
+// $Id: misc.c,v 1.22 2018/02/26 22:50:47 karn Exp karn $
 // Miscellaneous low-level DSP routines
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1 // Needed to get sincos/sincosf
@@ -163,6 +163,11 @@ char *lltime(long long t){
 
   utime = (t / 1000000000LL) - GPS_UTC_OFFSET + UNIX_EPOCH;
   t_usec = (t % 1000000000LL) / 1000;
+  if(t_usec < 0){
+    t_usec += 1000000;
+    utime -= 1;
+  }
+
 
   gmtime_r(&utime,&tm);
   // Mon Feb 26 14:40:08.123456 UTC 2018
