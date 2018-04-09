@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.55 2018/04/07 04:40:51 karn Exp karn $
+// $Id: monitor.c,v 1.57 2018/04/09 21:07:11 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Known bugs: specifying same group more than once causes problems
 //             'd' command sometimes hangs display thread   
@@ -743,11 +743,13 @@ void *display(void *arg){
     break;
     case 'd':
       {
-	struct session *next = Current->next;
-	Current->terminate = 1;
-	pthread_join(Current->task,NULL);
-	close_session(Current);
-	Current = next;
+	if(Current){
+	  struct session *next = Current->next;
+	  Current->terminate = 1;
+	  pthread_join(Current->task,NULL);
+	  close_session(Current);
+	  Current = next;
+	}
       }
       break;
     case '\f':  // Screen repaint (formfeed, aka control-L)

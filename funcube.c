@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.29 2018/03/01 03:50:23 karn Exp karn $
+// $Id: funcube.c,v 1.30 2018/04/09 21:26:55 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -190,6 +190,7 @@ int main(int argc,char *argv[]){
     dp = hton_status(dp,&FCD.status);
     signed short *sampbuf = (signed short *)dp;
     get_adc(sampbuf,Blocksize);
+    dp += Blocksize * 2 * sizeof(*sampbuf);
 #if 1
 
     // average energy (I+Q) in each sample, current block, **including DC offset**
