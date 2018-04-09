@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.85 2018/02/26 23:01:03 karn Exp karn $
+# $Id: Makefile,v 1.86 2018/04/09 20:26:45 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -57,34 +57,28 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
-am.o: am.c misc.h filter.h radio.h audio.h
+am.o: misc.h filter.h radio.h audio.h sdr.h
+aprs.o: aprs.c ax25.h multicast.h misc.h
 attr.o: attr.c attr.h
-aprs.o: aprs.c multicast.h ax25.h misc.h
-audio.o: audio.c misc.h audio.h
+audio.o: audio.c misc.h audio.h multicast.h
 ax25.o: ax25.c ax25.h
 bandplan.o: bandplan.c bandplan.h
-control.o: control.c misc.h radio.h
-display.o: display.c radio.h audio.h misc.h filter.h bandplan.h multicast.h
-knob.o: knob.c misc.h
-touch.o: touch.c misc.h
-doppler.o: doppler.c radio.h filter.h misc.h audio.h
+display.o: display.c radio.h sdr.h audio.h misc.h filter.h bandplan.h multicast.h
+doppler.o: doppler.c radio.h sdr.h misc.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c misc.h filter.h
-fm.o: fm.c misc.h filter.h radio.h audio.h
-funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
-gr.o: gr.c sdr.h
-hid-libusb.o: hid-libusb.c hidapi.h
-iqplay.o: iqplay.c misc.h radio.h multicast.h attr.h
-iqrecord.o: iqrecord.c radio.h multicast.h attr.h
-linear.o: linear.c misc.h filter.h radio.h audio.h
-main.o: main.c radio.h filter.h misc.h audio.h multicast.h
-misc.o: misc.c radio.h
-modes.o: modes.c 
-modulate.o: modulate.c misc.h filter.h radio.h
+fm.o: fm.c misc.h filter.h radio.h sdr.h audio.h
+iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
+iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
+linear.o: linear.c misc.h filter.h radio.h sdr.h audio.h
+main.o: main.c radio.h sdr.h filter.h misc.h audio.h multicast.h
+misc.o: misc.c radio.h sdr.h
+modes.o: modes.c radio.h sdr.h misc.h
+modulate.o: modulate.c misc.h filter.h radio.h sdr.h
 monitor.o: monitor.c misc.h multicast.h
 multicast.o: multicast.c multicast.h
-opus.o: opus.c misc.h multicast.h	     
+opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
-radio.o: radio.c radio.h filter.h misc.h audio.h
+radio.o: radio.c radio.h sdr.h filter.h misc.h audio.h 
 
