@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.86 2018/04/09 20:26:45 karn Exp karn $
+# $Id: Makefile,v 1.87 2018/04/09 21:26:25 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -68,6 +68,7 @@ doppler.o: doppler.c radio.h sdr.h misc.h
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c misc.h filter.h
 fm.o: fm.c misc.h filter.h radio.h sdr.h audio.h
+funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
 iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
 iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
 linear.o: linear.c misc.h filter.h radio.h sdr.h audio.h
