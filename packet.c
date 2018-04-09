@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.9 2018/02/25 02:37:32 karn Exp karn $
+// $Id: packet.c,v 1.10 2018/02/26 22:50:47 karn Exp karn $
 // AFSK/FM packet demodulator
 
 #define _GNU_SOURCE 1
@@ -292,51 +292,34 @@ int main(int argc,char *argv[]){
 	    Decode_mcast_address_text);
     exit(1);
   }
-  struct iovec iovec[2];
   struct rtp_header rtp;
-  //  int16_t data[Bufsize];
-  signed short data[Bufsize];
-  
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = data;
-  iovec[1].iov_len = sizeof(data);
-
-  struct msghdr message;
   struct sockaddr sender;
-  message.msg_name = &sender;
-  message.msg_namelen = sizeof(sender);
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 2;
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
-
   // audio input thread
   // Receive audio multicasts, multiplex into sessions, execute filter front end (which wakes up decoder thread)
   while(1){
     int size;
 
-    size = recvmsg(Input_fd,&message,0);
+    socklen_t socksize = sizeof(sender);
+    unsigned char buffer[16384]; // Fix this
+
+    size = recvfrom(Input_fd,buffer,sizeof(buffer),0,&sender,&socksize);
     if(size == -1){
       if(errno != EINTR){ // Happens routinely
-	perror("recvmsg");
+	perror("recvfrom");
 	usleep(1000);
       }
       continue;
     }
-    if(size < sizeof(rtp)){
-      usleep(500); // Avoid tight loop
+    if(size < RTP_MIN_SIZE){
+      usleep(1000); // Avoid tight loop
       continue; // Too small to be valid RTP
     }
     // To host order
-    rtp.ssrc = ntohl(rtp.ssrc);
-    rtp.seq = ntohs(rtp.seq);
-    rtp.timestamp = ntohl(rtp.timestamp);
+    unsigned char *dp = buffer;
+    dp = ntoh_rtp(&rtp,dp);
 
-    if(rtp.mpt != 10 && rtp.mpt != 20 && rtp.mpt != 11) // 1 byte, no need to byte swap
+    if(rtp.type != PCM_STEREO_PT && rtp.type != PCM_MONO_PT)
       goto endloop; // Discard unknown RTP types to avoid polluting session table
-
 
     struct packet *sp = lookup_session(&sender,rtp.ssrc);
     if(sp == NULL){
@@ -373,7 +356,7 @@ int main(int argc,char *argv[]){
     }
     sp->eseq = (rtp.seq + 1) & 0xffff;
 
-    sp->type = rtp.mpt;
+    sp->type = rtp.type;
     size -= sizeof(rtp); // Bytes in payload
     if(size <= 0){
       sp->empties++;
@@ -381,10 +364,9 @@ int main(int argc,char *argv[]){
     }
     int samples = 0;
 
-    switch(rtp.mpt){
+    switch(rtp.type){
     case 11: // Mono only for now
       samples = size / 2;
-      signed short *dp = data;
       while(samples-- > 0){
 	// Swap sample to host order, convert to float
 	sp->filter_in->input.r[sp->input_pointer++] = ntohs(*dp++) * SCALE;

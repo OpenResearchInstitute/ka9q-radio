@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.27 2018/02/26 08:51:50 karn Exp karn $
+// $Id: funcube.c,v 1.29 2018/03/01 03:50:23 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -84,8 +84,6 @@ int main(int argc,char *argv[]){
   // The sooner we do this, the fewer options there are for abuse
   seteuid(getuid());
 
-
-  struct rtp_header rtp;
   char *dest = "239.1.2.1"; // Default for testing
 
   Locale = getenv("LANG");
@@ -167,31 +165,8 @@ int main(int argc,char *argv[]){
   long ssrc;
   ssrc = tt & 0xffffffff; // low 32 bits of clock time
 
-  rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
-  rtp.mpt = 97;         // ordinarily dynamically allocated
-  rtp.ssrc = htonl(ssrc);
-
-  short sampbuf[2*Blocksize];
-  struct iovec iovec[3];
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = &FCD.status;
-  iovec[1].iov_len = sizeof(FCD.status);
-  iovec[2].iov_base = sampbuf;
-  iovec[2].iov_len = sizeof(sampbuf);
-
-  struct msghdr message;
-  message.msg_name = NULL;
-  message.msg_namelen = 0;
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 3;
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
-
   int timestamp = 0;
   int seq = 0;
-
   int gaindelay = 0;
 
   while(1){
@@ -200,6 +175,20 @@ int main(int argc,char *argv[]){
     // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
     FCD.status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
 
+    struct rtp_header rtp;
+    rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+    rtp.type = IQ_PT;         // ordinarily dynamically allocated
+    rtp.ssrc = ssrc;
+    rtp.seq = seq++;
+    rtp.timestamp = timestamp;
+    timestamp += Blocksize;
+
+    unsigned char buffer[16384]; // Pick a better value
+    unsigned char *dp = buffer;
+
+    dp = hton_rtp(dp,&rtp);
+    dp = hton_status(dp,&FCD.status);
+    signed short *sampbuf = (signed short *)dp;
     get_adc(sampbuf,Blocksize);
 #if 1
 
@@ -245,12 +234,9 @@ int main(int argc,char *argv[]){
     }
 #endif
 
-    rtp.seq = htons(seq++);
-    rtp.timestamp = htonl(timestamp);
-    timestamp += Blocksize;
 
-    if(sendmsg(Rtp_sock,&message,0) == -1){
-      perror("sendmsg");
+    if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
+      perror("send");
       // If we're sending to a unicast address without a listener, we'll get ECONNREFUSED
       // Sleep 1 sec to slow down the rate of these messages
       usleep(1000000);
