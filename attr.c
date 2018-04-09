@@ -1,4 +1,4 @@
-// $Id$
+// $Id: attr.c,v 1.1 2017/07/29 10:17:38 karn Exp karn $
 // Read and write external file attributes
 // These are in a separate file mainly because they are so OS-dependent. And gratuitously so.
 // 29 July 2017 Phil Karn, KA9Q
@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <alloca.h>
 #include <string.h>
+#include <assert.h>
 #ifdef __linux__
 #include <attr/xattr.h>
 #else
@@ -26,17 +27,23 @@ int attrscanf(int fd,char const *name,char const *format, ...){
   char *temp = NULL;
   asprintf(&temp,"user.%s",name);
   r = fgetxattr(fd,temp,NULL,0); // How big is it?
-  if(r < 0)
+  if(r < 0){
+    if(temp)
+      free(temp);
     return r;
-  char *value = alloca(r);
-  r = fgetxattr(fd,temp,value,r);
+  }
+  char *value = alloca(r+1);
+  int r1 = fgetxattr(fd,temp,value,r);
+  assert(r1 == r);
+  value[r] = '\0';
   free(temp);
 #else // mainly OSX
   r = fgetxattr(fd,name,NULL,0,0,0); // How big is it?
   if(r < 0)
     return r;
-  char *value = alloca(r);
+  char *value = alloca(r+1);
   r = fgetxattr(fd,name,value,r,0,0);
+  value[r] = '\0';
 #endif
   
   va_list ap;
