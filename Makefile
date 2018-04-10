@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.87 2018/04/09 21:26:25 karn Exp karn $
+# $Id: Makefile,v 1.88 2018/04/09 21:32:37 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,7 +6,7 @@ COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
-EXECS=aprs funcube iqplay iqrecord modulate monitor opus opussend packet radio
+EXECS=aprs funcube iqplay iqrecord modulate monitor opus opussend packet radio pcmsend
 AFILES=bandplan.txt help.txt modes.txt
 
 
@@ -30,7 +30,10 @@ opus: opus.o multicast.o
 	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread
 
 opussend: opussend.o multicast.o
-	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lm -lpthread $(LD_FLAGS)
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lm -lpthread
+
+pcmsend: pcmsend.o multicast.o
+	$(CC) -g -o $@ $^ -lportaudio -lbsd -lm -lpthread
 
 control: control.o modes.o
 	$(CC) -g -o $@ $^ -lbsd -lm
@@ -81,5 +84,6 @@ multicast.o: multicast.c multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
+pcmsend.o: pcmsend.c misc.h multicast.h
 radio.o: radio.c radio.h sdr.h filter.h misc.h audio.h 
 

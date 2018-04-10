@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.35 2018/04/09 20:27:33 karn Exp karn $
+# $Id: Makefile.osx,v 1.36 2018/04/09 21:26:25 karn Exp karn $
 #CC=g++
 GCC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,7 +6,7 @@ CFLAGS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cf
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
-EXECS=aprs iqplay iqrecord modulate monitor opus opussend packet radio
+EXECS=aprs iqplay iqrecord modulate monitor opus opussend packet radio pcmsend
 AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)
@@ -32,6 +32,9 @@ opus: opus.o multicast.o
 
 opussend: opussend.o multicast.o
 	$(CC) -g -o $@ $^ `pkg-config --libs opus portaudio-2.0` $(LD_FLAGS)
+
+pcmsend: pcmsend.o multicast.o
+	$(CC) -g -o $@ $^ `pkg-config --libs portaudio-2.0` $(LD_FLAGS)
 
 iqplay: iqplay.o multicast.o attr.o misc.o
 	$(CC) -g -o $@ $^ $(LD_FLAGS)
@@ -72,6 +75,7 @@ multicast.o: multicast.c multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
+pcmsend.o: pcmsend.c misc.h multicast.h
 radio.o: radio.c radio.h sdr.h filter.h misc.h audio.h 
 
 
