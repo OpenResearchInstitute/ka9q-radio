@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.30 2018/04/09 21:26:55 karn Exp karn $
+// $Id: funcube.c,v 1.31 2018/04/09 23:24:45 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -169,19 +169,19 @@ int main(int argc,char *argv[]){
   int seq = 0;
   int gaindelay = 0;
 
-  while(1){
-    struct timeval tp;
-    gettimeofday(&tp,NULL);
-    // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
-    FCD.status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
+  struct timeval tp;
+  gettimeofday(&tp,NULL);
+  // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
+  FCD.status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
 
+  while(1){
     struct rtp_header rtp;
     rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
     rtp.type = IQ_PT;         // ordinarily dynamically allocated
     rtp.ssrc = ssrc;
     rtp.seq = seq++;
     rtp.timestamp = timestamp;
-    timestamp += Blocksize;
+
 
     unsigned char buffer[16384]; // Pick a better value
     unsigned char *dp = buffer;
@@ -191,8 +191,9 @@ int main(int argc,char *argv[]){
     signed short *sampbuf = (signed short *)dp;
     get_adc(sampbuf,Blocksize);
     dp += Blocksize * 2 * sizeof(*sampbuf);
-#if 1
 
+#if 1
+    // Crude analog AGC just to keep signal roughly within A/D range
     // average energy (I+Q) in each sample, current block, **including DC offset**
     // At low levels, will disagree with demod's IF1 figure, which has the DC removed
     float sumsq = 0;
@@ -242,6 +243,21 @@ int main(int argc,char *argv[]){
       // Sleep 1 sec to slow down the rate of these messages
       usleep(1000000);
     }
+    timestamp += Blocksize;
+
+#if 0
+    // Get status timestamp from UNIX TOD clock -- but this might skew because of inexact sample rate
+    gettimeofday(&tp,NULL);
+    // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
+    FCD.status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
+#else
+    // Simply increment by number of samples
+    // But what if we lose some? Then the clock will always be off
+    FCD.status.timestamp += 1.e9 * Blocksize / ADC_samprate;
+#endif
+
+
+
   }
   // Can't really get here
   close(Rtp_sock);
