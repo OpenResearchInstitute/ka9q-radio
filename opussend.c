@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.10 2018/04/03 21:33:13 karn Exp karn $
+// $Id: opussend.c,v 1.11 2018/04/09 21:27:10 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -24,7 +24,7 @@
 #include "multicast.h"
 
 // Global config variables
-char *Input_device_text = "";
+char *Audiodev = "";
 char *Mcast_output_address_text = "audio-opus-mcast.local";     // Multicast address we're sending to
 
 #define BUFFERSIZE (1<<18)    // Size of audio ring buffer in mono samples. 2^18 is 2.73 sec at 48 kHz stereo
@@ -65,6 +65,16 @@ void closedown(int s){
   exit(0);
 }
 
+// Convert unsigned number modulo buffersize to a signed 2's complement
+static inline int signmod(unsigned int const a){
+  int y = a & (BUFFERSIZE-1);
+  
+  if(y >= BUFFERSIZE/2)
+    y -= BUFFERSIZE;
+  assert(y >= -BUFFERSIZE/2 && y < BUFFERSIZE/2);
+  return y;
+}
+
 
 int main(int argc,char * const argv[]){
   // Try to improve our priority
@@ -91,7 +101,7 @@ int main(int argc,char * const argv[]){
       Verbose++;
       break;
     case 'I':
-      Input_device_text = optarg;
+      Audiodev = optarg;
       break;
     case 'R':
       Mcast_output_address_text = optarg;
@@ -110,7 +120,7 @@ int main(int argc,char * const argv[]){
       break;
     default:
       fprintf(stderr,"Usage: %s [-x] [-v] [-o bitrate] [-B blocktime] [-I input_mcast_address] [-R output_mcast_address][-T mcast_ttl]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -o %d -B %.1f -I %s -R %s -T %d\n",argv[0],Opus_bitrate,Opus_blocktime,Input_device_text,Mcast_output_address_text,Mcast_ttl);
+      fprintf(stderr,"Defaults: %s -o %d -B %.1f -I %s -R %s -T %d\n",argv[0],Opus_bitrate,Opus_blocktime,Audiodev,Mcast_output_address_text,Mcast_ttl);
       exit(1);
     }
   }
@@ -134,18 +144,33 @@ int main(int argc,char * const argv[]){
     close(Output_fd);
     return r;
   }
-
-  int inDevNum;
-  if(strlen(Input_device_text) == 0){
-    // not specified; use default
-    inDevNum = Pa_GetDefaultInputDevice();
-  } else {
-    // Find requested audio device in the list
+  if(List_audio){
+    // On stdout, not stderr, so we can toss ALSA's noisy error messages
+    printf("Audio devices:\n");
     int numDevices = Pa_GetDeviceCount();
-    
+    for(int inDevNum=0; inDevNum < numDevices; inDevNum++){
+      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
+      printf("%d: %s\n",inDevNum,deviceInfo->name);
+    }
+    exit(0);
+  }
+
+  int inDevNum,d;
+  char *nextp;
+  int numDevices = Pa_GetDeviceCount();
+  if(strlen(Audiodev) == 0){
+    // not specified; use default
+    inDevNum = Pa_GetDefaultOutputDevice();
+  } else if(d = strtol(Audiodev,&nextp,0),nextp != Audiodev && *nextp == '\0'){
+    if(d >= numDevices){
+      fprintf(stderr,"%d is out of range, use %s -L for a list\n",d,argv[0]);
+      exit(1);
+    }
+    inDevNum = d;
+  } else {
     for(inDevNum=0; inDevNum < numDevices; inDevNum++){
       const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
-      if(strcmp(deviceInfo->name,Input_device_text) == 0)
+      if(strcmp(deviceInfo->name,Audiodev) == 0)
 	break;
     }
   }
@@ -184,16 +209,6 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
 
-  if(List_audio){
-    // On stdout, not stderr, so we can toss ALSA's noisy error messages
-    printf("Audio devices:\n");
-    int numDevices = Pa_GetDeviceCount();
-    for(int inDevNum=0; inDevNum < numDevices; inDevNum++){
-      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
-      printf("%s\n",deviceInfo->name);
-    }
-    exit(0);
-  }
 
   // Opus is specified to operate between 6 kb/s and 510 kb/s
   if(Opus_bitrate < 6000)
@@ -272,7 +287,7 @@ int main(int argc,char * const argv[]){
     // the expected time of a new frame
 
     int delay = Opus_blocktime * 1000;
-    while(((Wptr - rptr) & (BUFFERSIZE-1)) < Channels * Opus_frame_size){
+    while(signmod(Wptr - rptr) < Channels * Opus_frame_size){
       if(delay >= 200)
 	delay /= 2; // Minimum sleep time 0.2 ms
       usleep(delay);
