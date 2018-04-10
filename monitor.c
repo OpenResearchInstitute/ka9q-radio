@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.57 2018/04/09 21:07:11 karn Exp karn $
+// $Id: monitor.c,v 1.58 2018/04/09 23:24:33 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Known bugs: specifying same group more than once causes problems
 //             'd' command sometimes hangs display thread   
@@ -172,7 +172,7 @@ int main(int argc,char * const argv[]){
   }
   if(List_audio){
     // On stdout, not stderr, so we can toss ALSA's noisy error messages
-    printf("Audio output devices:\n");
+    printf("Audio devices:\n");
     int numDevices = Pa_GetDeviceCount();
     for(int inDevNum=0; inDevNum < numDevices; inDevNum++){
       const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
@@ -493,8 +493,13 @@ void *decode_task(void *arg){
     // Compute gains and delays for stereo imaging
     // -6dB for each channel in the center
     // when full to one side or the other, that channel is +6 dB and the other is -inf dB
+#if 1
     float left_gain = sp->gain * (1 - sp->pan)/2;
     float right_gain = sp->gain * (1 + sp->pan)/2;
+#else
+    float left_gain = sp->gain;
+    float right_gain = sp->gain;
+#endif    
     int left_delay = 0;
     int right_delay = 0;
     // Also delay less favored channel 1 ms max
@@ -525,6 +530,7 @@ void *decode_task(void *arg){
 	    for(int i=0; i<samples; i++){
 	      sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
 	      sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
+
 	      sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	    }
 	  }
@@ -598,6 +604,10 @@ void *display(void *arg){
   Mainscr = stdscr;
 
   while(1){
+
+    if(!Current)
+      Current = Session;
+
 
     int row = 2;
     wmove(Mainscr,row,0);
@@ -675,8 +685,6 @@ void *display(void *arg){
       if(sp->erasures)
 	wprintw(Mainscr," erasures %lu",sp->erasures);
       
-      if(!Current)
-	Current = sp;
     }
     row++;
     mvwprintw(Mainscr,row++,0,"\u21e5 select next stream");
@@ -744,11 +752,10 @@ void *display(void *arg){
     case 'd':
       {
 	if(Current){
-	  struct session *next = Current->next;
 	  Current->terminate = 1;
 	  pthread_join(Current->task,NULL);
 	  close_session(Current);
-	  Current = next;
+	  Current = Session;
 	}
       }
       break;
