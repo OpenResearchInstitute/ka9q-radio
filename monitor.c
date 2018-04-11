@@ -1,7 +1,5 @@
-// $Id: monitor.c,v 1.58 2018/04/09 23:24:33 karn Exp karn $
+// $Id: monitor.c,v 1.59 2018/04/10 07:49:36 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
-// Known bugs: specifying same group more than once causes problems
-//             'd' command sometimes hangs display thread   
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <stdatomic.h>
@@ -388,17 +386,18 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 
   float (*out)[2] = outputBuffer;
   
-  memset(out,0,sizeof(*out) * framesPerBuffer);
+  memset(out,0,sizeof(*out) * framesPerBuffer); // In case of no active streams
   // Walk through each decoder control block and add its decoded audio into output
   for(struct session *sp=Session; sp; sp=sp->next){
     if(signmod(sp->wptr - sp->rptr) < framesPerBuffer)
       continue; // Not enough; skip
 
     for(int n=0; n < framesPerBuffer; n++){
-      // Burn after reading since writers may skip over silence, or the stream may stall
       out[n][0] += sp->output_buffer[sp->rptr][0];
-      sp->output_buffer[sp->rptr][0] = 0;
       out[n][1] += sp->output_buffer[sp->rptr][1];
+      // Burn after reading since writers may skip over silence, or the stream may stall
+      // This prevents repeated playback of the same final snippet
+      sp->output_buffer[sp->rptr][0] = 0;
       sp->output_buffer[sp->rptr][1] = 0;
       sp->rptr = (sp->rptr + 1) & (BUFFERSIZE-1);
     }
@@ -414,6 +413,7 @@ void decode_task_cleanup(void *arg){
   assert(sp);
 
   pthread_mutex_destroy(&sp->qmutex);
+  pthread_cond_destroy(&sp->qcond);
 
   if(sp->opus){
     opus_decoder_destroy(sp->opus);
@@ -438,7 +438,7 @@ void *decode_task(void *arg){
   sp->pan = 0;     // center by default
   sp->wptr = 0;
 
-  // Main loop; run until canceled
+  // Main loop; run until asked to quit
   while(!sp->terminate){
 
     struct packet *pkt = NULL;
@@ -503,6 +503,7 @@ void *decode_task(void *arg){
     int left_delay = 0;
     int right_delay = 0;
     // Also delay less favored channel 1 ms max
+    // This is really what drives source localization in humans
     if(sp->pan > 0){
       // Delay left channel
       left_delay = round(sp->pan * 1.0 * SAMPRATE/1000);
@@ -753,6 +754,7 @@ void *display(void *arg){
       {
 	if(Current){
 	  Current->terminate = 1;
+	  pthread_cancel(Current->task);
 	  pthread_join(Current->task,NULL);
 	  close_session(Current);
 	  Current = Session;
