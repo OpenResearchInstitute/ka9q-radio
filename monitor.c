@@ -389,10 +389,9 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   memset(out,0,sizeof(*out) * framesPerBuffer); // In case of no active streams
   // Walk through each decoder control block and add its decoded audio into output
   for(struct session *sp=Session; sp; sp=sp->next){
-    if(signmod(sp->wptr - sp->rptr) < framesPerBuffer)
-      continue; // Not enough; skip
+    int num = min(signmod(sp->wptr - sp->rptr),framesPerBuffer);
 
-    for(int n=0; n < framesPerBuffer; n++){
+    for(int n=0; n < num; n++){
       out[n][0] += sp->output_buffer[sp->rptr][0];
       out[n][1] += sp->output_buffer[sp->rptr][1];
       // Burn after reading since writers may skip over silence, or the stream may stall
@@ -657,24 +656,20 @@ void *display(void *arg){
       wmove(Mainscr,row,1);
       wclrtoeol(Mainscr);
 
-      if(sp == Current)
-	wattr_on(Mainscr,A_UNDERLINE,NULL);
       if(!sp->dest) // Might not be allocated yet, if we got dispatched during the nameinfo() call
 	continue;
       char temp[strlen(sp->addr)+strlen(sp->port)+strlen(sp->dest) + 20]; // Allow some room
       snprintf(temp,sizeof(temp),"%s:%s -> %s",sp->addr,sp->port,sp->dest);
-      mvwprintw(Mainscr,row++,0,"%-12s%2d%3d%+5.0lf%+6.2lf%10x%7.3lf %s",
+      double queue =  (double)signmod(sp->wptr - sp->rptr)/SAMPRATE;
+      mvwprintw(Mainscr,row,0,"%-12s%2d%3d%+5.0lf%+6.2lf%10x%7.3lf %s",
 		type,
 		sp->channels,
 		bw,
 		20*log10(sp->gain),
 		sp->pan,
 		sp->ssrc,
-		(double)signmod(sp->wptr - sp->rptr)/SAMPRATE,
+		queue,
 		temp);
-      wattr_off(Mainscr,A_BOLD,NULL);
-      wattr_off(Mainscr,A_UNDERLINE,NULL);
-      
       if(sp->packets)
 	wprintw(Mainscr," packets %'lu",sp->packets);
       if(sp->dupes)
@@ -686,6 +681,12 @@ void *display(void *arg){
       if(sp->erasures)
 	wprintw(Mainscr," erasures %lu",sp->erasures);
       
+      if(queue != 0)
+	mvwchgat(Mainscr,row,40,5,A_BOLD,0,NULL);
+
+      if(sp == Current)
+	mvwchgat(Mainscr,row,18,10,A_STANDOUT,0,NULL);
+      row++;
     }
     row++;
     mvwprintw(Mainscr,row++,0,"\u21e5 select next stream");
