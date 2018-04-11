@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.20 2018/04/04 21:21:25 karn Exp karn $
+// $Id: iqplay.c,v 1.21 2018/04/09 21:08:36 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -59,7 +59,8 @@ int playfile(int sock,int fd,int blocksize){
     fprintf(stderr,": start time %s, %'d samp/s, RF LO %'.1lf Hz\n",lltime(status.timestamp),status.samprate,status.frequency);
 
   struct rtp_header rtp;
-  rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+  memset(&rtp,0,sizeof(rtp));
+  rtp.version = RTP_VERS;
   rtp.type = IQ_PT;         // ordinarily dynamically allocated
   
   struct timeval start_time;

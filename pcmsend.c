@@ -225,9 +225,9 @@ int main(int argc,char * const argv[]){
     }
     struct rtp_header rtp_out;
     memset(&rtp_out,0,sizeof(rtp_out));
-    rtp_out.vpxcc = RTP_VERS << 6;
-    rtp_out.seq = seq;
+    rtp_out.version = RTP_VERS;
     rtp_out.type = PCM_STEREO_PT;
+    rtp_out.seq = seq;
     rtp_out.ssrc = ssrc;
     rtp_out.timestamp = timestamp;
 

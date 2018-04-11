@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.14 2018/04/04 05:55:07 karn Exp karn $
+// $Id: opus.c,v 1.15 2018/04/09 21:00:18 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -363,9 +363,11 @@ int send_samples(struct session *sp,float left,float right){
 
     // Set up to transmit Opus RTP/UDP/IP
     struct rtp_header rtp_out;
-    rtp_out.vpxcc = RTP_VERS << 6;
-    rtp_out.seq = sp->oseq;
+    memset(&rtp_out,0,sizeof(rtp_out));
+    rtp_out.version = RTP_VERS;
     rtp_out.type = OPUS_PT; // Opus
+    rtp_out.seq = sp->oseq;
+
     if(sp->silence){
       // Beginning of talk spurt after silence, set marker bit
       rtp_out.marker = 1;

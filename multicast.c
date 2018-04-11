@@ -152,30 +152,46 @@ int setup_mcast(char const *target,int output){
 }
 
 unsigned char *ntoh_rtp(struct rtp_header *rtp,unsigned char *data){
-  rtp->vpxcc = data[0];
-  rtp->type = data[1] & ~RTP_MARKER;
-  rtp->marker = data[1] & RTP_MARKER;
-  rtp->seq = data[2] << 8 | data[3];
+  rtp->version = data[0] >> 6;
+  rtp->pad = (data[0] >> 5) & 1;
+  rtp->extension = (data[0] >> 4) & 1;
+  rtp->cc = data[0] & 0xf;
+  rtp->marker = (data[1] >> 7) & 1;
+  rtp->type = data[1] & 0x7f;
+  rtp->seq = (data[2] << 8) | data[3];
   rtp->timestamp = data[4] << 24 | data[5] << 16 | data[6] << 8 | data[7];
   rtp->ssrc = data[8] << 24 | data[9] << 16 | data[10] << 8 | data[11];
+  for(int i=0; i<rtp->cc; i++)
+    rtp->csrc[i] = data[12+4*i] << 24 | data[13+4*i] << 16 | data[14+4*i] << 8 | data[15+4*i];
   
-  return data + RTP_MIN_SIZE;
+  return data + RTP_MIN_SIZE + rtp->cc * sizeof(uint32_t);
 }
 
 
 unsigned char *hton_rtp(unsigned char *data, struct rtp_header *rtp){
-  data[0] = rtp->vpxcc;
-  data[1] = rtp->type | (rtp->marker ? RTP_MARKER : 0);
+  rtp->cc &= 0xf; // Force it to be legal
+  rtp->type &= 0x7f;
+  data[0] = (rtp->version << 6) | (rtp->pad << 5) | (rtp->extension << 4) | rtp->cc;
+  data[1] = (rtp->marker << 7) | rtp->type;
   data[2] = rtp->seq >> 8;
-  data[3] = rtp->seq & 0xff;
+  data[3] = rtp->seq;
+
   data[4] = rtp->timestamp >> 24;
   data[5] = rtp->timestamp >> 16;
   data[6] = rtp->timestamp >> 8;
   data[7] = rtp->timestamp;
+
   data[8] = rtp->ssrc >> 24;
   data[9] = rtp->ssrc >> 16;
   data[10] = rtp->ssrc >> 8;
   data[11] = rtp->ssrc;
+
+  for(int i=0; i < rtp->cc; i++){
+    data[12+4*i] = rtp->csrc[i] >> 24;
+    data[13+4*i] = rtp->csrc[i] >> 16;
+    data[14+4*i] = rtp->csrc[i] >> 8;
+    data[15+4*i] = rtp->csrc[i];
+  }
   
-  return data + RTP_MIN_SIZE;
+  return data + RTP_MIN_SIZE + rtp->cc * sizeof(uint32_t);
 }

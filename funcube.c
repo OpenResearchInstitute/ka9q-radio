@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.31 2018/04/09 23:24:45 karn Exp karn $
+// $Id: funcube.c,v 1.32 2018/04/10 00:11:49 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -176,12 +176,12 @@ int main(int argc,char *argv[]){
 
   while(1){
     struct rtp_header rtp;
-    rtp.vpxcc = (RTP_VERS << 6); // Version 2, padding = 0, extension = 0, csrc count = 0
+    memset(&rtp,0,sizeof(rtp));
+    rtp.version = RTP_VERS;
     rtp.type = IQ_PT;         // ordinarily dynamically allocated
     rtp.ssrc = ssrc;
     rtp.seq = seq++;
     rtp.timestamp = timestamp;
-
 
     unsigned char buffer[16384]; // Pick a better value
     unsigned char *dp = buffer;

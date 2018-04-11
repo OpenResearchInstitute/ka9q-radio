@@ -5,12 +5,16 @@ extern char Default_mcast_port[];
 extern int Mcast_ttl;
 
 struct rtp_header {
-  uint8_t vpxcc;
+  int version;
   uint8_t type;
   uint16_t seq;
   uint32_t timestamp;
   uint32_t ssrc;
-  int marker;
+  int marker:1;
+  int pad:1;
+  int extension:1;
+  int cc;
+  uint32_t csrc[15];
 };
 #define RTP_MIN_SIZE 12  // min size of RTP header
 #define RTP_VERS 2

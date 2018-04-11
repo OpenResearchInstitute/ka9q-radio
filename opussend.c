@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.11 2018/04/09 21:27:10 karn Exp karn $
+// $Id: opussend.c,v 1.12 2018/04/10 07:51:19 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -307,9 +307,10 @@ int main(int argc,char * const argv[]){
       rptr -= BUFFERSIZE;
 
     struct rtp_header rtp_out;
-    rtp_out.vpxcc = RTP_VERS << 6;
-    rtp_out.seq = seq;
+    memset(&rtp_out,0,sizeof(rtp_out));
+    rtp_out.version = RTP_VERS;
     rtp_out.type = OPUS_PT; // Opus (not standard)
+    rtp_out.seq = seq;
     rtp_out.ssrc = ssrc;
     rtp_out.timestamp = timestamp;
 
