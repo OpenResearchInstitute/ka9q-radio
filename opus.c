@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.15 2018/04/09 21:00:18 karn Exp karn $
+// $Id: opus.c,v 1.16 2018/04/11 07:08:18 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -185,6 +185,11 @@ int main(int argc,char * const argv[]){
     // To host order
     dp = ntoh_rtp(&rtp_in,buffer);
     size -= (dp - buffer);
+    if(rtp_in.pad){
+      // Remove padding
+      size -= dp[size-1];
+      rtp_in.pad = 0;
+    }
 
     // Only accept mono and stereo PCM at implied 48 kHz sample rate
     if(rtp_in.type != PCM_STEREO_PT && rtp_in.type != PCM_MONO_PT) // 1 byte, no need to byte swap
