@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.21 2018/04/09 21:08:36 karn Exp karn $
+// $Id: iqplay.c,v 1.22 2018/04/11 07:08:18 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -33,12 +33,6 @@ int Rtp_sock; // Socket handle for sending real time stream
 double Default_frequency = 0;
 long Default_samprate = 192000;
 int Blocksize = 256;
-
-void closedown(int a){
-  if(Verbose)
-    fprintf(stderr,"iqplay: caught signal %d: %s\n",a,strsignal(a));
-  exit(1);
-}
 
 
 // Play I/Q file with descriptor 'fd' on network socket 'sock'
@@ -173,11 +167,6 @@ int main(int argc,char *argv[]){
   Rtp_sock = setup_mcast(dest,1);
 
   signal(SIGPIPE,SIG_IGN);
-  signal(SIGINT,closedown);
-  signal(SIGKILL,closedown);
-  signal(SIGQUIT,closedown);
-  signal(SIGTERM,closedown);        
-  
 
   if(optind == argc){
     // No file arguments, read from stdin
