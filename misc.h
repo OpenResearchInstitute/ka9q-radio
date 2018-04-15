@@ -1,4 +1,4 @@
-// $Id: misc.h,v 1.2 2018/02/26 08:51:11 karn Exp karn $
+// $Id: misc.h,v 1.3 2018/02/26 22:50:47 karn Exp karn $
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -25,8 +25,22 @@ double const parse_frequency(const char *);
 void chomp(char *);
 
 
-#define max(x,y) ((x) > (y) ? (x) : (y))
-#define min(x,y) ((x) < (y) ? (x) : (y))
+// Stolen from the Linux kernel -- enforce type matching of arguments
+#define min(x,y) ({			\
+		typeof(x) _x = (x);	\
+		typeof(y) _y = (y);	\
+		(void) (&_x == &_y);	\
+		_x < _y ? _x : _y; })
+
+#define max(x,y) ({ \
+		typeof(x) _x = (x);	\
+		typeof(y) _y = (y);	\
+		(void) (&_x == &_y);	\
+		_x > _y ? _x : _y; })
+
+
+
+
 
 #define dB2power(x) (powf(10.,(x)/10.))
 #define power2dB(x) (10*log10f(x))
