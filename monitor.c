@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.59 2018/04/10 07:49:36 karn Exp karn $
+// $Id: monitor.c,v 1.61 2018/04/11 20:30:11 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -315,6 +315,11 @@ int main(int argc,char * const argv[]){
       unsigned char *dp = ntoh_rtp(&pkt->rtp,pkt->content);
       pkt->data = dp;
       pkt->len = size - (dp - pkt->content);
+      if(pkt->rtp.pad){
+	pkt->len -= dp[pkt->len-1];
+	pkt->rtp.pad = 0;
+      }
+
       assert(pkt->len > 0);
 
       if(pkt->rtp.type != PCM_STEREO_PT
@@ -383,17 +388,16 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     return paAbort; // can this happen??
   
   assert(framesPerBuffer < BUFFERSIZE/2); // Make sure ring buffer is big enough
-
-  float (*out)[2] = outputBuffer;
-  
-  memset(out,0,sizeof(*out) * framesPerBuffer); // In case of no active streams
+  memset(outputBuffer,0,2 * sizeof(float) * framesPerBuffer); // In case of no active streams
   // Walk through each decoder control block and add its decoded audio into output
   for(struct session *sp=Session; sp; sp=sp->next){
     int num = min(signmod(sp->wptr - sp->rptr),framesPerBuffer);
 
+    assert(0 <= num && num <= framesPerBuffer);
+    float *out = outputBuffer;
     for(int n=0; n < num; n++){
-      out[n][0] += sp->output_buffer[sp->rptr][0];
-      out[n][1] += sp->output_buffer[sp->rptr][1];
+      *out++ += sp->output_buffer[sp->rptr][0];
+      *out++ += sp->output_buffer[sp->rptr][1];
       // Burn after reading since writers may skip over silence, or the stream may stall
       // This prevents repeated playback of the same final snippet
       sp->output_buffer[sp->rptr][0] = 0;
@@ -505,18 +509,19 @@ void *decode_task(void *arg){
     // This is really what drives source localization in humans
     if(sp->pan > 0){
       // Delay left channel
-      left_delay = round(sp->pan * 1.0 * SAMPRATE/1000);
+      left_delay = round(sp->pan * .001 * SAMPRATE);
     } else if(sp->pan < 0){
       // Delay right channel
-      right_delay = round(-sp->pan * 1.0 * SAMPRATE/1000);
+      right_delay = round(-sp->pan * .001 * SAMPRATE);
     }
+    assert(left_delay >= 0 && right_delay >= 0);
 
     int lost_interval = (int)(pkt->rtp.timestamp - sp->etimestamp);
     sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
     if(lost_interval > 0){
       // Missing data -- if marker, just reset decoder and recover lost time
       if(sp->type == OPUS_PT && sp->opus){
-	if(pkt->rtp.marker || seq_offset >= 3 || lost_interval >= 3840) {
+	if(pkt->rtp.marker || seq_offset >= 3 || lost_interval > 3840) {
 	  opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder and catch up
 	} else {
 	  // Opus error concealment with FEC
@@ -526,6 +531,7 @@ void *decode_task(void *arg){
 	  float bounce[lost_interval][2];
 	  // Decode any FEC, otherwise interpolate or create comfort noise
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
+	  assert(samples <= lost_interval);
 	  if(samples > 0){
 	    for(int i=0; i<samples; i++){
 	      sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
@@ -575,6 +581,7 @@ void *decode_task(void *arg){
       {
 	float bounce[sp->frame_size][2];
 	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);	
+	assert(samples <= sp->frame_size);
 	if(samples > 0){	// check for error of some kind
 	  for(int i=0; i<samples; i++){
 	    sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
