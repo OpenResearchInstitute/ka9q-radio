@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.61 2018/04/11 20:30:11 karn Exp karn $
+// $Id: monitor.c,v 1.62 2018/04/15 04:11:19 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -106,6 +106,21 @@ unsigned long long Samples;
 unsigned long long Callbacks;
 
 
+void cleanup(void){
+  Pa_Terminate();
+  if(!Quiet){
+    echo();
+    nocbreak();
+    endwin();
+  }
+}
+
+void closedown(int s){
+  fprintf(stderr,"Signal %d, exiting\n",s);
+  exit(0);
+}
+
+
 void closedown(int);
 void *display(void *);
 struct session *lookup_session(const struct sockaddr *,uint32_t);
@@ -168,6 +183,9 @@ int main(int argc,char * const argv[]){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
     return r;
   }
+  atexit(cleanup);
+
+
   if(List_audio){
     // On stdout, not stderr, so we can toss ALSA's noisy error messages
     printf("Audio devices:\n");
@@ -391,7 +409,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   memset(outputBuffer,0,2 * sizeof(float) * framesPerBuffer); // In case of no active streams
   // Walk through each decoder control block and add its decoded audio into output
   for(struct session *sp=Session; sp; sp=sp->next){
-    int num = min(signmod(sp->wptr - sp->rptr),framesPerBuffer);
+    int num = min(signmod(sp->wptr - sp->rptr),(int)framesPerBuffer);
 
     assert(0 <= num && num <= framesPerBuffer);
     float *out = outputBuffer;
@@ -821,15 +839,4 @@ int close_session(struct session *sp){
   
   free(sp);
   return 0;
-}
-void closedown(int s){
-
-  Pa_Terminate();
-  if(!Quiet){
-    echo();
-    nocbreak();
-    endwin();
-  }
-  fprintf(stderr,"Signal %d, exiting\n",s);
-  exit(0);
 }
