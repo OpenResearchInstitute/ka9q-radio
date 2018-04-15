@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.81 2018/02/22 00:10:17 karn Exp karn $
+// $Id: radio.c,v 1.82 2018/02/26 22:50:47 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -367,8 +367,8 @@ int LO2_in_range(struct demod * const demod,double const f,int const avoid_alias
   pthread_mutex_unlock(&demod->status_mutex);
     
   if(avoid_alias)
-    return f >= demod->min_IF + max(0,demod->high)
-	    && f <= demod->max_IF + min(0,demod->low);
+    return f >= demod->min_IF + max(0.0f,demod->high)
+	    && f <= demod->max_IF + min(0.0f,demod->low);
   else {
     return fabs(f) <=  0.5 * demod->samprate; // within Nyquist limit?
   }
