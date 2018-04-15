@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.115 2018/04/05 20:32:53 karn Exp karn $
+// $Id: display.c,v 1.116 2018/04/09 21:06:34 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -110,14 +110,16 @@ static FILE *Tty;
 static SCREEN *Term;
 
 
-void display_cleanup(void *arg){
+void display_cleanup(void){
   echo();
   nocbreak();
   endwin();
   if(Term)
     delscreen(Term);
+  Term = NULL;
   if(Tty)
     fclose(Tty);
+  Tty = NULL;
 }
 
 static int Frequency_lock;
@@ -328,6 +330,8 @@ void *display(void *arg){
   pthread_t pthread_touch;
   pthread_create(&pthread_touch,NULL,touch,demod);   // Disable for now
 #endif
+
+  atexit(display_cleanup);
 
 #if FUNCTIONKEYS
   slk_init(3);
