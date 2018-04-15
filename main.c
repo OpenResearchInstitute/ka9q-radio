@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.103 2018/04/05 20:32:14 karn Exp karn $
+// $Id: main.c,v 1.104 2018/04/09 21:15:04 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -328,6 +328,11 @@ void *input_loop(void *arg){
     if(rtp.type != IQ_PT)
       continue; // Wrong type
 
+    if(rtp.pad){
+      // Remove padding
+      size -= dp[size-1];
+      rtp.pad = 0;
+    }
     demod->iq_packets++;
 
     // Host byte order
