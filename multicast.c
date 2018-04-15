@@ -1,3 +1,7 @@
+// $Id$
+// Multicast socket and RTP utility routines
+// Copyright 2018 Phil Karn, KA9Q
+
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -12,6 +16,7 @@
 int Mcast_ttl = 1;
 
 
+// Set options on multicast socket
 static void soptions(int fd){
   // Failures here are not fatal
   int reuse = 1;
@@ -34,6 +39,7 @@ static void soptions(int fd){
   }
 }
 
+// Join a socket to a multicast group
 #if defined(linux) // Linux, etc, for both IPv4/IPv6
 static int join_group(int fd,struct addrinfo *resp){
   struct sockaddr_in const *sin = (struct sockaddr_in *)resp->ai_addr;
@@ -70,6 +76,9 @@ char Default_mcast_port[] = "5004";
 
 // Set up multicast socket for input or output
 // Target is in the form of domain.name.com:5004 or 1.2.3.4:5004
+// when output = 1, connect to the multicast address so we can simply send() to it without specifying a destination
+// when output = 0, bind to it so we'll accept incoming packets
+// (Can we just do both?)
 int setup_mcast(char const *target,int output){
   int len = strlen(target) + 1;  // Including terminal null
   char host[len],*port;
@@ -146,52 +155,86 @@ int setup_mcast(char const *target,int output){
   }
 #endif
 
-
   freeaddrinfo(results);
   return fd;
 }
 
+// Convert RTP header from network (wire) big-endian format to internal host structure
+// Written to be insensitive to host byte order and C structure layout and padding
+// Use of unsigned formats is important to avoid unwanted sign extension
+
+static inline unsigned short get16(unsigned char *dp){
+  return dp[0] << 8 | dp[1];
+}
+static inline unsigned long get32(unsigned char *dp){
+  return dp[0] << 24 | dp[1] << 16 | dp[2] << 8 | dp[3];
+}
+
 unsigned char *ntoh_rtp(struct rtp_header *rtp,unsigned char *data){
-  rtp->version = data[0] >> 6;
-  rtp->pad = (data[0] >> 5) & 1;
-  rtp->extension = (data[0] >> 4) & 1;
-  rtp->cc = data[0] & 0xf;
-  rtp->marker = (data[1] >> 7) & 1;
-  rtp->type = data[1] & 0x7f;
-  rtp->seq = (data[2] << 8) | data[3];
-  rtp->timestamp = data[4] << 24 | data[5] << 16 | data[6] << 8 | data[7];
-  rtp->ssrc = data[8] << 24 | data[9] << 16 | data[10] << 8 | data[11];
-  for(int i=0; i<rtp->cc; i++)
-    rtp->csrc[i] = data[12+4*i] << 24 | data[13+4*i] << 16 | data[14+4*i] << 8 | data[15+4*i];
+  unsigned char *dp = data;
+
+  rtp->version = *dp >> 6; // What should we do if it's not 2??
+  rtp->pad = (*dp >> 5) & 1;
+  rtp->extension = (*dp >> 4) & 1;
+  rtp->cc = *dp & 0xf;
+  dp++;
+
+  rtp->marker = (*dp >> 7) & 1;
+  rtp->type = *dp & 0x7f;
+  dp++;
+
+  rtp->seq = get16(dp);
+  dp += 2;
+
+  rtp->timestamp = get32(dp);
+  dp += 4;
   
-  return data + RTP_MIN_SIZE + rtp->cc * sizeof(uint32_t);
+  rtp->ssrc = get32(dp);
+  dp += 4;
+
+  for(int i=0; i<rtp->cc; i++){
+    rtp->csrc[i] = get32(dp);
+    dp += 4;
+  }
+
+  if(rtp->extension){
+    // Ignore any extension, but skip over it
+    dp += 2; // skip over type
+    uint16_t ext_len = 4 + get16(dp); // grab length
+    dp += 2;
+    dp += ext_len;
+  }
+  return dp;
+}
+
+
+// Convert RTP header from internal host structure to network (wire) big-endian format
+// Written to be insensitive to host byte order and C structure layout and padding
+
+static inline unsigned char *put16(unsigned char *dp,uint16_t x){
+  *dp++ = x >> 8;
+  *dp++ = x;
+  return dp;
+}
+static inline unsigned char *put32(unsigned char *dp,uint32_t x){
+  *dp++ = x >> 24;
+  *dp++ = x >> 16;
+  *dp++ = x >> 8;
+  *dp++ = x;
+  return dp;
 }
 
 
 unsigned char *hton_rtp(unsigned char *data, struct rtp_header *rtp){
   rtp->cc &= 0xf; // Force it to be legal
   rtp->type &= 0x7f;
-  data[0] = (rtp->version << 6) | (rtp->pad << 5) | (rtp->extension << 4) | rtp->cc;
-  data[1] = (rtp->marker << 7) | rtp->type;
-  data[2] = rtp->seq >> 8;
-  data[3] = rtp->seq;
-
-  data[4] = rtp->timestamp >> 24;
-  data[5] = rtp->timestamp >> 16;
-  data[6] = rtp->timestamp >> 8;
-  data[7] = rtp->timestamp;
-
-  data[8] = rtp->ssrc >> 24;
-  data[9] = rtp->ssrc >> 16;
-  data[10] = rtp->ssrc >> 8;
-  data[11] = rtp->ssrc;
-
-  for(int i=0; i < rtp->cc; i++){
-    data[12+4*i] = rtp->csrc[i] >> 24;
-    data[13+4*i] = rtp->csrc[i] >> 16;
-    data[14+4*i] = rtp->csrc[i] >> 8;
-    data[15+4*i] = rtp->csrc[i];
-  }
+  *data++ = (RTP_VERS << 6) | (rtp->pad << 5) | (rtp->extension << 4) | rtp->cc; // Force version 2
+  *data++ = (rtp->marker << 7) | rtp->type;
+  data = put16(data,rtp->seq);
+  data = put32(data,rtp->timestamp);
+  data = put32(data,rtp->ssrc);
+  for(int i=0; i < rtp->cc; i++)
+    data = put32(data,rtp->csrc[i]);
   
-  return data + RTP_MIN_SIZE + rtp->cc * sizeof(uint32_t);
+  return data;
 }
