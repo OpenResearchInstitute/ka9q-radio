@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.12 2018/04/10 07:51:19 karn Exp karn $
+// $Id: opussend.c,v 1.13 2018/04/11 07:08:18 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -55,13 +55,20 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       void *userData);
 
 
-void closedown(int s){
+void cleanup(void){
   Pa_Terminate();
   if(Opus != NULL)
     opus_encoder_destroy(Opus);
+  Opus = NULL;
   
   if(Output_fd != -1)
     close(Output_fd);
+  Output_fd = -1;
+}
+
+void closedown(int s){
+  fprintf(stderr,"Signal %d\n",s);
+
   exit(0);
 }
 
@@ -135,6 +142,9 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
   int Opus_frame_size = round(Opus_blocktime * Samprate / 1000.);
+
+
+  atexit(cleanup);
 
 
   // Set up audio input

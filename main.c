@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.104 2018/04/09 21:15:04 karn Exp karn $
+// $Id: main.c,v 1.105 2018/04/15 04:06:42 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -54,6 +54,18 @@ char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
 int Update_interval = 100;  // 100 ms between screen updates
 
+void audio_cleanup(void *);
+
+void cleanup(void){
+  audio_cleanup(&Audio);  // Not really necessary
+}
+
+void closedown(int a){
+  if(!Quiet)
+    fprintf(stderr,"Signal %d\n",a);
+  exit(1);
+}
+
 
 int main(int argc,char *argv[]){
   // if we have root, up our priority and drop privileges
@@ -77,6 +89,8 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,Locale); // Set either the hardwired default or the value of $LANG if it exists
   snprintf(Statepath,sizeof(Statepath),"%s/%s",getenv("HOME"),".radiostate");
   Statepath[sizeof(Statepath)-1] = '\0';
+
+  atexit(cleanup);
 
   if(readmodes("modes.txt") != 0){
     fprintf(stderr,"Can't read mode table\n");
@@ -274,16 +288,6 @@ int main(int argc,char *argv[]){
   exit(0);
 }
 
-void display_cleanup(void *);
-void audio_cleanup(void *);
-
-void closedown(int a){
-  if(!Quiet)
-    fprintf(stderr,"radio: caught signal %d: %s\n",a,strsignal(a));
-  audio_cleanup(NULL);
-  display_cleanup(NULL);
-  exit(1);
-}
 
 // Read from RTP network socket, remove DC offsets,
 // fix I/Q gain and phase imbalance,

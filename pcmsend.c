@@ -50,13 +50,21 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       void *userData);
 
 
-void closedown(int s){
+void cleanup(void){
   Pa_Terminate();
   
   if(Output_fd != -1)
     close(Output_fd);
+  Output_fd = -1;
+}
+
+
+void closedown(int s){
+  fprintf(stderr,"signal %d\n",s);
   exit(0);
 }
+
+
 
 // Convert unsigned number modulo buffersize to a signed 2's complement
 static inline int signmod(unsigned int const a){
@@ -120,6 +128,8 @@ int main(int argc,char * const argv[]){
     close(Output_fd);
     return r;
   }
+  atexit(cleanup);
+
   if(List_audio){
     // On stdout, not stderr, so we can toss ALSA's noisy error messages
     printf("Audio devices:\n");
