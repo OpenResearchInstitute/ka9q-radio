@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.12.1.1 2018/04/15 04:07:11 karn Exp karn $
+// $Id: iqrecord.c,v 1.13 2018/04/15 08:30:43 karn Exp karn $
 // Read and record complex I/Q stream or PCM baseband audio
 // This version reverts to file I/O from an unsuccessful experiment to use mmap()
 #define _GNU_SOURCE 1
@@ -57,7 +57,7 @@ struct session {
 };
 
 int Quiet;
-char IQ_mcast_address_text[256] = "iq.hf.mcast.local"; // Default for testing
+char IQ_mcast_address_text[256];
 struct sockaddr Sender;
 struct sockaddr Input_mcast_sockaddr;
 int Input_fd;
@@ -109,9 +109,7 @@ int main(int argc,char *argv[]){
       Quiet++; // Suppress display
       break;
     default:
-      fprintf(stderr,"Usage: %s [-I iq multicast address] [-l locale] [-q]\n",argv[0]);
-      fprintf(stderr,"Default: %s -I %s -l %s\n",
-	      argv[0],IQ_mcast_address_text,locale);
+      fprintf(stderr,"Usage: %s -I iq multicast address [-l locale] [-q]\n",argv[0]);
       exit(1);
       break;
     }
