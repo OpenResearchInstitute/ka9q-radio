@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.36 2018/04/09 21:26:25 karn Exp karn $
+# $Id: Makefile.osx,v 1.37 2018/04/10 07:52:53 karn Exp karn $
 #CC=g++
 GCC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -21,62 +21,85 @@ clean:
 	rm -f *.o *.a $(EXECS) $(AFILES)
 	rcsclean
 
-aprs: aprs.o ax25.o multicast.o misc.o
-	$(CC) -g -o $@ $^ $(LD_FLAGS)
+# Executables
+aprs: aprs.o ax25.o libradio.a
+	$(CC) -g -o $@ $^ -lm
 
-packet: packet.o filter.o filter.o misc.o multicast.o ax25.o
-	$(CC) -g -o $@ $^ `pkg-config --libs fftw3f` $(LD_FLAGS)
+packet: packet.o libradio.a
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lm -lpthread 
 
-opus: opus.o multicast.o
-	$(CC) -g -o $@ $^ `pkg-config --libs opus` $(LD_FLAGS)
+opus: opus.o libradio.a
+	$(CC) -g -o $@ $^ -lopus -lm -lpthread
 
-opussend: opussend.o multicast.o
-	$(CC) -g -o $@ $^ `pkg-config --libs opus portaudio-2.0` $(LD_FLAGS)
+opussend: opussend.o libradio.a
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lm -lpthread
 
-pcmsend: pcmsend.o multicast.o
-	$(CC) -g -o $@ $^ `pkg-config --libs portaudio-2.0` $(LD_FLAGS)
+pcmsend: pcmsend.o libradio.a
+	$(CC) -g -o $@ $^ -lportaudio -lm -lpthread
 
-iqplay: iqplay.o multicast.o attr.o misc.o
-	$(CC) -g -o $@ $^ $(LD_FLAGS)
+funcube: funcube.o libradio.a libfcd.a
+	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lm -lpthread
 
-iqrecord: iqrecord.o multicast.o attr.o
-	$(CC) -g -o $@ $^ $(LD_FLAGS)
+iqplay: iqplay.o libradio.a
+	$(CC) -g -o $@ $^ -lm -lpthread
 
-modulate: modulate.o misc.o filter.o
-	$(CC) -g -o $@ $^ -lfftw3f_threads `pkg-config --libs fftw3f` $(LD_FLAGS)
+iqrecord: iqrecord.o libradio.a
+	$(CC) -g -o $@ $^ -lm -lpthread
 
-monitor: monitor.o multicast.o
-	$(CC) -g -o $@ $^ `pkg-config --libs ncurses portaudio-2.0 opus` $(LD_FLAGS)
+modulate: modulate.o libradio.a
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lm -lpthread
 
-# pkg-config doesn't seem to find -lfftw3f_threads so we list it explicitly
-radio: main.o radio.o fm.o linear.o am.o filter.o display.o doppler.o modes.o audio.o multicast.o bandplan.o misc.o
-	$(CC) -g -o $@ $^ -lfftw3f_threads `pkg-config --libs ncurses fftw3f` $(LD_FLAGS)
+monitor: monitor.o libradio.a
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lncurses -lm -lpthread
 
-am.o: misc.h filter.h radio.h audio.h sdr.h
+radio: main.o libradio.a
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lm -lpthread
+
+# Binary libraries
+libfcd.a: fcd.o hid-libusb.o
+	ar rv $@ $^
+	ranlib $@
+
+libradio.a: am.o attr.o audio.o ax25.o bandplan.o display.o doppler.o fcd.o filter.o fm.o gr.o linear.o misc.o modes.o multicast.o radio.o
+	ar rv $@ $^
+	ranlib $@
+
+# Main programs
 aprs.o: aprs.c ax25.h multicast.h misc.h
+funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
+iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
+iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
+main.o: main.c radio.h sdr.h filter.h misc.h audio.h multicast.h
+modulate.o: modulate.c misc.h filter.h radio.h sdr.h
+monitor.o: monitor.c misc.h multicast.h
+opus.o: opus.c misc.h multicast.h
+opussend.o: opussend.c misc.h multicast.h
+pcmsend.o: pcmsend.c misc.h multicast.h
+
+
+# Components of libfcd.a
+fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
+hid-libusb.o: hid-libusb.c hidapi.h
+
+# Components of libradio.a
+am.o: am.c misc.h filter.h radio.h audio.h sdr.h
 attr.o: attr.c attr.h
 audio.o: audio.c misc.h audio.h multicast.h
 ax25.o: ax25.c ax25.h
 bandplan.o: bandplan.c bandplan.h
 display.o: display.c radio.h sdr.h audio.h misc.h filter.h bandplan.h multicast.h
 doppler.o: doppler.c radio.h sdr.h misc.h
-fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 filter.o: filter.c misc.h filter.h
 fm.o: fm.c misc.h filter.h radio.h sdr.h audio.h
-iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
-iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
+gr.o: gr.c sdr.h
+knob.o: knob.c misc.h
 linear.o: linear.c misc.h filter.h radio.h sdr.h audio.h
-main.o: main.c radio.h sdr.h filter.h misc.h audio.h multicast.h
 misc.o: misc.c radio.h sdr.h
 modes.o: modes.c radio.h sdr.h misc.h
-modulate.o: modulate.c misc.h filter.h radio.h sdr.h
-monitor.o: monitor.c misc.h multicast.h
 multicast.o: multicast.c multicast.h
-opus.o: opus.c misc.h multicast.h
-opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h
-pcmsend.o: pcmsend.c misc.h multicast.h
 radio.o: radio.c radio.h sdr.h filter.h misc.h audio.h 
+touch.o: touch.c misc.h
 
 
 
