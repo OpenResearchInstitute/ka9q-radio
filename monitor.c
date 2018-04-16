@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.62 2018/04/15 04:11:19 karn Exp karn $
+// $Id: monitor.c,v 1.63 2018/04/15 08:58:14 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -409,7 +409,11 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   memset(outputBuffer,0,2 * sizeof(float) * framesPerBuffer); // In case of no active streams
   // Walk through each decoder control block and add its decoded audio into output
   for(struct session *sp=Session; sp; sp=sp->next){
-    int num = min(signmod(sp->wptr - sp->rptr),(int)framesPerBuffer);
+    int num = signmod(sp->wptr - sp->rptr);
+    if(num <= 0)
+      continue;
+    if(num > framesPerBuffer)
+      num = framesPerBuffer;
 
     assert(0 <= num && num <= framesPerBuffer);
     float *out = outputBuffer;
