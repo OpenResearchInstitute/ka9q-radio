@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.116 2018/04/09 21:06:34 karn Exp karn $
+// $Id: display.c,v 1.117 2018/04/15 08:56:49 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -1116,8 +1116,8 @@ void *display(void *arg){
   set_term(NULL);
   if(Term != NULL)
     delscreen(Term);
-  if(Tty != NULL)
-    fclose(Tty);
+  //  if(Tty != NULL)
+  //    fclose(Tty);
   
   // Dump receiver state to default
   savestate(demod,"default");
