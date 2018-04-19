@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.89 2018/04/10 07:52:53 karn Exp karn $
+# $Id: Makefile,v 1.90 2018/04/16 22:05:11 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -18,7 +18,9 @@ install: all
 
 clean:
 	rm -f *.o *.a $(EXECS) $(AFILES)
-	rcsclean
+
+.PHONY: clean all
+
 
 # Executables
 aprs: aprs.o ax25.o libradio.a
