@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.90 2018/04/16 22:05:11 karn Exp karn $
+# $Id: Makefile,v 1.91 2018/04/19 09:33:11 karn Exp karn $
 #CC=g++
 INCLUDES=
 #COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -51,10 +51,10 @@ modulate: modulate.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread
 
 monitor: monitor.o libradio.a
-	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lncurses -lm -lpthread
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lncursesw -lm -lpthread
 
 radio: main.o libradio.a
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lbsd -lm -lpthread
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncursesw -lbsd -lm -lpthread
 
 # Binary libraries
 libfcd.a: fcd.o hid-libusb.o
