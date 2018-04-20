@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.63 2018/04/15 08:58:14 karn Exp karn $
+// $Id: monitor.c,v 1.64 2018/04/16 22:04:47 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -62,38 +62,33 @@ struct packet {
 };
 
 struct session {
-  struct session *prev;       // Linked list pointers
+  struct session *prev;     // Linked list pointers
   struct session *next; 
-  uint32_t ssrc;            // RTP Sending Source ID
-  uint16_t eseq;            // Next expected RTP sequence number
-  int etimestamp;           // Next expected RTP timestamp
-  int type;                 // RTP type (10,11,20,111)
-  int reseq_count;
-  
-  struct packet *queue;     // Incoming RTP packets
-
-  float gain;               // Gain; 1 = 0 dB
-  float pan;                // Stereo position: 0 = center; -1 = full left; +1 = full right
 
   struct sockaddr sender;
   char *dest;
   char addr[NI_MAXHOST];    // RTP Sender IP address
   char port[NI_MAXSERV];    // RTP Sender source port
-  OpusDecoder *opus;        // Opus codec decoder handle, if needed
-  int channels;             // Channels (1 or 2)
-  int frame_size;           // Samples in a frame
-  int opus_bandwidth;       // Opus stream audio bandwidth
 
-  pthread_t task;           // Thread processing packets and running decoder
+  pthread_t task;           // Thread reading from queue and running decoder
+  struct packet *queue;     // Incoming RTP packets
   pthread_mutex_t qmutex;   // Mutex protecting packet queue
   pthread_cond_t qcond;     // Condition variable for arrival of new packet
 
+  struct rtp_state rtp_state;
+  uint32_t ssrc;            // RTP Sending Source ID
+  int type;                 // RTP type (10,11,20,111)
+
+  OpusDecoder *opus;        // Opus codec decoder handle, if needed
+  int opus_bandwidth;       // Opus stream audio bandwidth
+  int channels;             // Channels (1 or 2)
+  int frame_size;           // Samples in a frame
+  float gain;               // Gain; 1 = 0 dB
+  float pan;                // Stereo position: 0 = center; -1 = full left; +1 = full right
+
+
   unsigned long packets;    // RTP packets for this session
-  unsigned long drops;      // Apparent rtp packet drops
   unsigned long empties;    // RTP but no data
-  unsigned long dupes;      // Duplicate sequence numbers
-  unsigned long lates;      // Callback count of underruns (stereo samples) replaced with silence
-  unsigned long erasures;   // Erasure gaps
 
   float output_buffer[BUFFERSIZE][2]; // Decoded audio output, written by processing thread and read by PA callback
   int wptr;                        // Write pointer into output_buffer
@@ -138,7 +133,6 @@ static inline int signmod(unsigned int const a){
   assert(y >= -BUFFERSIZE/2 && y < BUFFERSIZE/2);
   return y;
 }
-
 
 
 int main(int argc,char * const argv[]){
@@ -328,8 +322,7 @@ int main(int argc,char * const argv[]){
       if(size <= RTP_MIN_SIZE)
 	continue; // Must be big enough for RTP header and at least some data
 
-      // Convert RTP header to host order
-
+      // Convert RTP header to host format
       unsigned char *dp = ntoh_rtp(&pkt->rtp,pkt->content);
       pkt->data = dp;
       pkt->len = size - (dp - pkt->content);
@@ -339,13 +332,6 @@ int main(int argc,char * const argv[]){
       }
 
       assert(pkt->len > 0);
-
-      if(pkt->rtp.type != PCM_STEREO_PT
-	 && pkt->rtp.type != OPUS_PT
-	 && pkt->rtp.type != 20           // Old fixed value for Opus, take this out eventually
-	 && pkt->rtp.type != PCM_MONO_PT) // 1 byte, no need to byte swap
-	continue; // Discard unknown RTP types to avoid polluting session table
-      
 
       // Find appropriate session; create new one if necessary
       struct session *sp = lookup_session(&sender,pkt->rtp.ssrc);
@@ -359,7 +345,6 @@ int main(int argc,char * const argv[]){
 		    //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
 	sp->dest = Mcast_address_text[fd_index];
-	sp->eseq = pkt->rtp.seq; // Needed since we sort the queue by sequence number
 
 	pthread_mutex_init(&sp->qmutex,NULL);
 	pthread_cond_init(&sp->qcond,NULL);
@@ -478,43 +463,34 @@ void *decode_task(void *arg){
 
     sp->packets++;
       
-    int seq_offset = (signed short)(pkt->rtp.seq - sp->eseq);
-    if(seq_offset < -5 || seq_offset > 50){
-      if(++sp->reseq_count < 3){
-	// Discard wildly different sequence numbers
-	sp->dupes++;
-	free(pkt);  pkt = NULL;
-	continue;
-      }
-      //resynch      
-      sp->etimestamp = pkt->rtp.timestamp;
-      seq_offset = 0;
-    }
-    sp->reseq_count = 0;
-    sp->type = pkt->rtp.type;
-
-    if(seq_offset > 0)
-      sp->drops += seq_offset;
-      
-    sp->eseq = pkt->rtp.seq + 1;
-      
     // extract these here since frame_size might change (especially with PCM)
     // and we need it for etimestamp updates
-    switch(sp->type){
+    switch(pkt->rtp.type){
     case PCM_STEREO_PT:
+      sp->type = PCM_STEREO_PT;
       sp->channels = 2;
       sp->frame_size = pkt->len / 4; // Number of stereo samples
       break;
     case PCM_MONO_PT:
+      sp->type = PCM_MONO_PT;
       sp->channels = 1;
       sp->frame_size = pkt->len / 2; // Number of stereo samples
       break;
     case OPUS_PT:
+    case 20:
+      sp->type = OPUS_PT;
       sp->channels = opus_packet_get_nb_channels(pkt->data);
       sp->opus_bandwidth = opus_packet_get_bandwidth(pkt->data);
       sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
       break;
     }
+    int samples_skipped = rtp_process(&sp->rtp_state,&pkt->rtp,sp->frame_size);
+    if(samples_skipped < 0){
+      free(pkt);
+      pkt = NULL;
+      continue;
+    }
+
     // Compute gains and delays for stereo imaging
     // -6dB for each channel in the center
     // when full to one side or the other, that channel is +6 dB and the other is -inf dB
@@ -538,22 +514,18 @@ void *decode_task(void *arg){
     }
     assert(left_delay >= 0 && right_delay >= 0);
 
-    int lost_interval = (int)(pkt->rtp.timestamp - sp->etimestamp);
-    sp->etimestamp = pkt->rtp.timestamp + sp->frame_size;
-    if(lost_interval > 0){
+    if(samples_skipped > 0){
       // Missing data -- if marker, just reset decoder and recover lost time
       if(sp->type == OPUS_PT && sp->opus){
-	if(pkt->rtp.marker || seq_offset >= 3 || lost_interval > 3840) {
+	if(pkt->rtp.marker || samples_skipped > 3840) {
 	  opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder and catch up
 	} else {
-	  // Opus error concealment with FEC
-	  sp->erasures += seq_offset;
-
 	  // Opus erasure handling - should also support FEC through look-ahead
-	  float bounce[lost_interval][2];
+	  assert(samples_skipped > 0);
+	  float bounce[samples_skipped][2];
 	  // Decode any FEC, otherwise interpolate or create comfort noise
-	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],lost_interval,1);	
-	  assert(samples <= lost_interval);
+	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],samples_skipped,1);	
+	  assert(samples <= samples_skipped);
 	  if(samples > 0){
 	    for(int i=0; i<samples; i++){
 	      sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
@@ -562,17 +534,12 @@ void *decode_task(void *arg){
 	      sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
 	    }
 	  }
-	}
+	} // No opus encoder reset
       } else {
-	// PCM
-	if(!pkt->rtp.marker && seq_offset < 3 && lost_interval < 3840){
-	  // Pad with zeroes
-	  sp->erasures += seq_offset;
-	  for(int i=0; i < lost_interval; i++){
-	    sp->output_buffer[sp->wptr][0] = 0;
-	    sp->output_buffer[sp->wptr][1] = 0;
-	    sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
-	  }
+	// gap in PCM data
+	if(!pkt->rtp.marker && samples_skipped < 3840){
+	  // Short loss; pad with implicit zeroes
+	  sp->wptr = (sp->wptr + samples_skipped) & (BUFFERSIZE-1);
 	}
       }	  
     }
@@ -599,6 +566,7 @@ void *decode_task(void *arg){
       if(!sp->opus){
 	int error;
 	sp->opus = opus_decoder_create(SAMPRATE,2,&error);
+	assert(sp->opus);
       }
       {
 	float bounce[sp->frame_size][2];
@@ -615,7 +583,6 @@ void *decode_task(void *arg){
       break;
     }
     free(pkt); pkt = NULL;
-    // advance time by one frame to let the D/A catch up
   }
   pthread_cleanup_pop(1);
   return NULL;
@@ -636,7 +603,6 @@ void *display(void *arg){
 
     if(!Current)
       Current = Session;
-
 
     int row = 2;
     wmove(Mainscr,row,0);
@@ -701,14 +667,10 @@ void *display(void *arg){
 		temp);
       if(sp->packets)
 	wprintw(Mainscr," packets %'lu",sp->packets);
-      if(sp->dupes)
-	wprintw(Mainscr," dupes %lu",sp->dupes);
-      if(sp->drops)
-	wprintw(Mainscr," drops %lu",sp->drops);
-      if(sp->lates)
-	wprintw(Mainscr," late %lu",sp->lates);
-      if(sp->erasures)
-	wprintw(Mainscr," erasures %lu",sp->erasures);
+      if(sp->rtp_state.dupes)
+	wprintw(Mainscr," dupes %lu",sp->rtp_state.dupes);
+      if(sp->rtp_state.drops)
+	wprintw(Mainscr," drops %lu",sp->rtp_state.drops);
       
       if(queue != 0)
 	mvwchgat(Mainscr,row,40,5,A_BOLD,0,NULL);
