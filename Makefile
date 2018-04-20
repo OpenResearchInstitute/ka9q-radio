@@ -1,8 +1,8 @@
-# $Id: Makefile,v 1.91 2018/04/19 09:33:11 karn Exp karn $
+# $Id: Makefile,v 1.92 2018/04/20 08:12:47 karn Exp karn $
 #CC=g++
 INCLUDES=
-#COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+#COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
