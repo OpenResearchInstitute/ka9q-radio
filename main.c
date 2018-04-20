@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.105 2018/04/15 04:06:42 karn Exp karn $
+// $Id: main.c,v 1.106 2018/04/15 08:58:33 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -27,17 +27,15 @@
 #include <errno.h>
 
 #include "misc.h"
+#include "multicast.h"
 #include "radio.h"
 #include "filter.h"
 #include "audio.h"
-#include "multicast.h"
 
 #define MAXPKT 1500 // Maximum bytes of data in incoming I/Q packet
 
 void closedown(int);
-void *input_loop(void *);
-
-pthread_t Display_thread;
+void *rtp_recv(void *);
 
 // Primary control blocks for downconvert/filter/demodulate and audio output
 // Note: initialized to all zeroes, like all global variables
@@ -98,17 +96,14 @@ int main(int argc,char *argv[]){
   }
 
   // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
-  
   fftwf_import_system_wisdom();
   fftwf_make_planner_thread_safe();
-
 
   struct demod * const demod = &Demod; // Only one demodulator per program for now
   struct audio * const audio = &Audio;
 
-
   // Set program defaults, can be overridden by state file and command line args, in that order
-  memset(demod,0,sizeof(*demod));
+  memset(demod,0,sizeof(*demod)); // Just in case it's ever dynamic
   audio->samprate = DAC_samprate; // currently 48 kHz, hard to change
   strcpy(demod->mode,"FM");
   demod->freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
@@ -210,7 +205,6 @@ int main(int argc,char *argv[]){
   // Set up actual demod state
   demod->ctl_fd = -1;   // Invalid
   demod->input_fd = -1; // Invalid
-  demod->write_ptr = 0;
 
 #if !defined(NDEBUG)
   // Detect early starts
@@ -218,17 +212,13 @@ int main(int argc,char *argv[]){
   demod->second_LO_phasor_step = NAN;
 #endif
 
-  // Circular buffer between input thread and demodulator thread
-  demod->corr_data = malloc(DATASIZE * sizeof(*demod->corr_data));
-  
   pthread_mutex_init(&demod->status_mutex,NULL);
   pthread_cond_init(&demod->status_cond,NULL);
-  pthread_mutex_init(&demod->data_mutex,NULL);
-  pthread_cond_init(&demod->data_cond,NULL);
   pthread_mutex_init(&demod->doppler_mutex,NULL);
   pthread_mutex_init(&demod->shift_mutex,NULL);
   pthread_mutex_init(&demod->second_LO_mutex,NULL);
-  
+  pthread_mutex_init(&demod->qmutex,NULL);
+  pthread_cond_init(&demod->qcond,NULL);
 
   // Input socket for I/Q data from SDR
   demod->input_fd = setup_mcast(demod->iq_mcast_address_text,0);
@@ -245,21 +235,17 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Audio setup failed\n");
     exit(1);
   }
+  // Create master half of filter
+  // Must be done before the demodulator starts or it will fail an assert
+  // If done in proc_samples(), will be a race condition
+  demod->filter_in = create_filter_input(demod->L,demod->M,COMPLEX);
 
-  // The input thread must run before calling these next functions, otherwise they'll deadlock
-  pthread_create(&demod->input_thread,NULL,input_loop,demod);
-
-  set_second_LO(demod,0); // Initialize LO2 phasor so demod task won't fail at startup
+  pthread_create(&demod->rtp_recv_thread,NULL,rtp_recv,demod);
+  pthread_create(&demod->proc_samples,NULL,proc_samples,demod);
 
   // Optional doppler correction
   if(demod->doppler_command)
     pthread_create(&demod->doppler_thread,NULL,doppler,demod);
-
-  // Thread to do downconversion and first half of filtering
-  pthread_create(&demod->filter_thread,NULL,filtert,demod);
-  // Wait for thread to create input filter. KLUDGE!!!!!
-  while(demod->filter_in == NULL)
-    usleep(1000);
 
   // Actually set the mode and frequency already specified
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
@@ -276,15 +262,13 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
 
-  if(!Quiet)
-    pthread_create(&Display_thread,NULL,display,demod);
-
-  sleep(1);
-  set_freq(demod,demod->freq,NAN);
-
-  while(1)
-    usleep(1000000); // probably get rid of this
-
+  // Become the display thread unless quiet; then just twiddle our thumbs
+  if(!Quiet){
+    display(demod);
+  } else {
+    while(1)
+      usleep(1000000); // probably get rid of this
+  }
   exit(0);
 }
 
@@ -293,15 +277,12 @@ int main(int argc,char *argv[]){
 // fix I/Q gain and phase imbalance,
 // Write corrected data to circular buffer, wake up demodulator thread(s)
 // when data is available and when SDR status (frequency, sampling rate) changes
-void *input_loop(void *arg){
-  pthread_setname("input");
+void *rtp_recv(void *arg){
+  pthread_setname("rtp-rcv");
   assert(arg != NULL);
   struct demod * const demod = arg;
   
-  int init = 0;
-  int reseq = 0;
-  uint16_t eseq;
-  uint32_t etimestamp;
+  struct packet *pkt = NULL;
 
   while(1){
     // Packet consists of Ethernet, IP and UDP header (already stripped)
@@ -312,30 +293,33 @@ void *input_loop(void *arg){
     // Note this is a portability problem if this system and the one generating
     // the data have opposite byte orders. But who's big endian anymore?
     // Receive I/Q data from front end
+    // Incoming RTP packets
+
+    if(!pkt)
+      pkt = malloc(sizeof(*pkt));
+
     socklen_t socksize = sizeof(demod->input_source_address);
-    unsigned char data[MAXPKT];
-    int size = recvfrom(demod->input_fd,data,sizeof(data),0,&demod->input_source_address,&socksize);
+    int size = recvfrom(demod->input_fd,pkt->content,sizeof(pkt->content),0,&demod->input_source_address,&socksize);
     if(size <= 0){    // ??
       perror("recvfrom");
       usleep(50000);
       continue;
     }
-
-    
     if(size < RTP_MIN_SIZE)
       continue; // Too small for RTP, ignore
-    struct rtp_header rtp;
-    unsigned char *dp = data;
-    dp = ntoh_rtp(&rtp,dp);
-    size -= (dp - data);
+
+    unsigned char *dp = pkt->content;
+
+    dp = ntoh_rtp(&pkt->rtp,dp);
+    size -= (dp - pkt->content);
     
-    if(rtp.type != IQ_PT)
+    if(pkt->rtp.type != IQ_PT)
       continue; // Wrong type
 
-    if(rtp.pad){
+    if(pkt->rtp.pad){
       // Remove padding
       size -= dp[size-1];
-      rtp.pad = 0;
+      pkt->rtp.pad = 0;
     }
     demod->iq_packets++;
 
@@ -349,60 +333,30 @@ void *input_loop(void *arg){
     new_status.if_gain = dp[22];
     dp += 24;
     size -= 24;
-
-    signed short *samples = (signed short *)dp;
-    size /= 2*sizeof(*samples); // Count of 32-bit samples
-
-    if(init){
-      // Sequence number check
-      short seq_step = (short)(rtp.seq - eseq);
-      if(seq_step < 0 || seq_step > 10){
-	if(++reseq >= 3){
-	  // Probably a new stream; start over with new sequence numbers
-	  reseq = init = 0;
-	} else {
-	  if(seq_step > 0)
-	    demod->drops++;	  
-	  else if(seq_step < 0)
-	    demod->dupes++;
-	  continue;
-	}
-      } else
-	reseq = 0;
-    }
-    if(!init){
-      // First packet
-      gettimeofday(&demod->start_time,NULL);
-      demod->samples = -size; // Don't count this packet
-      eseq = rtp.seq;
-      etimestamp = rtp.timestamp;
-      init = 1;
-    }
-    eseq = rtp.seq + 1;
-    
-    gettimeofday(&demod->current_time,NULL);
-    int time_step = (int)(rtp.timestamp - etimestamp);
-    if(time_step < 0){
-      // Old samples; drop. Shouldn't happen if sequence number isn't old
-      continue;
-    } else if(time_step > 0 && time_step < DATASIZE/2){
-      // Inject enough zeroes to keep the sample count correct
-      // Arbitrary limit of 1/2 input ring buffer just to keep things from blowing up
-      // Good enough for the occasional lost packet or two
-      // May upset the I/Q DC offset and channel balance estimates, but hey you can't win 'em all
-      short zeroes[2*time_step];
-      memset(zeroes,0,sizeof(zeroes));
-      demod->samples += time_step;
-      proc_samples(demod,zeroes,time_step);
-    }
-    demod->samples += size;
-    eseq = rtp.seq + 1;
-    etimestamp = rtp.timestamp + size;
     update_status(demod,&new_status);
-    // Pass PCM I/Q samples to corrector and input queue
-    proc_samples(demod,samples,size);
-    
-  }
+
+
+    pkt->data = dp;
+    pkt->len = size;
+
+    // Insert onto queue sorted by sequence number, wake up thread
+    struct packet *q_prev = NULL;
+    struct packet *qe = NULL;
+    pthread_mutex_lock(&demod->qmutex);
+    for(qe = demod->queue; qe; q_prev = qe,qe = qe->next){
+      if(pkt->rtp.seq < qe->rtp.seq)
+	break;
+    }
+    pkt->next = qe;
+    if(q_prev)
+      q_prev->next = pkt;
+    else
+      demod->queue = pkt; // Front of list
+    pkt = NULL;        // force new packet to be allocated
+    // wake up decoder thread
+    pthread_cond_signal(&demod->qcond);
+    pthread_mutex_unlock(&demod->qmutex);
+  }      
   return NULL;
 }
  
