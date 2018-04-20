@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.16 2018/04/11 07:08:18 karn Exp karn $
+// $Id: opus.c,v 1.17 2018/04/15 04:11:56 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -57,19 +57,18 @@ struct session {
   struct sockaddr sender;
   char addr[NI_MAXHOST];    // RTP Sender IP address
   char port[NI_MAXSERV];    // RTP Sender source port
+
+  struct rtp_state rtp_state; // RTP input state
   OpusEncoder *opus;        // Opus encoder handle
   int silence;              // Currently suppressing silence
 
-  uint16_t oseq;                 // Output sequence number
-  uint32_t otimestamp;           // Output timestamp
   float *audio_buffer;      // Buffer to accumulate PCM until enough for Opus frame
   int audio_index;          // Index of next sample to write into audio_buffer
 
+  uint32_t otimestamp;
+  uint16_t oseq;
+
   unsigned long packets;    // RTP packets for this session
-  unsigned long drops;      // Apparent rtp packet drops
-  unsigned long invalids;   // Unknown RTP type
-  unsigned long empties;    // RTP but no data
-  unsigned long dupes;      // Duplicate or old serial numbers
   unsigned long underruns;  // Callback count of underruns (stereo samples) replaced with silence
 };
 struct session *Audio;
@@ -182,7 +181,7 @@ int main(int argc,char * const argv[]){
       continue; // Too small to be valid RTP
     }
     unsigned char *dp = buffer;
-    // To host order
+    // RTP header to host format
     dp = ntoh_rtp(&rtp_in,buffer);
     size -= (dp - buffer);
     if(rtp_in.pad){
@@ -191,9 +190,17 @@ int main(int argc,char * const argv[]){
       rtp_in.pad = 0;
     }
 
-    // Only accept mono and stereo PCM at implied 48 kHz sample rate
-    if(rtp_in.type != PCM_STEREO_PT && rtp_in.type != PCM_MONO_PT) // 1 byte, no need to byte swap
+    int frame_size = 0;
+    switch(rtp_in.type){
+    case PCM_STEREO_PT:
+      frame_size = size / (2 * sizeof(short));
+      break;
+    case PCM_MONO_PT:
+      frame_size = size / sizeof(short);
+      break;
+    default:
       goto endloop; // Discard all but mono and stereo PCM to avoid polluting session table
+    }
 
     struct session *sp = lookup_session(&sender,rtp_in.ssrc);
     if(sp == NULL){
@@ -204,8 +211,6 @@ int main(int argc,char * const argv[]){
       }
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
-      sp->oseq = 0;
-      sp->dupes = 0;
       sp->audio_buffer = malloc(Channels * sizeof(float) * Opus_frame_size);
       sp->audio_index = 0;
       int error = 0;
@@ -238,22 +243,10 @@ int main(int argc,char * const argv[]){
     }
     sp->packets++;
     sp->type = rtp_in.type;
-    if(rtp_in.seq != sp->eseq){
-      int const diff = (int)(rtp_in.seq - sp->eseq);
-      //        fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
-      if(diff < 0 && diff > -10){
-	sp->dupes++;
-	goto endloop;	// Drop probable duplicate
-      }
-      sp->drops += abs(diff); // Apparent # packets dropped
-    }
-    sp->eseq = rtp_in.seq + 1;
-
-    int samples_skipped = (signed int)(rtp_in.timestamp - sp->etimestamp);
-
-    sp->otimestamp += samples_skipped; // Track sender's timestamp jumps
+    int samples_skipped = rtp_process(&sp->rtp_state,&rtp_in,frame_size);
+    
     if(rtp_in.marker || samples_skipped > 4*Opus_frame_size){
-      // reset encoder state after 4 frames of complete silence and set RTP marker bit
+      // reset encoder state after 4 frames of complete silence or a RTP marker bit
       opus_encoder_ctl(sp->opus,OPUS_RESET_STATE);
       sp->silence = 1;
     }
@@ -280,7 +273,6 @@ int main(int argc,char * const argv[]){
       sampcount = 0;
       break; // ignore
     }
-    sp->etimestamp = rtp_in.timestamp + sampcount;
 
   endloop:;
   }
