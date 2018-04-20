@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.62 2018/04/01 10:18:14 karn Exp karn $
+// $Id: radio.h,v 1.63 2018/04/09 21:24:44 karn Exp karn $
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 
 #include "sdr.h"
+#include "multicast.h"
 
 struct modetab {
   char name[16];
@@ -27,28 +28,31 @@ struct modetab {
   float hangtime;
 };
 
-// Demodulator state block
+#define PKTSIZE 16384
 
+// Incoming RTP packets
+struct packet {
+  struct packet *next;
+  struct rtp_header rtp;
+  unsigned char *data;
+  int len;
+  unsigned char content[PKTSIZE];
+};
+
+
+
+// Demodulator state block
 struct demod {
   // Global parameters
 
   // Input thread state
-  pthread_t input_thread;
+  pthread_t rtp_recv_thread;
   int input_fd;      // Raw incoming I/Q data from multicast socket
   char iq_mcast_address_text[256];
   struct sockaddr input_source_address;
   struct sockaddr ctl_address;
-  unsigned long long iq_packets; // Count of I/Q input packets received
-  unsigned long long samples;    // Count of raw I/Q samples received
-  unsigned long long dupes;
-  unsigned long long drops;
-  struct timeval start_time;
-  struct timeval current_time;
-
-  // I/Q correction parameters
-  float DC_i,DC_q;       // Average DC offsets
-  float sinphi;          // smoothed estimate of I/Q phase error
-  float imbalance;       // Ratio of I power to Q power
+  long long iq_packets; // Count of I/Q input packets received
+  long long samples;    // Count of raw I/Q samples received
 
   struct status requested_status; // The status we want the FCD to be in
   struct status status;           // Last status from FCD
@@ -61,14 +65,20 @@ struct demod {
   // Set from I/Q packet header and calibrate parameter
   volatile double samprate;
 
-  // corr_data and write_ptr are written by the input thread and read by fillbuf in the demod tasks,
-  // so they're protected by mutexes. The buffer is *NOT* protected from overrun, so the reader must keep up
-#define DATASIZE 65536 // Strongly recommend a power of 2 for efficiency
-  complex float *corr_data;       // Circular buffer of corrected I/Q data from input thread to demod thread
-  int write_ptr;                  // 0 to DATASIZE-1
-  int read_ptr;                   // 0 to DATASIZE-1
-  pthread_mutex_t data_mutex;     // Protects corr_data and write_ptr
-  pthread_cond_t data_cond;       // Signalled whenever data is written and write_ptr updated
+  // queue of RTP packets between rtp-recv and procsamp
+  pthread_cond_t qcond;
+  pthread_mutex_t qmutex;
+  struct packet *queue;
+
+  struct rtp_state rtp_state;
+
+  // Thread that processes samples from RTP receiver and 
+  pthread_t proc_samples;
+  // I/Q correction parameters
+  float DC_i,DC_q;       // Average DC offsets
+  float sinphi;          // smoothed estimate of I/Q phase error
+  float imbalance;       // Ratio of I power to Q power
+
 
   // Demodulator thread data
   pthread_t demod_thread;
@@ -104,7 +114,7 @@ struct demod {
   float max_IF;
 
   // Doppler shift correction (optional)
-  pthread_t doppler_thread;          // Thread that reads file and sets this
+  pthread_t doppler_thread;          // Thread that reads file and sets doppler
   char *doppler_command;             // Command to execute for tracking
 
   pthread_mutex_t doppler_mutex;     // Protects doppler
@@ -145,8 +155,6 @@ struct demod {
   // Transition region is approx sqrt(1+Beta^2)
   // 0 => rectangular window; increasing values widens main lobe and decreases ripple
   float kaiser_beta;
-  pthread_t filter_thread;          // Thread for downconversion and first half of filter
-
 
   // Demodulator configuration settngs
   float headroom;   // Audio level headroom
@@ -177,7 +185,6 @@ extern int Nmodes;
 
 
 void *filtert(void *arg);
-int fillbuf(struct demod *,complex float *,const int);
 int LO2_in_range(struct demod *,double f,int);
 double get_freq(struct demod *);
 double set_freq(struct demod *,double,double);
@@ -192,9 +199,8 @@ double get_doppler_rate(struct demod *);
 int set_doppler(struct demod *,double,double);
 int set_mode(struct demod *,const char *,int);
 int set_cal(struct demod *,double);
-int spindown(struct demod *,complex float const *);
 void update_status(struct demod *,struct status *);
-void proc_samples(struct demod *,int16_t const *,int);
+void *proc_samples(void *);
 const float compute_n0(struct demod const *);
 
 

@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.82 2018/02/26 22:50:47 karn Exp karn $
+// $Id: radio.c,v 1.83 2018/04/15 08:58:47 karn Exp karn $
 // Lower part of radio program - control LOs, set frequency/mode, etc
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -31,7 +31,7 @@ int IF_EXCLUDE = 16000; // Hardwired for UK Funcube Dongle Pro+, make this more 
 
 
 
-// Lower half of input thread
+// thread for first half of sample processing
 // Preprocessing of samples performed for all demodulators
 // Remove DC biases, equalize I/Q power, correct phase imbalance
 // Update power measurement
@@ -40,115 +40,144 @@ float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset
 float const Power_alpha = 0.00001; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
 float const SCALE = 1./SHRT_MAX;   // Scale signed 16-bit int to float in range -1, +1
 
-void proc_samples(struct demod * const demod,int16_t const *sp,int const cnt){
+void *proc_samples(void *arg){
   // gain and phase balance coefficients
-  if(demod == NULL)
-    return;
+  assert(arg);
+  pthread_setname("procsamp");
 
-  float const gain_q = sqrtf(0.5 * (1 + demod->imbalance));
-  float const gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
-  float const secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
-  float const tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
-
+  struct demod *demod = (struct demod *)arg;
 
   float samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
   float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
   float dotprod = 0;                           // sum of I*Q, for phase balance
-  for(int i=0;i<cnt;i++){
-    // Remove and update DC offsets
-    float samp_i = *sp++ * SCALE;
-    samp_i_sum += samp_i;
-    samp_i -= demod->DC_i;
-    samp_i_sq_sum += samp_i * samp_i;
 
-    float samp_q = *sp++ * SCALE;
-    samp_q_sum += samp_q;
-    samp_q -= demod->DC_q;
-    samp_q_sq_sum += samp_q * samp_q;
-
-    // Balance gains, keeping constant total energy
-    samp_i *= gain_i;                  samp_q *= gain_q;
-
-    dotprod += samp_i * samp_q;
-    // Correct phase
-    samp_q = secphi * samp_q - tanphi * samp_i;
-    complex float samp = CMPLXF(samp_i,samp_q);
-    // Experimental notch filter
-    if(demod->nf)
-      samp = notch(demod->nf,samp);
-
-    // Final corrected sample
-    demod->corr_data[(demod->write_ptr + i) % DATASIZE] = samp;
-  }
-  // Update estimates of DC offset, signal powers and phase error
-  demod->DC_i += DC_alpha * (samp_i_sum - cnt * demod->DC_i);
-  demod->DC_q += DC_alpha * (samp_q_sum - cnt * demod->DC_q);
-  demod->imbalance += Power_alpha * cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
-
-  float dpn = 2 * dotprod / (samp_i_sq_sum + samp_q_sq_sum);
-  demod->sinphi += Power_alpha * cnt * (dpn - demod->sinphi);
-
-  pthread_mutex_lock(&demod->data_mutex);
-  demod->write_ptr += cnt;
-  demod->write_ptr %= DATASIZE;
-  pthread_cond_broadcast(&demod->data_cond);
-  pthread_mutex_unlock(&demod->data_mutex);
-}
-
-
-// Completely fill buffer from corrected I/O input queue
-// Block until enough data is available
-int fillbuf(struct demod * const demod,complex float *buffer,int const cnt){
-  for(int i = cnt;i > 0;){
-    // The mutex protects demod->write_ptr
-    pthread_mutex_lock(&demod->data_mutex);
-    while(demod->write_ptr == demod->read_ptr)
-      pthread_cond_wait(&demod->data_cond,&demod->data_mutex);
-    
-    int chunk = (demod->write_ptr - demod->read_ptr + DATASIZE) % DATASIZE; // How much is available?
-    pthread_mutex_unlock(&demod->data_mutex);  // Done looking at write_ptr
-    if(demod->interpolate == 1){
-      // Not interpolating; directly copy large blocks
-      chunk = min(chunk,DATASIZE - demod->read_ptr); // How much can we copy contiguously?
-      chunk = min(chunk,i); // How much do we need?
-      
-      memcpy(buffer,&demod->corr_data[demod->read_ptr],chunk*sizeof(complex float));
-      demod->read_ptr = (demod->read_ptr + chunk) % DATASIZE;
-      i -= chunk;
-      buffer += chunk;
-    } else {
-      // copy only one sample at a time, then stuff zeroes
-      *buffer++ = demod->corr_data[demod->read_ptr++];
-      demod->read_ptr %= DATASIZE;
-      for(int j=1; j<demod->interpolate; j++)
-	*buffer++ = 0;
-
-      i -= demod->interpolate;
-    }
-  }
-  return cnt;
-}
-
-// Thread to read adjusted I/Q samples, downconvert with second LO, and execute master half of filter
-// Also compute total power in IF before filtering
-void *filtert(void *arg){
-  struct demod *demod = arg;
-  pthread_setname("downcvt");
-  assert(demod != NULL);
-  struct filter_in *master;
-
-  demod->filter_in = master = create_filter_input(demod->L,demod->M,COMPLEX);
+  // Gain and phase corrections. These will be updated every block
+  float gain_q = 1;
+  float gain_i = 1;
+  float secphi = 1;
+  float tanphi = 0;
+  int in_cnt = 0;
+  struct packet *pkt = NULL;
 
   while(1){
-    fillbuf(demod,master->input.c,master->ilen);
-    spindown(demod,master->input.c);
-    demod->if_power = cpower(master->input.c,master->ilen);
-    execute_filter_input(master);
-  }
+    // Pull next I/Q data packet off queue
+    pthread_mutex_lock(&demod->qmutex);
+    while(demod->queue == NULL)
+      pthread_cond_wait(&demod->qcond,&demod->qmutex);
+    pkt = demod->queue;
+    demod->queue = pkt->next;
+    pthread_mutex_unlock(&demod->qmutex);
+
+    int sampcount = pkt->len / (2 * sizeof(signed short));
+    int time_step = rtp_process(&demod->rtp_state,&pkt->rtp,sampcount);
+    if(time_step < 0 || time_step > 192000){
+      // Old samples, or too big a jump; drop. Shouldn't happen if sequence number isn't old
+      free(pkt); pkt = NULL;
+      continue;
+    } else if(time_step > 0){
+      // Samples were lost. Inject enough zeroes to keep the sample count and LO phase correct
+      // Arbitrary 1 sec limit just to keep things from blowing up
+      // Good enough for the occasional lost packet or two
+      // May upset the I/Q DC offset and channel balance estimates, but hey you can't win 'em all
+      // Note: we don't use marker bits since we don't suppress silence
+      demod->samples += time_step;
+      for(int i=0;i < time_step; i++){
+	demod->filter_in->input.c[in_cnt++] = 0;
+	// Keep the LOs running
+	demod->second_LO_phasor *= demod->second_LO_phasor_step;
+	if(is_phasor_init(demod->doppler_phasor)){ // Initialized?
+	  demod->doppler_phasor *= demod->doppler_phasor_step;
+	  demod->doppler_phasor_step *= demod->doppler_phasor_step_step;
+	}
+	if(in_cnt == demod->filter_in->ilen){
+	  // Run filter but freeze everything else?
+	  execute_filter_input(demod->filter_in);
+	  in_cnt = 0;
+	}
+      }
+    }
+    // Process individual samples
+    signed short *sp = (signed short *)pkt->data;
+    demod->samples += sampcount;
+
+    while(sampcount--){
+
+      float samp_i = *sp++ * SCALE;
+      float samp_q = *sp++ * SCALE;
+
+      // Remove and update DC offsets
+      samp_i_sum += samp_i;
+      samp_q_sum += samp_q;
+      samp_i -= demod->DC_i;
+      samp_q -= demod->DC_q;
+
+      // accumulate I and Q energies before gain correction
+      samp_i_sq_sum += samp_i * samp_i;
+      samp_q_sq_sum += samp_q * samp_q;
+      
+      // Balance gains, keeping constant total energy
+      samp_i *= gain_i;                  samp_q *= gain_q;
+      
+      // Accumulate phase error
+      dotprod += samp_i * samp_q;
+
+      // Correct phase
+      samp_q = secphi * samp_q - tanphi * samp_i;
+      complex float samp = CMPLXF(samp_i,samp_q);
+      // Experimental notch filter
+      if(demod->nf)
+	samp = notch(demod->nf,samp);
+      
+      // Apply 2nd LO
+      samp *= demod->second_LO_phasor;
+      demod->second_LO_phasor *= demod->second_LO_phasor_step;
+      
+      // Apply Doppler if active
+      if(is_phasor_init(demod->doppler_phasor)){ // Initialized?
+	samp *= demod->doppler_phasor;
+	demod->doppler_phasor *= demod->doppler_phasor_step;
+	demod->doppler_phasor_step *= demod->doppler_phasor_step_step;
+      }
+      // Accumulate in filter input buffer
+      demod->filter_in->input.c[in_cnt++] = samp;
+      if(in_cnt == demod->filter_in->ilen){
+	// Filter buffer is full, execute it
+	execute_filter_input(demod->filter_in);
+	
+	// Update every fft block
+	// estimates of DC offset, signal powers and phase error
+	demod->DC_i += DC_alpha * (samp_i_sum - in_cnt * demod->DC_i);
+	demod->DC_q += DC_alpha * (samp_q_sum - in_cnt * demod->DC_q);
+	float block_energy = samp_i_sq_sum + samp_q_sq_sum;
+	demod->imbalance += Power_alpha * in_cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
+	demod->if_power += Power_alpha * (block_energy - in_cnt * demod->if_power); // Average IF power
+	
+	float dpn = 2 * dotprod / block_energy;
+	demod->sinphi += Power_alpha * in_cnt * (dpn - demod->sinphi);
+	gain_q = sqrtf(0.5 * (1 + demod->imbalance));
+	gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
+	secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
+	tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
+	
+	// Reset for next block
+	in_cnt = 0;
+	samp_i_sum = 0;
+	samp_q_sum = 0;
+	samp_i_sq_sum = 0;
+	samp_q_sq_sum = 0;
+	dotprod = 0;
+	
+	// Renormalize phasors
+	demod->second_LO_phasor /= cabs(demod->second_LO_phasor); // renormalize every block
+	if(is_phasor_init(demod->doppler_phasor)){
+	  demod->doppler_phasor /= cabs(demod->doppler_phasor);
+	  demod->doppler_phasor_step /= cabs(demod->doppler_phasor_step);
+	}
+      } // Every FFT block
+    } // for each sample in I/Q packet
+    free(pkt); pkt = NULL;
+  } // end of main loop
 }
-
-
-
 // The funcube dongle uses the Mirics MSi001 tuner. It has a fractional N synthesizer that can't actually do integer frequency steps.
 // This formula is hacked down from code from Howard Long; it's what he uses in the firmware so I can figure out
 // the *actual* frequency. Of course, we still have to correct it for the TCXO offset.
@@ -488,39 +517,7 @@ int set_cal(struct demod * const demod,double const cal){
   }
   return 0;
 }
-// Apply LO2 to input samples
-// Length of data input obtained from demod->filter->i_len
-int spindown(struct demod * const demod,complex float const * const data){
-  if(demod == NULL || data == NULL || demod->filter_in == NULL)
-    return -1;
 
-  struct filter_in * const filter = demod->filter_in;
-
-  pthread_mutex_lock(&demod->second_LO_mutex);
-  if(is_phasor_init(demod->second_LO_phasor)) { // Initialized?
-    // Apply 2nd LO, compute average pre-filter signal power
-    for(int n=0; n < filter->ilen; n++){
-      filter->input.c[n] = data[n] * demod->second_LO_phasor;
-      demod->second_LO_phasor *= demod->second_LO_phasor_step;
-    }
-    demod->second_LO_phasor /= cabs(demod->second_LO_phasor);
-  }
-  pthread_mutex_unlock(&demod->second_LO_mutex);
-  
-  // Apply Doppler, if active
-  pthread_mutex_lock(&demod->doppler_mutex);
-  if(is_phasor_init(demod->doppler_phasor)){ // Initialized?
-    for(int n=0; n < filter->ilen; n++){
-      filter->input.c[n] *= demod->doppler_phasor;
-      demod->doppler_phasor *= demod->doppler_phasor_step;
-      demod->doppler_phasor_step *= demod->doppler_phasor_step_step;
-    }
-    demod->doppler_phasor /= cabs(demod->doppler_phasor);
-    demod->doppler_phasor_step /= cabs(demod->doppler_phasor_step);
-  }
-  pthread_mutex_unlock(&demod->doppler_mutex);
-  return 0;
-}
 // Called from network packet receiver to process incoming metadata from SDR
 void update_status(struct demod *demod,struct status *new_status){
       // Protect status with a mutex and signal a condition when it changes
