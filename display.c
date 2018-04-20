@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.117 2018/04/15 08:56:49 karn Exp karn $
+// $Id: display.c,v 1.118 2018/04/18 20:54:07 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Copyright 2017 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -390,8 +390,13 @@ void *display(void *arg){
   mousemask(mask,NULL);
   MEVENT mouse_event;
 
+  struct timeval last_time;
+  gettimeofday(&last_time,NULL);
+  long long lastsamples = demod->samples;
+  float actual_sample_rate = demod->samprate; // Initialize with nominal
+
   for(;;){
-    // update display
+    // update display indefinitely, handle user commands
 
     // Tuning control window - these can be adjusted by the user
     // using the keyboard or tuning knob, so be careful with formatting
@@ -683,20 +688,26 @@ void *display(void *arg){
     col = 1;
     extern uint32_t Ssrc;
 
-    double run_time = demod->current_time.tv_sec - demod->start_time.tv_sec
-      + (demod->current_time.tv_usec - demod->start_time.tv_usec)/1.e6;
+    struct timeval current_time;
+    gettimeofday(&current_time,NULL);
+    double interval = current_time.tv_sec - last_time.tv_sec
+      + (current_time.tv_usec - last_time.tv_usec)/1.e6;
+    double instant_sample_rate = (demod->samples - lastsamples) / interval;
+    if(instant_sample_rate < 10*actual_sample_rate) // Suppress glitches, especially at startup. '10' is empirically determined
+      actual_sample_rate += .002 * (instant_sample_rate - actual_sample_rate); // .002 is empirical
 
-    double sample_rate = demod->samples/run_time;
+    last_time = current_time;
+    lastsamples = demod->samples;
 
     wmove(network,0,0);
     wclrtoeol(network);
     mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
     mvwprintw(network,row++,col,"IQ pkts %'llu samples %'llu rate %'.3lf Hz",
-	      demod->iq_packets,demod->samples,sample_rate);
-    if(demod->drops)
-      wprintw(network," drops %'llu",demod->drops);
-    if(demod->dupes)
-      wprintw(network," dupes %'llu",demod->dupes);
+	      demod->iq_packets,demod->samples,actual_sample_rate);
+    if(demod->rtp_state.drops)
+      wprintw(network," drops %'llu",demod->rtp_state.drops);
+    if(demod->rtp_state.dupes)
+      wprintw(network," dupes %'llu",demod->rtp_state.dupes);
 
     mvwprintw(network,row++,col,"Time: %s",lltime(demod->status.timestamp));
     mvwprintw(network,row++,col,"Sink: %s; ssrc %8x; TTL %d%s",audio->audio_mcast_address_text,
@@ -854,8 +865,8 @@ void *display(void *arg){
 	if(j != -1)
 	  close(j); // This should cause the input thread to see an error
 	strlcpy(demod->iq_mcast_address_text,str,sizeof(demod->iq_mcast_address_text));
-	// Reset error counts
-	demod->drops = demod->dupes = 0;
+	// Clear RTP receiver state
+	memset(&demod->rtp_state,0,sizeof(demod->rtp_state));
       }
       break;
     case 'l': // Toggle RF or first LO lock; affects how adjustments to LO and IF behave
