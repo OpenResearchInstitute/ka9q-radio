@@ -1,4 +1,4 @@
-// $Id: attr.c,v 1.1 2017/07/29 10:17:38 karn Exp karn $
+// $Id: attr.c,v 1.2 2018/04/09 21:16:13 karn Exp karn $
 // Read and write external file attributes
 // These are in a separate file mainly because they are so OS-dependent. And gratuitously so.
 // 29 July 2017 Phil Karn, KA9Q
@@ -33,8 +33,10 @@ int attrscanf(int fd,char const *name,char const *format, ...){
     return r;
   }
   char *value = alloca(r+1);
+#if !defined(NDEBUG)
   int r1 = fgetxattr(fd,temp,value,r);
   assert(r1 == r);
+#endif
   value[r] = '\0';
   free(temp);
 #else // mainly OSX
