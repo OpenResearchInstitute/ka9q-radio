@@ -1,4 +1,4 @@
-// $Id$
+// $Id: multicast.c,v 1.15 2018/04/15 04:09:28 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -238,3 +238,42 @@ unsigned char *hton_rtp(unsigned char *data, struct rtp_header *rtp){
   
   return data;
 }
+
+
+// Process sequence number and timestamp in incoming RTP header:
+// Check that the sequence number is (close to) what we expect
+// If not, drop it but 3 wild sequence numbers in a row will assume a stream restart
+//
+// Determine timestamp jump, if any
+// Returns: <0            if packet should be dropped as a duplicate or a wild sequence number
+//           0            if packet is in sequence with no missing timestamps
+//         timestamp jump if packet is in sequence or <10 sequence numbers ahead, with missing timestamps
+int rtp_process(struct rtp_state *state,struct rtp_header *rtp,int sampcnt){
+  if(!state->init){
+    state->expected_seq = rtp->seq;
+    state->expected_timestamp = rtp->timestamp;
+    state->init = 1;
+  }
+  // Sequence number check
+  short seq_step = (short)(rtp->seq - state->expected_seq);
+  if(seq_step < 0 || seq_step > 10){
+    if(++state->reseq < 3){ // Look for three consecutive out-of-sequence packets
+      if(seq_step > 0)
+	state->drops++;	  
+      else if(seq_step < 0)
+	state->dupes++;
+      return -1;
+    }
+    // Three invalid sequence numbers in a row; probably a restarted stream so accept this sequence number
+    state->reseq = 0;
+  }
+  state->expected_seq = rtp->seq + 1;
+
+  int time_step = (int)(rtp->timestamp - state->expected_timestamp);
+  if(time_step < 0)
+    return time_step;    // Old samples; drop. Shouldn't happen if sequence number isn't old
+
+  state->expected_timestamp = rtp->timestamp + sampcnt;
+  return time_step;
+}
+

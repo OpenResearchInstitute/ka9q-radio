@@ -29,4 +29,16 @@ struct rtp_header {
 unsigned char *ntoh_rtp(struct rtp_header *,unsigned char *);
 unsigned char *hton_rtp(unsigned char *, struct rtp_header *);
 
+struct rtp_state {
+  int init;
+  uint16_t expected_seq;
+  uint32_t expected_timestamp;
+  long long drops;
+  long long dupes;
+  int reseq;
+};
+
+int rtp_process(struct rtp_state *state,struct rtp_header *rtp,int samples);
+
+
 #endif
