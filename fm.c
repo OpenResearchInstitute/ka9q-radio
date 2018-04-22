@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.50 2018/04/04 01:38:50 karn Exp karn $
+// $Id: fm.c,v 1.51 2018/04/22 20:59:00 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -103,7 +103,7 @@ void *demod_fm(void *arg){
     avg_amp /= filter->olen;         // Average magnitude
     float const fm_variance = demod->bb_power - avg_amp*avg_amp;
     demod->snr = avg_amp*avg_amp/(2*fm_variance) - 1;
-    demod->snr = max(0,demod->snr); // Smoothed values can be a little inconsistent
+    demod->snr = max(0.0f,demod->snr); // Smoothed values can be a little inconsistent
 
     // Demodulated FM samples
     float samples[audio_master->ilen];

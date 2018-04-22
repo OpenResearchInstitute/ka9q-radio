@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.119 2018/04/20 06:24:50 karn Exp karn $
+// $Id: display.c,v 1.120 2018/04/22 18:45:06 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -542,7 +542,7 @@ void *display(void *arg){
     if(demod->filter_out != NULL)
       bw = demod->samprate * demod->filter_out->noise_gain;
     float sn0 = demod->bb_power / demod->n0 - bw;
-    sn0 = max(sn0,0); // Can go negative due to inconsistent smoothed values; clip it at zero
+    sn0 = max(sn0,0.0f); // Can go negative due to inconsistent smoothed values; clip it at zero
 
     row = 1;
     col = 1;
