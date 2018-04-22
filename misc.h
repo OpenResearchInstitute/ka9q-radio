@@ -1,4 +1,6 @@
-// $Id: misc.h,v 1.3 2018/02/26 22:50:47 karn Exp karn $
+// $Id: misc.h,v 1.4 2018/04/15 08:57:18 karn Exp karn $
+// Miscellaneous constants, macros and function prototypes
+// Copyright 2018 Phil Karn, KA9Q
 #ifndef _DSP_H
 #define _DSP_H 1
 
