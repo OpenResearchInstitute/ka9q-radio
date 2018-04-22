@@ -1,4 +1,5 @@
-// $Id: modulate.c,v 1.8 2018/02/06 11:46:44 karn Exp karn $ AM modulator - will eventually support other modes
+// $Id: modulate.c,v 1.9 2018/03/23 22:29:05 karn Exp karn $
+// Simple I/Q AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
 #include <stdio.h>
 #include <unistd.h>
@@ -94,8 +95,6 @@ int main(int argc,char *argv[]){
   if(-frequency > low && -frequency < high){
     fprintf(stderr,"Warning: low carrier frequency may interfere with receiver DC suppression\n");
   }
-
-
 
   frequency *= 2*M_PI/Samprate;       // radians/sample
   amplitude = pow(10.,amplitude/20.); // Convert to amplitude ratio
