@@ -1,7 +1,9 @@
-// $Id: gr.c,v 1.5 2017/05/20 01:16:56 karn Exp karn $
+// $Id: gr.c,v 1.6 2017/05/20 10:10:15 karn Exp karn $
 // Mirics default gain tables
 // Mirics SDR API specification, section 5
 // Return actual gain, which can be different from parameter if out of range
+// Orphaned file at present
+// Copyright 2018 Phil Karn, KA9Q
 #include <stdint.h>
 #include "sdr.h"
 
