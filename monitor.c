@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.64 2018/04/16 22:04:47 karn Exp karn $
+// $Id: monitor.c,v 1.65 2018/04/20 06:18:42 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -359,10 +359,9 @@ int main(int argc,char * const argv[]){
       struct packet *q_prev = NULL;
       struct packet *qe = NULL;
       pthread_mutex_lock(&sp->qmutex);
-      for(qe = sp->queue; qe; q_prev = qe,qe = qe->next){
-	if(pkt->rtp.seq < qe->rtp.seq)
-	  break;
-      }
+      for(qe = sp->queue; qe && pkt->rtp.seq >= qe->rtp.seq; q_prev = qe,qe = qe->next)
+	;
+
       pkt->next = qe;
       if(q_prev)
 	q_prev->next = pkt;
