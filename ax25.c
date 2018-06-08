@@ -1,4 +1,4 @@
-// $Id$
+// $Id: ax25.c,v 1.2 2018/04/22 22:31:51 karn Exp karn $
 // AX.25 frame header decoding (this takes me wayyyyy back)
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -24,7 +24,10 @@ char *get_callsign(char *result,unsigned char *in){
     callsign[i] = c;
   }
   int ssid = (in[6] >> 1) & 0xf;
-  snprintf(result,10,"%s-%d",callsign,ssid);
+  if(ssid != 0)
+    snprintf(result,10,"%s-%d",callsign,ssid);
+  else
+    snprintf(result,10,"%s",callsign);    
   return result;
 }
 
@@ -67,7 +70,9 @@ int dump_frame(unsigned char *frame,int bytes){
     else
       putchar(tolower(c));
   }
-  printf("-%d",(frame[13] >> 1) & 0xf); // SSID
+  int ssid = (frame[13] >> 1) & 0xf; // SSID
+  if(ssid > 0)
+    printf("-%d",ssid);
   
   printf(" -> ");
   
@@ -87,7 +92,8 @@ int dump_frame(unsigned char *frame,int bytes){
 	  putchar(tolower(c));
       }
       int ssid = frame[14 + 7*i + 6];
-      printf("-%d",(ssid>> 1) & 0xf); // SSID
+      if(ssid > 0)
+	printf("-%d",(ssid>> 1) & 0xf); // SSID
       printf(" -> ");
       if(ssid  & 0x1){ // Last one
 	control = frame + 14 + 7*i + 7;
@@ -102,7 +108,9 @@ int dump_frame(unsigned char *frame,int bytes){
       break;
     putchar(tolower(c));
   }
-  printf("-%d",(frame[6] >> 1) & 0xf); // SSID
+  ssid = (frame[6] >> 1) & 0xf; // SSID
+  if(ssid > 0)
+    printf("-%d",ssid);
 
   // Type field
   printf("; control = %02x",*control++ & 0xff);
