@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.95 2018/04/22 22:39:26 karn Exp karn $
+# $Id: Makefile,v 1.96 2018/06/08 06:24:01 karn Exp karn $
 #CC=g++
 INCLUDES=
 COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -26,7 +26,7 @@ clean:
 aprs: aprs.o ax25.o libradio.a
 	$(CC) -g -o $@ $^ -lbsd -lm
 
-aprsfeed: aprs.o ax25.o libradio.a
+aprsfeed: aprsfeed.o ax25.o libradio.a
 	$(CC) -g -o $@ $^ -lbsd -lm
 
 packet: packet.o libradio.a
@@ -70,7 +70,7 @@ libradio.a: am.o attr.o audio.o ax25.o bandplan.o display.o doppler.o filter.o f
 
 # Main programs
 aprs.o: aprs.c ax25.h multicast.h misc.h
-aprsfeed.o: aprs.c ax25.h multicast.h misc.h
+aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
 iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
 iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
