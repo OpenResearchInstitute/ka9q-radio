@@ -31,7 +31,7 @@ int Input_fd = -1;
 int All;
 int Network_fd = -1;
 
-int monstring(char *output,int outlen, unsigned char *packet,int pktlen);
+int monstring(char *output,int outlen, unsigned char *packet,int pktlen,char *extra);
 
 int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
@@ -117,7 +117,7 @@ int main(int argc,char *argv[]){
 		
     char outstring[1024];
     // pktlen includes the CRC, don't pass it to monstring
-    if(monstring(outstring,sizeof(outstring),packet,pktlen-2) < 0){
+    if(monstring(outstring,sizeof(outstring),packet,pktlen-2,"qAR,KA9Q-1") < 0){
       printf("error in monstring\n");
       continue;
     }
@@ -147,7 +147,7 @@ int main(int argc,char *argv[]){
 }
 
 // construct formatted string in TNC2 monitor format
-int monstring(char *output,int outlen, unsigned char *packet,int pktlen){
+int monstring(char *output,int outlen, unsigned char *packet,int pktlen,char *extra){
   // Ensure there's an end to the address field
   if(pktlen < 16) // 7+7+1+1 = 16
     return -1; // Too short
@@ -185,6 +185,16 @@ int monstring(char *output,int outlen, unsigned char *packet,int pktlen){
       return -1;
     totalwritten += written;
   }
+  if(extra){
+    written = snprintf(output,outlen,",%s",extra);
+    if(written < 0)
+      return written;
+    output += written; outlen -= written;    
+    if(outlen <= 0)
+      return -1;
+    totalwritten += written;
+  }
+
   i += 2; // Advance over type and protocol
   *output++ = ':';
   outlen--;
