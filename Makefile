@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.96 2018/06/08 06:24:01 karn Exp karn $
+# $Id: Makefile,v 1.97 2018/06/08 07:20:58 karn Exp karn $
 #CC=g++
 INCLUDES=
 COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -27,7 +27,7 @@ aprs: aprs.o ax25.o libradio.a
 	$(CC) -g -o $@ $^ -lbsd -lm
 
 aprsfeed: aprsfeed.o ax25.o libradio.a
-	$(CC) -g -o $@ $^ -lbsd -lm
+	$(CC) -g -o $@ $^ -lbsd -lm -lpthread
 
 packet: packet.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread 
