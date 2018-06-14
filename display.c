@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.124 2018/05/27 04:23:27 karn Exp karn $
+// $Id: display.c,v 1.125 2018/06/10 18:06:19 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -701,6 +701,8 @@ void *display(void *arg){
       wprintw(network," drops %'llu",demod->rtp_state.drops);
     if(demod->rtp_state.dupes)
       wprintw(network," dupes %'llu",demod->rtp_state.dupes);
+    if(demod->rtp_state.resyncs)
+      wprintw(network," resyncs %'llu",demod->rtp_state.resyncs);      
 
     mvwprintw(network,row++,col,"Time: %s",lltime(demod->status.timestamp));
     mvwprintw(network,row++,col,"Sink: %s; ssrc %8x; TTL %d%s",audio->audio_mcast_address_text,
