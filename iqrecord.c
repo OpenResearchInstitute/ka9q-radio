@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.15 2018/04/22 21:49:57 karn Exp karn $
+// $Id: iqrecord.c,v 1.16 2018/04/23 09:52:48 karn Exp karn $
 // Read and record complex I/Q stream or PCM baseband audio
 // This version reverts to file I/O from an unsuccessful experiment to use mmap()
 // Copyright 2018 Phil Karn, KA9Q
@@ -95,7 +95,8 @@ int main(int argc,char *argv[]){
 
   // Quickly drop root if we have it
   // The sooner we do this, the fewer options there are for abuse
-  seteuid(getuid());
+  if(seteuid(getuid()) != 0)
+    perror("seteuid");
   char *locale;
   locale = getenv("LANG");
   setlocale(LC_ALL,locale);

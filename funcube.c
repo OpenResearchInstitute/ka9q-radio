@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.32 2018/04/10 00:11:49 karn Exp karn $
+// $Id: funcube.c,v 1.33 2018/04/11 07:08:18 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -82,7 +82,8 @@ int main(int argc,char *argv[]){
 
   // Quickly drop root if we have it
   // The sooner we do this, the fewer options there are for abuse
-  seteuid(getuid());
+  if(seteuid(getuid()) != 0)
+    perror("seteuid");
 
   char *dest = "239.1.2.1"; // Default for testing
 

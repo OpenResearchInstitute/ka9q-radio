@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.68 2018/06/07 17:04:06 karn Exp karn $
+// $Id: monitor.c,v 1.69 2018/06/14 00:50:13 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -139,7 +139,8 @@ int main(int argc,char * const argv[]){
   // Try to improve our priority, then drop root
   int prio = getpriority(PRIO_PROCESS,0);
   prio = setpriority(PRIO_PROCESS,0,prio - 15);
-  seteuid(getuid());
+  if(seteuid(getuid()) != 0)
+    perror("seteuid");
 
   setlocale(LC_ALL,getenv("LANG"));
 

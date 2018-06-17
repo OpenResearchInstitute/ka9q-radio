@@ -1,4 +1,4 @@
-// $Id: opussend.c,v 1.13 2018/04/11 07:08:18 karn Exp karn $
+// $Id: opussend.c,v 1.14 2018/04/15 08:58:33 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -89,7 +89,8 @@ int main(int argc,char * const argv[]){
   prio = setpriority(PRIO_PROCESS,0,prio - 15);
 
   // Drop root if we have it
-  seteuid(getuid());
+  if(seteuid(getuid()) != 0)
+    perror("seteuid");
 
   setlocale(LC_ALL,getenv("LANG"));
 

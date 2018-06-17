@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.2 2018/06/08 06:58:34 karn Exp karn $
+// $Id: aprsfeed.c,v 1.3 2018/06/10 06:36:34 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -109,7 +109,10 @@ int main(int argc,char *argv[]){
   char *message;
   int mlen;
   mlen = asprintf(&message,"user %s pass %s vers KA9Q-aprs 1.0\r\n",User,Passcode);
-  write(Network_fd,message,mlen);
+  if(write(Network_fd,message,mlen) != mlen){
+    perror("Login write to network failed");
+    exit(1);
+  }
   free(message);
   }
   
@@ -209,8 +212,18 @@ int main(int argc,char *argv[]){
     }
 
     // Send to APRS network with appended crlf
-    write(Network_fd,monstring,sizeof(monstring) - sspace - 1);
-    write(Network_fd,"\r\n",2);
+    {
+      assert(sspace >= 2);
+      int len = strlen(monstring);
+      char *cp = monstring + len;
+      *cp++ = '\r';
+      *cp++ = '\n';
+      len += 2;
+      if(write(Network_fd,monstring,len) != len){
+	perror("network report write");
+	break;
+      }
+    }
   }
 }
 
@@ -223,7 +236,10 @@ void *netreader(void *arg){
     int r = read(Network_fd,&c,1);
     if(r < 0)
       break;
-    write(1,&c,1);
+    if(write(1,&c,1) != 1){
+      perror("server echo write");
+      break;
+    }
   }
   return NULL;
 }

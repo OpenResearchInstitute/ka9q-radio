@@ -1,4 +1,4 @@
-// $Id$
+// $Id: pcmsend.c,v 1.4 2018/04/22 18:12:56 karn Exp karn $
 // Multicast local audio source with PCM
 // Copyright April 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -90,7 +90,8 @@ int main(int argc,char * const argv[]){
   prio = setpriority(PRIO_PROCESS,0,prio - 15);
 
   // Drop root if we have it
-  seteuid(getuid());
+  if(seteuid(getuid()) != 0)
+    perror("seteuid");
 
   setlocale(LC_ALL,getenv("LANG"));
 

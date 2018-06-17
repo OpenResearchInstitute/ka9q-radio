@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.110 2018/04/23 09:56:32 karn Exp karn $
+// $Id: main.c,v 1.111 2018/06/10 06:35:43 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -80,7 +80,8 @@ int main(int argc,char *argv[]){
 
   // Quickly drop root if we have it
   // The sooner we do this, the fewer options there are for abuse
-  seteuid(getuid());
+  if(seteuid(getuid()) != 0)
+    perror("seteuid");
 
   // Set up program defaults
   // Some can be overridden by state file or command line args
