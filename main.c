@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.111 2018/06/10 06:35:43 karn Exp karn $
+// $Id: main.c,v 1.112 2018/06/17 20:23:41 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -327,9 +327,9 @@ void *rtp_recv(void *arg){
       size -= dp[size-1];
       pkt->rtp.pad = 0;
     }
-    if(pkt->rtp.type != IQ_PT)
+    if(pkt->rtp.type != IQ_PT && pkt->rtp.type != IQ_PT8)
       continue; // Wrong type
-
+  
     // Note these are in host byte order, i.e., *little* endian because we don't have to interoperate with anything else
     struct status new_status;
     new_status.timestamp = *(long long *)dp;

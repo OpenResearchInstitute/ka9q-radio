@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.85 2018/04/22 18:05:02 karn Exp karn $
+// $Id: radio.c,v 1.86 2018/05/02 01:27:50 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -43,7 +43,8 @@ const int ADC_samprate = 192000;
 
 float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset estimates, per sample
 float const Power_alpha = 0.00001; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
-float const SCALE = 1./SHRT_MAX;   // Scale signed 16-bit int to float in range -1, +1
+float const SCALE16 = 1./SHRT_MAX; // Scale signed 16-bit int to float in range -1, +1
+float const SCALE8 = 1./127;       // Scale signed 8-bit int to float in range -1, +1
 
 void *proc_samples(void *arg){
   // gain and phase balance coefficients
@@ -73,7 +74,16 @@ void *proc_samples(void *arg){
     demod->queue = pkt->next;
     pthread_mutex_unlock(&demod->qmutex);
 
-    int sampcount = pkt->len / (2 * sizeof(signed short));
+    int sampcount;
+
+    switch(pkt->rtp.type){
+    case IQ_PT:
+      sampcount = pkt->len / (2 * sizeof(signed short));
+      break;
+    case IQ_PT8:
+      sampcount = pkt->len / (2 * sizeof(signed char));
+      break;
+    }
     int time_step = rtp_process(&demod->rtp_state,&pkt->rtp,sampcount);
     if(time_step < 0 || time_step > 192000){
       // Old samples, or too big a jump; drop. Shouldn't happen if sequence number isn't old
@@ -103,12 +113,23 @@ void *proc_samples(void *arg){
     }
     // Process individual samples
     signed short *sp = (signed short *)pkt->data;
+    signed char *cp = (signed char *)pkt->data;
     demod->samples += sampcount;
 
     while(sampcount--){
 
-      float samp_i = *sp++ * SCALE;
-      float samp_q = *sp++ * SCALE;
+      float samp_i,samp_q;
+
+      switch(pkt->rtp.type){
+      case IQ_PT:
+	samp_i = *sp++ * SCALE16;
+	samp_q = *sp++ * SCALE16;
+	break;
+      case IQ_PT8:
+	samp_i = *cp++ * SCALE8;
+	samp_q = *cp++ * SCALE8;
+	break;
+      }
 
       // Remove and update DC offsets
       samp_i_sum += samp_i;
