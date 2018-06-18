@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.87 2018/06/18 21:08:53 karn Exp karn $
+// $Id: radio.c,v 1.88 2018/06/18 21:11:49 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -77,6 +77,7 @@ void *proc_samples(void *arg){
     int sampcount;
 
     switch(pkt->rtp.type){
+    default: // Shut up lint
     case IQ_PT:
       sampcount = pkt->len / (2 * sizeof(signed short));
       break;
