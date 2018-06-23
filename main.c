@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.112 2018/06/17 20:23:41 karn Exp karn $
+// $Id: main.c,v 1.113 2018/06/18 21:08:53 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -124,7 +124,6 @@ int main(int argc,char *argv[]){
   demod->headroom = pow(10.,-15./20); // -15 dB
   strlcpy(audio->audio_mcast_address_text,"pcm.hf.mcast.local",sizeof(audio->audio_mcast_address_text));
   demod->tunestep = 0;  // single digit hertz position
-  demod->calibrate = 0;
   demod->imbalance = 1; // 0 dB
 
   // set invalid to start
@@ -134,7 +133,7 @@ int main(int argc,char *argv[]){
   set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "c:d:f:I:k:l:L:m:M:r:R:qs:t:T:u:v";
+  char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:v";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -147,9 +146,6 @@ int main(int argc,char *argv[]){
   int c;
   while((c = getopt(argc,argv,optstring)) != EOF){
     switch(c){
-    case 'c':   // SDR TCXO and A/D clock calibration in parts per million
-      set_cal(demod,1e-6*strtod(optarg,NULL));
-      break;
     case 'd':
       demod->doppler_command = optarg;
       break;
@@ -203,7 +199,7 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-c calibrate_ppm] [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-q] [-R Audio multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v]\n",argv[0]);
+      fprintf(stderr,"Usage: %s [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-q] [-R Audio multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v]\n",argv[0]);
       exit(1);
       break;
     }
@@ -364,39 +360,6 @@ void *rtp_recv(void *arg){
     pthread_mutex_unlock(&demod->qmutex);
   }      
   return NULL;
-}
- 
-// Load calibration factor for specified sending IP
-int loadcal(struct demod *demod){
-  FILE *fp;
-  char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,demod->iq_mcast_address_text);
-
-  if((fp = fopen(pathname,"r")) == NULL){
-    fprintf(stderr,"Can't read calibration file %s\n",pathname);
-    return -1;
-  }
-  double calibrate;
-  if(fscanf(fp,"%lg",&calibrate) == 1){
-    set_cal(demod,calibrate);
-  }
-  fclose(fp);
-  return 0;
-}
-// Save calibration factor for specified mcast group (assumes only one sender)
-int savecal(struct demod *demod){
-  // Dump receiver state to file
-  FILE *fp;
-  char pathname[PATH_MAX];
-  snprintf(pathname,sizeof(pathname),"%s/calibrate-%s",Statepath,demod->iq_mcast_address_text);
-
-  if((fp = fopen(pathname,"w")) == NULL){
-    fprintf(stderr,"Can't write calibration file %s\n",pathname);
-    return -1;
-  }
-  fprintf(fp,"%lg\n",demod->calibrate);
-  fclose(fp);
-  return 0;
 }
 
 

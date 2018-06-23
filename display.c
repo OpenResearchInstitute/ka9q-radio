@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.125 2018/06/10 18:06:19 karn Exp karn $
+// $Id: display.c,v 1.126 2018/06/14 00:50:13 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -142,13 +142,10 @@ void adjust_item(struct demod *demod,int direction){
       set_freq(demod,get_freq(demod) + tunestep,NAN);
     break;
   case 2: // First LO
-    if(fabs(tunestep) < 1)
-      break; // First LO can't make steps < 1  Hz
-    
     if(demod->tuner_lock) // Tuner is locked, don't change it
       break;
 
-    // Keep frequency but move LO2, which will move LO1
+    // Keep frequency but move LO2, which will move LO1 (if it can move)
     double new_lo2 = demod->second_LO + tunestep;
     if(LO2_in_range(demod,new_lo2,0))
       set_freq(demod,get_freq(demod),new_lo2);
@@ -595,10 +592,6 @@ void *display(void *arg){
     col = 1;
     mvwprintw(sdr,row,col,"%'18d Hz",demod->status.samprate); // Nominal
     mvwaddstr(sdr,row++,col,"Samprate");
-    mvwprintw(sdr,row,col,"%'18.0f Hz",demod->status.frequency); // Integer for now (SDR dependent)
-    mvwaddstr(sdr,row++,col,"LO");
-    mvwprintw(sdr,row,col,"%'+18.5f ppm",demod->calibrate *1e6);
-    mvwaddstr(sdr,row++,col,"TCXO cal");
     mvwprintw(sdr,row,col,"%+18.6f",demod->DC_i);  // Scaled to +/-1
     mvwaddstr(sdr,row++,col,"I offset");
     mvwprintw(sdr,row,col,"%+18.6f",demod->DC_q);
@@ -629,11 +622,6 @@ void *display(void *arg){
       wattron(options,A_UNDERLINE);      
     mvwprintw(options,row++,col,"PLL");
     wattroff(options,A_UNDERLINE);
-
-    if(demod->flags & CAL)
-      wattron(options,A_UNDERLINE);
-    mvwprintw(options,row++,col,"Calibrate");
-    wattroff(options,A_UNDERLINE);      
 
     if(demod->flags & SQUARE)
       wattron(options,A_UNDERLINE);            
@@ -693,7 +681,7 @@ void *display(void *arg){
     lastsamples = demod->samples;
 
     wmove(network,0,0);
-    wclrtoeol(network);
+    wclrtobot(network);
     mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
     mvwprintw(network,row++,col,"IQ pkts %'llu samples %'llu rate %'.3lf Hz",
 	      demod->rtp_state.packets,demod->samples,actual_sample_rate);
@@ -917,16 +905,6 @@ void *display(void *arg){
 	demod->L = i;
 	demod->M = demod->L + 1;
 	set_mode(demod,demod->mode,0); // Restart demod thread
-      }
-      break;
-    case 'c':   // TCXO calibration offset, also affects sampling clock
-      {
-	char str[160],*ptr;
-	getentry("Enter calibration offset in ppm: ",str,sizeof(str));
-	double const f = strtod(str,&ptr);
-	if(ptr == str)
-	  break;
-	set_cal(demod,f * 1e-6);
       }
       break;
     case 'm': // Manually set modulation mode
