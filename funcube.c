@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.33 2018/04/11 07:08:18 karn Exp karn $
+// $Id: funcube.c,v 1.34 2018/06/17 20:23:41 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -37,6 +37,8 @@ struct sdrstate {
 
   struct status status;     // Frequency and gain settings, grouped for transmission in RTP packet
 
+  unsigned int intfreq;              // Nominal (uncorrected) tuner frequency
+
   // Analog gain settings
   int agc_holdoff;
   int agc_holdoff_count;
@@ -65,10 +67,13 @@ int Blocksize = 240;
 int Dongle = 0;
 char *Locale;
 
+double Calibration = 0;
+
 
 void *fcd_command(void *arg);
 int process_fc_command(char *,int);
 double set_fc_LO(double);
+double fcd_actual(unsigned int u32Freq);
 
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 int Ctl_sock;
@@ -92,8 +97,11 @@ int main(int argc,char *argv[]){
     Locale = "en_US.UTF-8";
 
   int c;
-  while((c = getopt(argc,argv,"d:vp:l:b:oR:T:")) != EOF){
+  while((c = getopt(argc,argv,"c:d:vp:l:b:oR:T:")) != EOF){
     switch(c){
+    case 'c':
+      Calibration = strtod(optarg,NULL) * 1e-6; // Calibration offset in ppm
+      break;
     case 'R':
       dest = optarg;
       break;
@@ -122,6 +130,29 @@ int main(int argc,char *argv[]){
 
   setlocale(LC_ALL,Locale);
   
+  // Load/save calibration file
+  {
+    char *calfilename = NULL;
+    
+    asprintf(&calfilename,"%s/.radiostate/cal-funcube-%d",getenv("HOME"),Dongle);
+    if(calfilename){
+      FILE *calfp = NULL;
+      if(Calibration == 0){
+	if((calfp = fopen(calfilename,"r")) != NULL){
+	  fscanf(calfp,"%lg",&Calibration);
+	}
+      } else {
+	if((calfp = fopen(calfilename,"w")) != NULL){
+	  fprintf(calfp,"%.6lg",Calibration);
+	}
+      }
+      if(calfp)
+	fclose(calfp);
+      free(calfilename);
+    }
+  }
+  
+
   // Set up RTP output socket
   Rtp_sock = setup_mcast(dest,1);
   if(Rtp_sock == -1){
@@ -296,9 +327,8 @@ int front_end_init(int dongle, int samprate,int L){
     goto done;
   }
   // Load current tuner state
-  int intfreq;
-  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_FREQ_HZ,(unsigned char *)&intfreq,sizeof(intfreq));
-  FCD.status.frequency = intfreq;
+  fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_FREQ_HZ,(unsigned char *)&FCD.intfreq,sizeof(FCD.intfreq));
+  FCD.status.frequency = fcd_actual(FCD.intfreq) * (1 + Calibration);
 
   fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
   fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
@@ -437,9 +467,8 @@ void *fcd_command(void *arg){
       fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_LNA_GAIN,&FCD.status.lna_gain,sizeof(FCD.status.lna_gain));
       fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_MIXER_GAIN,&FCD.status.mixer_gain,sizeof(FCD.status.mixer_gain));
       fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_IF_GAIN1,&FCD.status.if_gain,sizeof(FCD.status.if_gain));
-      int intfreq;
-      fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_FREQ_HZ,(unsigned char *)&intfreq,sizeof(intfreq));
-      FCD.status.frequency = intfreq;
+      fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_FREQ_HZ,(unsigned char *)&FCD.intfreq,sizeof(FCD.intfreq));
+      FCD.status.frequency = fcd_actual(FCD.intfreq) * (1 + Calibration);
       goto done;
     } 
     // A command arrived, read it
@@ -484,13 +513,13 @@ void *fcd_command(void *arg){
       fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_IF_GAIN1,&FCD.status.if_gain,sizeof(FCD.status.if_gain));
     }
     if(requested_status.frequency > 0 && FCD.status.frequency != requested_status.frequency){
-      int intfreq;
       
 #if 0
       fprintf(stderr,"tuner frequency %lf\n",requested_status.frequency);
 #endif
-      intfreq = FCD.status.frequency = requested_status.frequency;
-      fcdAppSetFreq(FCD.phd,intfreq);
+      FCD.intfreq = round(requested_status.frequency/ (1 + Calibration));
+      fcdAppSetFreq(FCD.phd,FCD.intfreq);
+      FCD.status.frequency = fcd_actual(FCD.intfreq) * (1 + Calibration);
     }
   done:;
     if(No_hold_open && FCD.phd != NULL){
@@ -505,19 +534,20 @@ void *display(void *arg){
   pthread_setname("funcube-disp");
   float powerdB;
 
-  fprintf(stderr,"Frequency      LNA  Mix   IF   A/D\n");
-  fprintf(stderr,"Hz                        dB  dBFS\n");
+  fprintf(stderr,"Nom frequency  LNA  Mix   IF   A/D   Offset\n");
+  fprintf(stderr,"Hz                        dB  dBFS   ppm\n");
 
   while(1){
     // This is +3dB for both channels carrying a maximum amplitude square wave
     powerdB = 10*log10f(FCD.power) - 90.309; // voltage ratio of 32768 -> +90.309 dB
 
-    fprintf(stderr,"%'-15.0lf%3d%5d%5d%'6.1f\r",
-	    FCD.status.frequency,
+    fprintf(stderr,"%'-15u%3d%5d%5d%'6.1f   %.6lf\r",
+	    FCD.intfreq,
 	    FCD.status.lna_gain,
 	    FCD.status.mixer_gain,
 	    FCD.status.if_gain,
-	    powerdB);
+	    powerdB,
+	    Calibration * 1e6) ;
     usleep(100000); // 10 Hz
   }
   return NULL;
@@ -532,4 +562,68 @@ void closedown(int a){
     fprintf(stderr,"funcube: caught signal %d: %s\n",a,strsignal(a));
   snd_pcm_drop(FCD.sdr_handle);
   exit(1);
+}
+// The funcube dongle uses the Mirics MSi001 tuner. It has a fractional N synthesizer that can't actually do integer frequency steps.
+// This formula is hacked down from code from Howard Long; it's what he uses in the firmware so I can figure out
+// the *actual* frequency. Of course, we still have to correct it for the TCXO offset.
+
+// This needs to be generalized since other tuners will be completely different!
+double fcd_actual(unsigned int u32Freq){
+  typedef unsigned int UINT32;
+  typedef unsigned long long UINT64;
+
+  const UINT32 u32Thresh = 3250U;
+  const UINT32 u32FRef = 26000000U;
+  double f64FAct;
+  
+  struct
+  {
+    UINT32 u32Freq;
+    UINT32 u32FreqOff;
+    UINT32 u32LODiv;
+  } *pts,ats[]=
+      {
+	{4000000U,130000000U,16U},
+	{8000000U,130000000U,16U},
+	{16000000U,130000000U,16U},
+	{32000000U,130000000U,16U},
+	{75000000U,130000000U,16U},
+	{125000000U,0U,32U},
+	{142000000U,0U,16U},
+	{148000000U,0U,16U},
+	{300000000U,0U,16U},
+	{430000000U,0U,4U},
+	{440000000U,0U,4U},
+	{875000000U,0U,4U},
+	{UINT32_MAX,0U,2U},
+	{0U,0U,0U}
+      };
+  for(pts = ats; u32Freq >= pts->u32Freq; pts++)
+    ;
+
+  if (pts->u32Freq == 0)
+    pts--;
+      
+  // Frequency of synthesizer before divider - can possibly exceed 32 bits, so it's stored in 64
+  UINT64 u64FSynth = ((UINT64)u32Freq + pts->u32FreqOff) * pts->u32LODiv;
+
+  // Integer part of divisor ("INT")
+  UINT32 u32Int = u64FSynth / (u32FRef*4);
+
+  // Subtract integer part to get fractional and AFC parts of divisor ("FRAC" and "AFC")
+  UINT32 u32Frac4096 =  (u64FSynth<<12) * u32Thresh/(u32FRef*4) - (u32Int<<12) * u32Thresh;
+
+  // FRAC is higher 12 bits
+  UINT32 u32Frac = u32Frac4096>>12;
+
+  // AFC is lower 12 bits
+  UINT32 u32AFC = u32Frac4096 - (u32Frac<<12);
+      
+  // Actual tuner frequency, in floating point, given specified parameters
+  f64FAct = (4.0 * u32FRef / (double)pts->u32LODiv) * (u32Int + ((u32Frac * 4096.0 + u32AFC) / (u32Thresh * 4096.))) - pts->u32FreqOff;
+  
+  // double f64step = ( (4.0 * u32FRef) / (pts->u32LODiv * (double)u32Thresh) ) / 4096.0;
+  //      printf("f64step = %'lf, u32LODiv = %'u, u32Frac = %'d, u32AFC = %'d, u32Int = %'d, u32Thresh = %'d, u32FreqOff = %'d, f64FAct = %'lf err = %'lf\n",
+  //	     f64step, pts->u32LODiv, u32Frac, u32AFC, u32Int, u32Thresh, pts->u32FreqOff,f64FAct,f64FAct - u32Freq);
+  return f64FAct;
 }
