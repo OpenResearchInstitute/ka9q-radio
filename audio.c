@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.68 2018/04/22 08:56:24 karn Exp karn $
+// $Id: audio.c,v 1.69 2018/04/22 18:23:14 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -22,12 +22,11 @@
 #include "multicast.h"
 
 #define PCM_BUFSIZE 480        // 16-bit word count; must fit in Ethernet MTU
+#define PACKETSIZE 2048        // Somewhat larger than Ethernet MTU
 
 uint16_t Rtp_seq = 0;
 uint32_t Ssrc;
 uint32_t Timestamp;
-
-
 
 static short const scaleclip(float const x){
   if(x >= 1.0)
@@ -68,7 +67,7 @@ int send_stereo_audio(struct audio * const audio,float const * buffer,int size){
       } else
 	rtp.marker = 0;
       rtp.seq = Rtp_seq++;
-      unsigned char packet[2048],*dp;
+      unsigned char packet[PACKETSIZE],*dp;
       dp = packet;
 
       dp = hton_rtp(dp,&rtp);
@@ -117,7 +116,7 @@ int send_mono_audio(struct audio * const audio,float const * buffer,int size){
       } else
 	rtp.marker = 0;
       rtp.seq = Rtp_seq++;
-      unsigned char packet[2048];
+      unsigned char packet[PACKETSIZE];
       unsigned char *dp = packet;
 
       dp = hton_rtp(dp,&rtp);
