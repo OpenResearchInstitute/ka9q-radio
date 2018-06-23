@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.97 2018/06/08 07:20:58 karn Exp karn $
+# $Id: Makefile,v 1.98 2018/06/10 06:45:31 karn Exp karn $
 #CC=g++
 INCLUDES=
 COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,7 +6,7 @@ COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
-EXECS=aprs funcube iqplay iqrecord modulate monitor opus opussend packet radio pcmsend aprsfeed
+EXECS=aprs funcube iqplay iqrecord modulate monitor opus opussend packet radio pcmsend aprsfeed hackrf
 AFILES=bandplan.txt help.txt modes.txt
 
 
@@ -44,6 +44,9 @@ pcmsend: pcmsend.o libradio.a
 funcube: funcube.o libradio.a libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lbsd -lm -lpthread
 
+hackrf: hackrf.o libradio.a 
+	$(CC) -g -o $@ $^ -lhackrf -lbsd -lm -lpthread
+
 iqplay: iqplay.o libradio.a
 	$(CC) -g -o $@ $^ -lbsd -lm -lpthread
 
@@ -72,6 +75,7 @@ libradio.a: am.o attr.o audio.o ax25.o bandplan.o display.o doppler.o filter.o f
 aprs.o: aprs.c ax25.h multicast.h misc.h
 aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
+hackrf.o: hackrf.c sdr.h radio.h misc.h multicast.h
 iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
 iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
 main.o: main.c radio.h sdr.h filter.h misc.h audio.h multicast.h

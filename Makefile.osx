@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.41 2018/06/08 06:24:01 karn Exp karn $
+# $Id: Makefile.osx,v 1.42 2018/06/10 06:45:31 karn Exp karn $
 #CC=g++
 GCC=g++
 #COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
@@ -6,7 +6,7 @@ CFLAGS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cf
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
-EXECS=aprs iqplay iqrecord modulate monitor opus opussend packet radio pcmsend aprsfeed
+EXECS=aprs iqplay iqrecord modulate monitor opus opussend packet radio pcmsend aprsfeed hackrf
 AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)
@@ -27,6 +27,9 @@ aprs: aprs.o ax25.o libradio.a
 
 aprsfeed: aprsfeed.o ax25.o libradio.a
 	$(CC) -g -o $@ $^ -lm -lpthread
+
+hackrf: hackrf.o libradio.a
+	$(CC) -g -o $@ $^ -lhackrf -lm -lpthread
 
 packet: packet.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lm -lpthread 
