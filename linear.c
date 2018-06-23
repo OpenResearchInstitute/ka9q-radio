@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.19 2018/02/26 08:51:19 karn Exp karn $
+// $Id: linear.c,v 1.20 2018/04/22 22:13:15 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -107,7 +107,6 @@ void *demod_linear(void *arg){
   float delta_f = 0;                    // FFT-derived offset
   float ramp = 0;                       // Frequency sweep (do we still need this?)
   int lock_count = 0;
-  float calibrate_offset = 0;           // Frequency error for calibration mode
   int pll_lock = 0;
 
   while(!demod->terminate){
@@ -237,15 +236,6 @@ void *demod_linear(void *arg){
       else if((feedback <= binsize) && (ramp < 0))
 	ramp = ramprate;  // Reached downward sweep limit, sweep up
       
-      if((demod->flags & CAL) && pll_lock){
-	// In calibrate mode, keep highly smoothed estimate of frequency offset
-	// Apply this to calibration estimate below
-	calibrate_offset += .01 * (feedback + delta_f - calibrate_offset);
-	// apply and clear the current measured offset
-	set_cal(demod,demod->calibrate - calibrate_offset/get_freq(demod));
-	calibrate_offset = 0;
-	savecal(demod);
-      }
       if(isnan(demod->foffset))
 	demod->foffset = feedback + delta_f;
       else
