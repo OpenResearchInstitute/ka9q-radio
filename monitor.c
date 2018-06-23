@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.69 2018/06/14 00:50:13 karn Exp karn $
+// $Id: monitor.c,v 1.70 2018/06/17 20:23:41 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -99,6 +99,7 @@ struct session *Current;
 
 unsigned long long Samples;
 unsigned long long Callbacks;
+pthread_t Display_task;
 
 
 void cleanup(void){
@@ -271,10 +272,9 @@ int main(int argc,char * const argv[]){
   signal(SIGHUP,closedown);  
   signal(SIGPIPE,SIG_IGN);
 
-  if(!Quiet){
-    pthread_t display_task;
-    pthread_create(&display_task,NULL,display,NULL);
-  }
+  if(!Quiet)
+    pthread_create(&Display_task,NULL,display,NULL);
+
   struct sockaddr sender;
 
   // Do this at the last minute at startup since the upcall will come quickly
