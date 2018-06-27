@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.89 2018/06/18 21:13:22 karn Exp karn $
+// $Id: radio.c,v 1.90 2018/06/23 01:48:41 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -129,7 +129,6 @@ void *proc_samples(void *arg){
 	samp_q = *cp++ * SCALE8;
 	break;
       }
-#if 1
       // Remove and update DC offsets
       samp_i_sum += samp_i;
       samp_q_sum += samp_q;
@@ -148,7 +147,6 @@ void *proc_samples(void *arg){
 
       // Correct phase
       samp_q = secphi * samp_q - tanphi * samp_i;
-#endif      
       complex float samp = CMPLXF(samp_i,samp_q);
       // Experimental notch filter
       if(demod->nf)
@@ -170,7 +168,6 @@ void *proc_samples(void *arg){
 	// Filter buffer is full, execute it
 	execute_filter_input(demod->filter_in);
 	
-#if 1
 	// Update every fft block
 	// estimates of DC offset, signal powers and phase error
 	demod->DC_i += DC_alpha * (samp_i_sum - in_cnt * demod->DC_i);
@@ -178,14 +175,14 @@ void *proc_samples(void *arg){
 	float block_energy = samp_i_sq_sum + samp_q_sq_sum;
 	demod->imbalance += Power_alpha * in_cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
 	demod->if_power += Power_alpha * (block_energy - in_cnt * demod->if_power); // Average IF power
-	
+
 	float dpn = 2 * dotprod / block_energy;
 	demod->sinphi += Power_alpha * in_cnt * (dpn - demod->sinphi);
 	gain_q = sqrtf(0.5 * (1 + demod->imbalance));
 	gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
 	secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
 	tanphi = demod->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
-#endif	
+
 	// Reset for next block
 	in_cnt = 0;
 	samp_i_sum = 0;
