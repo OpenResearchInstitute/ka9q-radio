@@ -1,8 +1,8 @@
-# $Id: Makefile,v 1.98 2018/06/10 06:45:31 karn Exp karn $
+# $Id: Makefile,v 1.99 2018/06/23 01:50:10 karn Exp karn $
 #CC=g++
 INCLUDES=
 COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-#COPTS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+#COPTS=-pg -no-pie -g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -67,7 +67,7 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
-libradio.a: am.o attr.o audio.o ax25.o bandplan.o display.o doppler.o filter.o fm.o knob.o linear.o misc.o modes.o multicast.o radio.o touch.o
+libradio.a: am.o attr.o audio.o ax25.o bandplan.o display.o doppler.o filter.o fm.o knob.o linear.o misc.o modes.o multicast.o radio.o touch.o decimate.o window.o 
 	ar rv $@ $^
 	ranlib $@
 
@@ -75,11 +75,11 @@ libradio.a: am.o attr.o audio.o ax25.o bandplan.o display.o doppler.o filter.o f
 aprs.o: aprs.c ax25.h multicast.h misc.h
 aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
-hackrf.o: hackrf.c sdr.h radio.h misc.h multicast.h
+hackrf.o: hackrf.c sdr.h radio.h misc.h multicast.h decimate.h 
 iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
 iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
-main.o: main.c radio.h sdr.h filter.h misc.h audio.h multicast.h
-modulate.o: modulate.c misc.h filter.h radio.h sdr.h
+main.o: main.c radio.h sdr.h filter.h misc.h audio.h multicast.h window.h
+modulate.o: modulate.c misc.h filter.h radio.h sdr.h window.h
 monitor.o: monitor.c misc.h multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
@@ -91,20 +91,22 @@ fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
 hid-libusb.o: hid-libusb.c hidapi.h
 
 # Components of libradio.a
-am.o: am.c misc.h filter.h radio.h audio.h sdr.h
+am.o: am.c misc.h filter.h radio.h audio.h sdr.h window.h
 attr.o: attr.c attr.h
 audio.o: audio.c misc.h audio.h multicast.h
 ax25.o: ax25.c ax25.h
 bandplan.o: bandplan.c bandplan.h
-display.o: display.c radio.h sdr.h audio.h misc.h filter.h bandplan.h multicast.h
+decimate.o: decimate.c decimate.h
+display.o: display.c radio.h sdr.h audio.h misc.h filter.h bandplan.h multicast.h window.h
 doppler.o: doppler.c radio.h sdr.h misc.h
-filter.o: filter.c misc.h filter.h
-fm.o: fm.c misc.h filter.h radio.h sdr.h audio.h
+filter.o: filter.c misc.h filter.h window.h
+fm.o: fm.c misc.h filter.h radio.h sdr.h audio.h window.h
 knob.o: knob.c misc.h
-linear.o: linear.c misc.h filter.h radio.h sdr.h audio.h
+linear.o: linear.c misc.h filter.h radio.h sdr.h audio.h window.h
 misc.o: misc.c radio.h sdr.h
 modes.o: modes.c radio.h sdr.h misc.h
 multicast.o: multicast.c multicast.h
-packet.o: packet.c filter.h misc.h multicast.h ax25.h
-radio.o: radio.c radio.h sdr.h filter.h misc.h audio.h 
+packet.o: packet.c filter.h misc.h multicast.h ax25.h window.h
+radio.o: radio.c radio.h sdr.h filter.h misc.h audio.h  window.h
 touch.o: touch.c misc.h
+window.o: window.c window.h
