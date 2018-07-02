@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.19 2018/06/14 00:50:13 karn Exp karn $
+// $Id: multicast.c,v 1.20 2018/06/23 01:48:19 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -239,6 +239,7 @@ unsigned char *hton_rtp(unsigned char *data, struct rtp_header *rtp){
 //           0            if packet is in sequence with no missing timestamps
 //         timestamp jump if packet is in sequence or <10 sequence numbers ahead, with missing timestamps
 int rtp_process(struct rtp_state *state,struct rtp_header *rtp,int sampcnt){
+  state->ssrc = rtp->ssrc; // Must be filtered elsewhere if you want it
   state->packets++;
   if(!state->init){
     state->expected_seq = rtp->seq;
@@ -258,6 +259,7 @@ int rtp_process(struct rtp_state *state,struct rtp_header *rtp,int sampcnt){
     }
     // Three invalid sequence numbers in a row; probably a restarted stream so accept this sequence number
     state->drops = state->dupes = 0; // Not really meaningful after a resync
+    state->expected_timestamp = rtp->timestamp;
     state->resyncs++;
   }
   state->seq_err = 0;
