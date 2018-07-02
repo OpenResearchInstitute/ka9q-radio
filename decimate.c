@@ -1,90 +1,130 @@
-// Cascaded half-band filters for sample rate decimation by powers of 2
+// half-band filter for sample rate decimation by powers of 2
 #include <complex.h>
 #include <math.h>
 #include <string.h>
 #include <assert.h>
-#include "window.h"
 #include "decimate.h"
 
+// Pick up vectorized versions if available
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+  #include <x86intrin.h>  // GCC-compatible compiler, targeting x86/x86-64
+#elif defined(__GNUC__) && defined(__ARM_NEON__)
+  #include <arm_neon.h>  // GCC-compatible compiler, targeting ARM with NEON
+#endif
 
-struct decimate_state Filters[N];
+/* Folded half-band 15-tap filter
+   Only four non-unity coefficents are needed
+   Note ordering of coefficients: coeff[0] is at the tails, not the center
+
+  |--   even[3]   even[2]    even[1]    even[0]  <-- in first
+  v
+drop
+
+  --     odd[3]    odd[2]     odd[1]     odd[0]  <-- in second
+  |
+  |       +         +          +          +
+  |
+  |-->oldodd[3]  oldodd[2]  oldodd[1]  oldodd[0] --------|
+          *          *           *          *            v
+       coeff[3]   coeff[2]   coeff[1]   coeff[0]        drop
+          v          v           v          v
+        temp[3]    temp[2]    temp[1]    temp[0]
+       sum(temp[3...0] + even[3]) to give output
+ */
 
 
-static float sincf(float x){
-  if(x == 0)
-    return 1;
-  return sinf(x) / x;
-}
+// x86 vectorized version: SSSE3 or better for horizontal add
+#ifdef __SSSE3__
 
+#define shiftleft(arg,n) _mm_castsi128_ps(_mm_bslli_si128(_mm_castps_si128(arg),4*n))
+#define shiftright(arg,n) _mm_castsi128_ps(_mm_bsrli_si128(_mm_castps_si128(arg),4*n))
 
-int decimate_setup(float beta){
-  memset(Filters,0,sizeof(Filters));
+void hb15_block(struct hb15_state *state,float *output,float *input,int cnt){
+  __m128 coeffs;
+  __m128 even_samples;
+  __m128 odd_samples;
+  __m128 old_odd_samples;
 
-  int ntaps = 4+1;  // Make this depend on n
-  for(int n=0; n < N; n++){
-    int ntapso2 = ntaps/2; // Will floor down if ntaps is odd, as it should be
-  
-    float kaiser_coeffs[ntaps];
-    // Make full symmetric kaiser window with peak in center
-    make_kaiser(kaiser_coeffs,ntaps,beta);
+  coeffs = _mm_loadu_ps(state->coeffs);  // coeffs in xmm5
+  even_samples = _mm_loadu_ps(state->even_samples); // xmm3
+  odd_samples = _mm_loadu_ps(state->odd_samples); // xmm1
+  old_odd_samples = _mm_loadu_ps(state->old_odd_samples); // xmm2
 
-    Filters[n].ntapso2 = ntapso2;
-    for(int i=1; i<ntapso2; i++){
-      float c = sincf(i*M_PI/2);
-      
-      // Need to get rid of even coefficients here, they're all zeros
-      // Coefficient #1 goes into coefficients[0]
-      Filters[n].coefficients[i-1] = c * kaiser_coeffs[i+ntapso2]; // Skip the central coefficient
-    }
-    ntaps = 2*(ntaps-1) + 1;
-  }
-  return 0;
-}
+  while(cnt--){
+    __m128 temp;
 
-complex float decimate(struct decimate_state * restrict fs,float real,float imag){
-  
-  fs = Filters;
+    temp = _mm_load_ss(input++); // xmm0[0] = *input++
+    even_samples = _mm_move_ss(even_samples,temp);  // even_samples[0] = temp[0]
 
-  complex float s = CMPLXF(real,imag);
+    temp = _mm_load_ss(input++);
+    odd_samples = _mm_move_ss(odd_samples,temp);  // odd_samples[0] = temp[0]
 
-  // Run through series of concatenated half-band filters
-  for(int n=0; n<N; n++){
-    int ptr = (fs->ptr + 1) & (MAX_L-1);
-    fs->ptr = ptr;
-    fs->state[(ptr + fs->ntapso2 - 1) & (MAX_L-1)] = s;
-    if((ptr & 1) != 0) // Each stage decimates by 2
-      return CMPLXF(NAN,NAN); // Not yet ready with sample from output of decimator
-    // actually execute and recursively invoke on every other sample to decimate by 2:1
-    s = fs->state[ptr]; // 0 (center peak) coefficient is always 1
-    // Only do the odd coefficients; even coefficients (except #0) are all zero in a halfband filter
-    // Change this so coefficients[] only stores the odd non-zero coefficients
-    for(int i = 1; i < fs->ntapso2; i += 2){
-      // Impulse response is symmetric, avoid extra multiply
-      s += (fs->state[(ptr + i) & (MAX_L-1)]
-	    + fs->state[(ptr - i) & (MAX_L-1)]) * fs->coefficients[i-1]; // ensure arg to modulo (%) is positive
-    }
-    fs++;
-  }
-  // If we make it entirely through the loop, we've processed 2^N samples; return the new decimator output sample
-  return s;
-}
+    temp = _mm_mul_ps(_mm_add_ps(odd_samples,old_odd_samples),coeffs); // all taps but the middle
+    // Right shift old_odd_samples (no longer need old_odd_samples[0])
+    // sets old_odd_samples[3] = 0 in preparation for ORing later with odd_samples[3]
+    old_odd_samples = shiftright(old_odd_samples,1);
 
-#if 0
-#include <stdlib.h>
-#include <stdio.h>
+    // old_odd_samples[3] = odd_samples[3]
+    // Shift right 3 words and then back to clear words 2-0
+    old_odd_samples = _mm_add_ps(old_odd_samples,shiftleft(shiftright(odd_samples,3),3));
 
-int main(){
-  
-  decimate_setup(3.0);
+    // left shift odd samples
+    odd_samples = shiftleft(odd_samples,1);
 
-  for(int i=0;;i++){
-    complex float s = sinf(i * 2 * M_PI/90);
+    // Sum up 4 terms
+    temp = _mm_hadd_ps(temp,temp);
+    temp = _mm_hadd_ps(temp,temp);    
     
-    s = halfband(Filters,s);
-    if(!isnan(crealf(s)) && !isnan(cimagf(s))){
-      printf("%d %f %f\n",i,crealf(s),cimagf(s));
-    }
+    temp = _mm_add_ps(temp,shiftright(even_samples,3));       // temp += even_samples[3] (central tap, unity gain)
+
+    // Left shift one word (no longer need even_samples[3])
+    even_samples = shiftleft(even_samples,1);
+
+    // Stash result:     *output++ = result;
+    _mm_store_ss(output++,temp);
   }
-  exit(0);
+  _mm_storeu_ps(state->even_samples,even_samples);
+  _mm_storeu_ps(state->odd_samples,odd_samples);
+  _mm_storeu_ps(state->old_odd_samples,old_odd_samples);
+}
+
+#else
+
+// Portable version - written to help the compiler vectorize at least partly
+void hb15_block(struct hb15_state *state,float *output,float *input,int cnt){
+  float even_samples[4];
+  float odd_samples[4];
+  float old_odd_samples[4];
+  float coeffs[4];
+
+  memcpy(coeffs, state->coeffs, sizeof(coeffs));
+  memcpy(even_samples, state->even_samples, sizeof(even_samples));
+  memcpy(odd_samples, state->odd_samples, sizeof(odd_samples));
+  memcpy(old_odd_samples, state->old_odd_samples, sizeof(old_odd_samples));
+
+  while(cnt--){
+    even_samples[0] = *input++;
+    odd_samples[0] = *input++;
+
+    float result = even_samples[3];
+    for(int i=2; i >= 0; i--)
+      even_samples[i+1] = even_samples[i];
+
+    for(int i=0; i < 4; i++)
+      result += (odd_samples[i] + old_odd_samples[i]) * coeffs[i];
+    
+    *output++ = result;
+
+    for(int i=0; i < 3; i++)
+      old_odd_samples[i] = old_odd_samples[i+1];
+    
+    old_odd_samples[3] = odd_samples[3];
+    
+    for(int i=2; i >= 0; i--)
+      odd_samples[i+1] = odd_samples[i];
+  }
+  memcpy(state->even_samples, even_samples, sizeof(even_samples));
+  memcpy(state->odd_samples, odd_samples, sizeof(odd_samples));
+  memcpy(state->old_odd_samples, old_odd_samples, sizeof(old_odd_samples));
 }
 #endif
