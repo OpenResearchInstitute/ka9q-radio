@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.90 2018/06/23 01:48:41 karn Exp karn $
+// $Id: radio.c,v 1.91 2018/06/27 20:53:40 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -27,7 +27,7 @@
 
 
 // SDR alias keep-out region, i.e., stay between -(samprate/2 - IF_EXCLUDE) and (samprate/2 - IF_EXCLUDE)
-int IF_EXCLUDE = 16000; // Hardwired for UK Funcube Dongle Pro+, make this more general
+const float IF_EXCLUDE = 0.95; // Assume decimation filters roll off above Fs/2 * IF_EXCLUDE
 
 // Preferred A/D sample rate; ignored by funcube but may be used by others someday
 const int ADC_samprate = 192000;
@@ -471,7 +471,7 @@ void update_status(struct demod *demod,struct status *new_status){
 	  demod->interpolate = 1;
 	  demod->decimate = demod->status.samprate / Audio.samprate;
 	  demod->samprate = demod->status.samprate;
-	  demod->max_IF = demod->status.samprate/2 - IF_EXCLUDE;
+	  demod->max_IF = IF_EXCLUDE * demod->status.samprate/2;
 	  demod->min_IF = -demod->max_IF;
 	} else {
 	  // Sample rate is lower than audio rate
@@ -479,7 +479,7 @@ void update_status(struct demod *demod,struct status *new_status){
 	  demod->decimate = 1; 
 	  demod->interpolate = Audio.samprate / demod->status.samprate;	  
 	  demod->samprate = Audio.samprate;
-	  demod->max_IF = Audio.samprate/2 - IF_EXCLUDE;
+	  demod->max_IF = IF_EXCLUDE * Audio.samprate/2;
 	  demod->min_IF = -demod->max_IF;
 	}
 	// re-call these two to recalculate their phasor steps
