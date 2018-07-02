@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.34 2018/06/17 20:23:41 karn Exp karn $
+// $Id: funcube.c,v 1.35 2018/06/23 01:49:48 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -134,12 +134,13 @@ int main(int argc,char *argv[]){
   {
     char *calfilename = NULL;
     
-    asprintf(&calfilename,"%s/.radiostate/cal-funcube-%d",getenv("HOME"),Dongle);
-    if(calfilename){
+    if(asprintf(&calfilename,"%s/.radiostate/cal-funcube-%d",getenv("HOME"),Dongle) > 0){
       FILE *calfp = NULL;
       if(Calibration == 0){
 	if((calfp = fopen(calfilename,"r")) != NULL){
-	  fscanf(calfp,"%lg",&Calibration);
+	  if(fscanf(calfp,"%lg",&Calibration) < 1){
+	    fprintf(stderr,"Can't read calibration from %s\n",calfilename);
+	  }
 	}
       } else {
 	if((calfp = fopen(calfilename,"w")) != NULL){
