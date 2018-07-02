@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.126 2018/06/14 00:50:13 karn Exp karn $
+// $Id: display.c,v 1.127 2018/06/23 01:47:35 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -675,14 +675,14 @@ void *display(void *arg){
       + (current_time.tv_usec - last_time.tv_usec)/1.e6;
     double instant_sample_rate = (demod->samples - lastsamples) / interval;
     if(instant_sample_rate < 10*actual_sample_rate) // Suppress glitches, especially at startup. '10' is empirically determined
-      actual_sample_rate += .002 * (instant_sample_rate - actual_sample_rate); // .002 is empirical
+      actual_sample_rate += .002 * (instant_sample_rate - actual_sample_rate); // empirical constant
 
     last_time = current_time;
     lastsamples = demod->samples;
 
     wmove(network,0,0);
     wclrtobot(network);
-    mvwprintw(network,row++,col,"Source: %s:%s -> %s",source,sport,demod->iq_mcast_address_text);
+    mvwprintw(network,row++,col,"Source: %s:%s -> %s SSRC %0lx",source,sport,demod->iq_mcast_address_text,demod->rtp_state.ssrc);
     mvwprintw(network,row++,col,"IQ pkts %'llu samples %'llu rate %'.3lf Hz",
 	      demod->rtp_state.packets,demod->samples,actual_sample_rate);
     if(demod->rtp_state.drops)
