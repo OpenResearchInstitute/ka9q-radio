@@ -1,7 +1,7 @@
-# $Id: Makefile,v 1.99 2018/06/23 01:50:10 karn Exp karn $
+# $Id: Makefile,v 1.100 2018/06/27 20:53:53 karn Exp karn $
 #CC=g++
 INCLUDES=
-COPTS=-g -O2 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -O3 -mssse3 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-pg -no-pie -g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
@@ -11,6 +11,10 @@ AFILES=bandplan.txt help.txt modes.txt
 
 
 all: $(EXECS) $(AFILES)
+
+hackrf.s: hackrf.c sdr.h radio.h misc.h multicast.h decimate.h 
+	$(CC) -S -O3 -mssse3 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations hackrf.c
+
 
 install: all
 	install -o root -m 04755 -D --target-directory=$(BINDIR) $(EXECS)
