@@ -6,11 +6,8 @@
 #include "decimate.h"
 
 // Pick up vectorized versions if available
-#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+#if defined(__SSSE3__)
   #include <x86intrin.h>  // GCC-compatible compiler, targeting x86/x86-64
-#elif defined(__GNUC__) && defined(__ARM_NEON__)
-  #include <arm_neon.h>  // GCC-compatible compiler, targeting ARM with NEON
-#endif
 
 /* Folded half-band 15-tap filter
    Only four non-unity coefficents are needed
@@ -34,8 +31,6 @@ drop
 
 
 // x86 vectorized version: SSSE3 or better for horizontal add
-#ifdef __SSSE3__
-
 #define shiftleft(arg,n) _mm_castsi128_ps(_mm_bslli_si128(_mm_castps_si128(arg),4*n))
 #define shiftright(arg,n) _mm_castsi128_ps(_mm_bsrli_si128(_mm_castps_si128(arg),4*n))
 
