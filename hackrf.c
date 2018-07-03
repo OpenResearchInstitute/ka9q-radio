@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.2 2018/06/27 20:54:21 karn Exp karn $
+// $Id: hackrf.c,v 1.3 2018/07/02 17:12:06 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -40,13 +40,13 @@ int Decimate = 128;
 int log_decimate = 7;
 int Blocksize = 350;
 int Device = 0;
-float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset estimates, per sample
-float const Power_alpha = 0.001; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
+float const DC_alpha = 0.01;    // high pass filter coefficient for DC offset estimates, per sample
+float const Power_alpha = 0.01; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
 
 
 int Verbose;
 int Device;       // Which of several to use
-#define OFFSET 1     // Offset tuner by +Fs/4, downconvert in software to avoid DC
+int Offset=1;     // Default to offset high by +Fs/4 downconvert in software to avoid DC
 
 struct sdrstate {
   // Stuff for sending commands
@@ -80,7 +80,7 @@ long Ssrc;
 int Seq = 0;
 int Timestamp = 0;
 
-char Sampbuffer[BUFFERSIZE];
+complex float Sampbuffer[BUFFERSIZE];
 int Samp_wp;
 int Samp_rp;
 
@@ -93,22 +93,72 @@ double  rffc5071_freq(uint16_t lo);
 uint32_t max2837_freq(uint32_t freq);
 
 
+// Gain and phase corrections. These will be updated every block
+float gain_q = 1;
+float gain_i = 1;
+float secphi = 1;
+float tanphi = 0;
+
+
 // Callback called with incoming receiver data from A/D
 int rx_callback(hackrf_transfer *transfer){
   int remain = transfer->valid_length;
   unsigned char *dp = transfer->buffer;
 
+  int samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
+  float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
+  float dotprod = 0;                           // sum of I*Q, for phase balance
+  float blocks_p_samp = 1./remain; // avoid divisions later
+
   while(remain > 0){
-    int chunk = min(remain,BUFFERSIZE-Samp_wp);
-    memcpy(Sampbuffer + Samp_wp,dp,chunk);
-    dp += chunk;
-    remain -= chunk;
-    pthread_mutex_lock(&Buf_mutex);
-    Samp_wp += chunk;
+    int isamp_i = (char)*dp++;
+    int isamp_q = (char)*dp++;
+    remain -= 2;
+
+    if(abs(isamp_q) >= 127 || abs(isamp_i) >= 127)
+      HackCD.clips++;
+
+    // Update DC totals - can be done as integers
+    // Is this necessary when Offset is active?
+    samp_i_sum += isamp_i;
+    samp_q_sum += isamp_q;
+
+    // Convert to float, remove DC offset (which can be fractional)
+    float samp_i = isamp_i - HackCD.DC_i;
+    float samp_q = isamp_q - HackCD.DC_q;
+    
+    // Must correct gain and phase before frequency shift
+    // accumulate I and Q energies before gain correction
+    samp_i_sq_sum += samp_i * samp_i;
+    samp_q_sq_sum += samp_q * samp_q;
+    
+    // Balance gains, keeping constant total energy
+    samp_i *= gain_i;                  samp_q *= gain_q;
+    
+    // Accumulate phase error
+    dotprod += samp_i * samp_q;
+    
+    // Correct phase
+    samp_q = secphi * samp_q - tanphi * samp_i;
+
+    Sampbuffer[Samp_wp++] = CMPLXF(samp_i,samp_q);
     Samp_wp &= (BUFFERSIZE-1);
-    pthread_mutex_unlock(&Buf_mutex);
   }
   pthread_cond_signal(&Buf_cond); // Wake him up only after we're done
+  // Update every block
+  // estimates of DC offset, signal powers and phase error
+  HackCD.DC_i += DC_alpha * (blocks_p_samp * samp_i_sum - HackCD.DC_i);
+  HackCD.DC_q += DC_alpha * (blocks_p_samp * samp_q_sum - HackCD.DC_q);
+  float block_energy = samp_i_sq_sum + samp_q_sq_sum;
+  HackCD.power += Power_alpha * (0.5*blocks_p_samp * block_energy - HackCD.power); // Average A/D output power per channel
+  HackCD.imbalance += Power_alpha * ( (samp_i_sq_sum / samp_q_sq_sum) - HackCD.imbalance);
+  float dpn = 2 * dotprod / block_energy;
+  HackCD.sinphi += Power_alpha * (dpn - HackCD.sinphi);
+  gain_q = sqrtf(0.5 * (1 + HackCD.imbalance));
+  gain_i = sqrtf(0.5 * (1 + 1./HackCD.imbalance));
+  secphi = 1/sqrtf(1 - HackCD.sinphi * HackCD.sinphi); // sec(phi) = 1/cos(phi)
+  tanphi = HackCD.sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
+
   return 0;
 }
 
@@ -123,16 +173,6 @@ void *process(void *arg){
   rtp.type = IQ_PT;
   rtp.ssrc = Ssrc;
   int rotate_phase = 0;
-
-  // Gain and phase corrections. These will be updated every block
-  float gain_q = 1;
-  float gain_i = 1;
-  float secphi = 1;
-  float tanphi = 0;
-  HackCD.imbalance = 1;
-
-  float blocks_p_samp = 1./(Blocksize*Decimate); // avoid divisions later
-  float time_p_packet = Decimate * Blocksize / ADC_samprate;
 
   // Filter states
 
@@ -154,6 +194,7 @@ void *process(void *arg){
     hb_state_real[i].coeffs[0] = -6./802; 
     hb_state_imag[i].coeffs[0] = -6./802;    
   }
+  float time_p_packet = Decimate * Blocksize / ADC_samprate;
   while(1){
 
     rtp.timestamp = Timestamp;
@@ -167,50 +208,21 @@ void *process(void *arg){
     pthread_mutex_lock(&Buf_mutex);
     while(1){
       int avail = (Samp_wp - Samp_rp + BUFFERSIZE) & (BUFFERSIZE-1);
-      if(avail >= 2*Blocksize*Decimate)
+      if(avail >=Blocksize*Decimate)
 	break;
       pthread_cond_wait(&Buf_cond,&Buf_mutex);
     }
     pthread_mutex_unlock(&Buf_mutex);
     
-    int samp_i_sum = 0, samp_q_sum = 0;        // sums of I and Q, for DC offset
-    float samp_i_sq_sum = 0, samp_q_sq_sum = 0;  // sums of I^2 and Q^2, for power and gain balance
-    float dotprod = 0;                           // sum of I*Q, for phase balance
-
     float workblock_real[Decimate*Blocksize];    // Hold input to first decimator, half used on each filter call
     float workblock_imag[Decimate*Blocksize];
 
     // Load first stage with corrected samples
     for(int i=0;i<Decimate*Blocksize;i++){
-      int isamp_i = Sampbuffer[Samp_rp++];
-      int isamp_q = Sampbuffer[Samp_rp++];
+      complex float samp = Sampbuffer[Samp_rp++];
+      float samp_i = crealf(samp);
+      float samp_q = cimagf(samp);
       Samp_rp &= (BUFFERSIZE-1); // Assume even buffer size
-
-      if(abs(isamp_q) >= 127 || abs(isamp_i) >= 127)
-	HackCD.clips++;
-
-      // Update DC totals - can be done as integers
-      // Is this necessary when Offset is active?
-      samp_i_sum += isamp_i;
-      samp_q_sum += isamp_q;
-
-      // Convert to float, remove DC offset (which can be fractional)
-      float samp_i = isamp_i - HackCD.DC_i;
-      float samp_q = isamp_q - HackCD.DC_q;
-	
-      // Must correct gain and phase before frequency shift
-      // accumulate I and Q energies before gain correction
-      samp_i_sq_sum += samp_i * samp_i;
-      samp_q_sq_sum += samp_q * samp_q;
-      
-      // Balance gains, keeping constant total energy
-      samp_i *= gain_i;                  samp_q *= gain_q;
-      
-      // Accumulate phase error
-      dotprod += samp_i * samp_q;
-
-      // Correct phase
-      samp_q = secphi * samp_q - tanphi * samp_i;
 
       // Increase frequency by Fs/4 to compensate for tuner being high by Fs/4
       switch(rotate_phase){
@@ -231,10 +243,8 @@ void *process(void *arg){
 	workblock_imag[i] = -samp_i;
 	break;
       }
-#if OFFSET
-      rotate_phase += 1; // limit to 1?
+      rotate_phase += Offset;
       rotate_phase &= 3; // Modulo 4
-#endif
     }
     // Real channel decimation
     for(int j=log_decimate-1;j>=0;j--)
@@ -242,7 +252,7 @@ void *process(void *arg){
 
     signed short *up = (signed short *)dp;
     for(int j=0;j<Blocksize;j++){
-      *up++ = (short)workblock_real[j];
+      *up++ = (short)round(workblock_real[j]);
       up++;
     }
 
@@ -254,7 +264,7 @@ void *process(void *arg){
     up = (signed short *)dp;
     for(int j=0;j<Blocksize;j++){
       up++;
-      *up++ = (short)workblock_imag[j];
+      *up++ = (short)round(workblock_imag[j]);
     }
     dp = (unsigned char *)up;
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
@@ -269,19 +279,6 @@ void *process(void *arg){
     // But what if we lose some? Then the clock will always be off
     HackCD.status.timestamp += 1.e9 * time_p_packet;
 
-    // Update every block of Blocksize*Decimate input sample pairs
-    // estimates of DC offset, signal powers and phase error
-    HackCD.DC_i += DC_alpha * (blocks_p_samp * samp_i_sum - HackCD.DC_i);
-    HackCD.DC_q += DC_alpha * (blocks_p_samp * samp_q_sum - HackCD.DC_q);
-    float block_energy = samp_i_sq_sum + samp_q_sq_sum;
-    HackCD.power += Power_alpha * (0.5*blocks_p_samp * block_energy - HackCD.power); // Average A/D output power per channel
-    HackCD.imbalance += Power_alpha * ( (samp_i_sq_sum / samp_q_sq_sum) - HackCD.imbalance);
-    float dpn = 2 * dotprod / block_energy;
-    HackCD.sinphi += Power_alpha * (dpn - HackCD.sinphi);
-    gain_q = sqrtf(0.5 * (1 + HackCD.imbalance));
-    gain_i = sqrtf(0.5 * (1 + 1./HackCD.imbalance));
-    secphi = 1/sqrtf(1 - HackCD.sinphi * HackCD.sinphi); // sec(phi) = 1/cos(phi)
-    tanphi = HackCD.sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
   }
 }
 
@@ -303,8 +300,11 @@ int main(int argc,char *argv[]){
     Locale = "en_US.UTF-8";
 
   int c;
-  while((c = getopt(argc,argv,"d:vp:l:b:R:T:")) != EOF){
+  while((c = getopt(argc,argv,"d:vp:l:b:R:T:o:")) != EOF){
     switch(c){
+    case 'o':
+      Offset = strtol(optarg,NULL,0);
+      break;
     case 'R':
       dest = optarg;
       break;
@@ -385,9 +385,8 @@ int main(int argc,char *argv[]){
   assert(ret == HACKRF_SUCCESS);
 
   uint64_t intfreq = HackCD.status.frequency = 146000000;
-#if OFFSET
-  intfreq += ADC_samprate / 4; // Offset tune high by +Fs/4
-#endif
+  
+  intfreq += Offset * ADC_samprate / 4; // Offset tune high by +Fs/4
 
   ret = hackrf_set_freq(HackCD.device,intfreq);
   assert(ret == HACKRF_SUCCESS);
@@ -395,12 +394,6 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&Buf_mutex,NULL);
   pthread_cond_init(&Buf_cond,NULL);
 
-  //  decimate_setup(3.0);
-
-  pthread_create(&Process_thread,NULL,process,NULL);
-
-  ret = hackrf_start_rx(HackCD.device,rx_callback,&HackCD);
-  assert(ret == HACKRF_SUCCESS);
 
   time_t tt;
   time(&tt);
@@ -412,18 +405,23 @@ int main(int argc,char *argv[]){
   Ssrc = tt & 0xffffffff; // low 32 bits of clock time
   if(Verbose){
     fprintf(stderr,"hackrf device %d; blocksize %d; RTP SSRC %lx\n",Device,Blocksize,Ssrc);
-    fprintf(stderr,"Sample rate %'d Hz; decimation ratio %d; output sample rate %'d Hz\n",
-	    ADC_samprate,Decimate,ADC_samprate/Decimate);
+    fprintf(stderr,"Sample rate %'d Hz; decimation ratio %d; output sample rate %'d Hz; Offset %'+d\n",
+	    ADC_samprate,Decimate,ADC_samprate/Decimate,Offset * ADC_samprate/4);
   }
+  pthread_create(&Process_thread,NULL,process,NULL);
 
-  signal(SIGPIPE,SIG_IGN);
-  signal(SIGINT,closedown);
-  signal(SIGKILL,closedown);
-  signal(SIGQUIT,closedown);
-  signal(SIGTERM,closedown);        
+  ret = hackrf_start_rx(HackCD.device,rx_callback,&HackCD);
+  assert(ret == HACKRF_SUCCESS);
 
-  if(Verbose > 1)
+  if(Verbose > 1){
+    signal(SIGPIPE,SIG_IGN);
+    signal(SIGINT,closedown);
+    signal(SIGKILL,closedown);
+    signal(SIGQUIT,closedown);
+    signal(SIGTERM,closedown);        
+
     pthread_create(&Display_thread,NULL,display,NULL);
+  }
 
   // Process commands to change hackrf state
   // We listen on the same IP address and port we use as a multicasting source
@@ -466,9 +464,7 @@ int main(int argc,char *argv[]){
       continue; // Too short; ignore
     
     uint64_t intfreq = HackCD.status.frequency = requested_status.frequency;
-#if OFFSET
-    intfreq += ADC_samprate/4; // Offset tune by +Fs/4
-#endif
+    intfreq += Offset * ADC_samprate/4; // Offset tune by +Fs/4
 
     ret = hackrf_set_freq(HackCD.device,intfreq);
     assert(ret == HACKRF_SUCCESS);
@@ -507,7 +503,7 @@ void *display(void *arg){
 	    (180/M_PI) * asin(HackCD.sinphi),
 	    10*log10(HackCD.imbalance),
 	    HackCD.clips);
-    sleep(100000); // 10 Hz
+    usleep(100000); // 10 Hz
     int ret __attribute__((unused)) = HACKRF_SUCCESS; // Won't be used when asserts are disabled
     if(HackCD.agc_holdoff_count){
       HackCD.agc_holdoff_count--;
