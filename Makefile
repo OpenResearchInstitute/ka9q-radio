@@ -1,8 +1,8 @@
-# $Id: Makefile,v 1.100 2018/06/27 20:53:53 karn Exp karn $
+# $Id: Makefile,v 1.101 2018/07/02 17:12:06 karn Exp karn $
 #CC=g++
 INCLUDES=
-COPTS=-g -O3 -mssse3 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-#COPTS=-pg -no-pie -g -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -O3 -march=native -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+#COPTS=-pg -no-pie -g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -12,16 +12,12 @@ AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)
 
-hackrf.s: hackrf.c sdr.h radio.h misc.h multicast.h decimate.h 
-	$(CC) -S -O3 -mssse3 -DNDEBUG=1 -std=gnu11 -pthread -Wall -funsafe-math-optimizations hackrf.c
-
-
 install: all
 	install -o root -m 04755 -D --target-directory=$(BINDIR) $(EXECS)
 	install -D --target-directory=$(LIBDIR) $(AFILES)
 
 clean:
-	rm -f *.o *.a $(EXECS) $(AFILES)
+	rm -f *.o *.a $(EXECS)
 
 .PHONY: clean all
 

@@ -1,8 +1,7 @@
-# $Id: Makefile.osx,v 1.43 2018/06/23 01:50:10 karn Exp karn $
+# $Id: Makefile.osx,v 1.44 2018/06/27 20:53:53 karn Exp karn $
 #CC=g++
 GCC=g++
-#COPTS=-g -O2 -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-CFLAGS=-g -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
+CFLAGS=-g -O3 -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
@@ -18,7 +17,7 @@ install: all
 	install $(AFILES) $(LIBDIR)
 
 clean:
-	rm -f *.o *.a $(EXECS) $(AFILES)
+	rm -f *.o *.a $(EXECS)
 	rcsclean
 
 # Executables
