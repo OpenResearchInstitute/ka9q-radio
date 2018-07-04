@@ -1,6 +1,4 @@
 // half-band filter for sample rate decimation by powers of 2
-#include <complex.h>
-#include <math.h>
 #include <string.h>
 #include <assert.h>
 #include "decimate.h"
