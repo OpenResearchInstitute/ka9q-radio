@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.31 2018/04/04 01:55:31 karn Exp karn $
+// $Id: audio.h,v 1.32 2018/04/22 08:56:24 karn Exp karn $
 // Variables and structures for KA9Q SDR receiver audio subsystem
 // Copyright 2017 Phil Karn, KA9Q
 
@@ -6,9 +6,6 @@
 #define _AUDIO_H 1
 
 #include <sys/types.h>
-//#include <sys/socket.h>
-//#include <netinet/in.h>
-//#include <arpa/inet.h>
 
 struct audio {
   int samprate;       // Audio D/A sample rate (usually decimated from SDR A/D)

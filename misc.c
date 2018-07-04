@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.23 2018/04/09 21:08:56 karn Exp karn $
+// $Id: misc.c,v 1.24 2018/04/22 22:25:40 karn Exp karn $
 // Miscellaneous low-level DSP routines
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -14,13 +14,13 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <time.h>
 
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
 
 #include "misc.h"
-#include "radio.h"
 
 // return unit magnitude complex number with phase x radians
 // I.e., cos(x) + j*sin(x)
