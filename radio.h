@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.65 2018/04/22 18:05:02 karn Exp karn $
+// $Id: radio.h,v 1.66 2018/04/23 09:53:58 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -7,20 +7,28 @@
 #ifndef _RADIO_H
 #define _RADIO_H 1
 
-#include <stdint.h>
 #include <pthread.h>
-#include <unistd.h>
 #include <complex.h>
 #undef I
 
-#include <sys/types.h>
 #include <sys/socket.h>
 
 #include "sdr.h"
 #include "multicast.h"
 
-// Internal format of entries in /usr/local/share/ka9q-radio/modes.txt
+struct audio {
+  int samprate;       // Audio D/A sample rate (usually decimated from SDR A/D)
 
+  // RTP network streaming
+  int silent; // last packet was suppressed (used to generate RTP mark bit)
+  char audio_mcast_address_text[256];
+  int audio_mcast_fd; // File descriptor for multicast output
+  unsigned long long audio_packets;
+};
+
+
+
+// Internal format of entries in /usr/local/share/ka9q-radio/modes.txt
 struct modetab {
   char name[16];
   char demod_name[16];
@@ -36,7 +44,6 @@ struct modetab {
 };
 
 #define PKTSIZE 16384
-
 // Incoming RTP packets
 // This should probably be extracted into a more general RTP library
 struct packet {
@@ -46,7 +53,6 @@ struct packet {
   int len;
   unsigned char content[PKTSIZE];
 };
-
 
 
 // Demodulator state block
@@ -194,7 +200,9 @@ extern char Libdir[];
 extern int Tunestep;
 extern struct modetab Modes[];
 extern int Nmodes;
-
+extern struct audio Audio;
+extern int DAC_samprate;
+extern int Verbose;
 
 // Functions/methods to control a demod instance
 void *filtert(void *arg);
@@ -236,5 +244,11 @@ void *doppler(void *);
 void *demod_fm(void *);
 void *demod_am(void *);
 void *demod_linear(void *);
+
+int send_mono_audio(struct audio *,const float *,int);
+int send_stereo_audio(struct audio *,const float *,int);
+int setup_audio(struct audio *);
+void audio_cleanup(void *);
+
 
 #endif
