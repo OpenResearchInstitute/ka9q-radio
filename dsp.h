@@ -1,4 +1,5 @@
-// $Id: dsp.h,v 1.16 2017/09/11 04:37:13 karn Exp karn $
+// $Id: dsp.h,v 1.17 2017/09/28 22:03:47 karn Exp karn $
+// Low-level, ostly math functions useful for digital signal processing
 #ifndef _DSP_H
 #define _DSP_H 1
 
@@ -27,15 +28,7 @@ float complex const cpowers(complex float const *,const int);
 float const cnrmf(const complex float x);
 double const cnrm(const complex double x);
 
-int is_phasor_init(const complex double x);
-
-int pipefill(int,void *,const int);
 double const parse_frequency(const char *);
-void chomp(char *);
-
-
-#define max(x,y) ((x) > (y) ? (x) : (y))
-#define min(x,y) ((x) < (y) ? (x) : (y))
 
 #define dB2power(x) (powf(10.,(x)/10.))
 #define power2dB(x) (10*log10f(x))
@@ -47,16 +40,8 @@ void chomp(char *);
 
 // I *hate* this sort of pointless, stupid, gratuitous incompatibility that
 // makes a lot of code impossible to read and debug
-// The Linux version of pthread_setname_np takes two args, the OSx version only one
-// The GNU malloc_usable_size() does exactly the same thing as the BSD/OSX malloc_size()
-// except that the former is defined in <malloc.h>, the latter is in <malloc/malloc.h>
 #ifdef __APPLE__
-#define pthread_setname(x) pthread_setname_np(x)
-#include <malloc/malloc.h>
-#define malloc_usable_size(x) malloc_size(x)
-#else
-#include <malloc.h>
-#define pthread_setname(x) pthread_setname_np(pthread_self(),x)
+#define sincos(x,s,c) {*s = sin(x); *c = cos(x);}
 #endif
 
 
