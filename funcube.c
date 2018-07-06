@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.35 2018/06/23 01:49:48 karn Exp karn $
+// $Id: funcube.c,v 1.36 2018/07/02 17:12:06 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -27,10 +27,6 @@
 #include "misc.h"
 #include "multicast.h"
 
-void *display(void *arg);
-pthread_t Display_thread;
-
-
 struct sdrstate {
   // Stuff for sending commands
   void *phd;                 // Opaque pointer to type hid_device
@@ -52,8 +48,6 @@ struct sdrstate {
   int overrun;               // A/D overrun count
 };
 
-struct sdrstate FCD;
-pthread_t FCD_control_thread;
 int ADC_samprate = 192000;
 int Verbose;
 int No_hold_open; // if set, close control between commands
@@ -66,7 +60,6 @@ int Dongle;       // Which of several funcube dongles to use
 int Blocksize = 240;
 int Dongle = 0;
 char *Locale;
-
 double Calibration = 0;
 
 
@@ -74,11 +67,16 @@ void *fcd_command(void *arg);
 int process_fc_command(char *,int);
 double set_fc_LO(double);
 double fcd_actual(unsigned int u32Freq);
+int front_end_init(int dongle, int samprate,int L);
+int get_adc(short *buffer,const int L);
+void *display(void *arg);
 
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 int Ctl_sock;
 extern int Mcast_ttl;
-
+struct sdrstate FCD;
+pthread_t FCD_control_thread;
+pthread_t Display_thread;
 
 int main(int argc,char *argv[]){
   // if we have root, up our priority and drop privileges
