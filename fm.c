@@ -1,21 +1,19 @@
-// $Id: fm.c,v 1.51 2018/04/22 20:59:00 karn Exp karn $
+// $Id: fm.c,v 1.52 2018/04/22 22:51:55 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
-#include <limits.h>
 #include <pthread.h>
 #include <string.h>
-#include <stdlib.h>
 #include <math.h>
 #include <complex.h>
 #include <fftw3.h>
 #undef I
 
 #include "misc.h"
+#include "dsp.h"
 #include "filter.h"
 #include "radio.h"
-#include "audio.h"
 
 void *pltask(void *); // Measure PL tone frequency
 

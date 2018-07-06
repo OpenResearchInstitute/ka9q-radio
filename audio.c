@@ -1,25 +1,19 @@
-// $Id: audio.c,v 1.69 2018/04/22 18:23:14 karn Exp karn $
+// $Id: audio.c,v 1.70 2018/06/23 01:47:25 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
 
 #define _GNU_SOURCE 1
 #include <assert.h>
-#include <pthread.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <limits.h>
 #include <string.h>
-#include <time.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "misc.h"
-#include "audio.h"
 #include "multicast.h"
+#include "radio.h"
 
 #define PCM_BUFSIZE 480        // 16-bit word count; must fit in Ethernet MTU
 #define PACKETSIZE 2048        // Somewhat larger than Ethernet MTU

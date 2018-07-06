@@ -1,11 +1,9 @@
-// $Id: multicast.c,v 1.20 2018/06/23 01:48:19 karn Exp karn $
+// $Id: multicast.c,v 1.21 2018/07/02 17:12:06 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
 #include <stdio.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <netdb.h>
 #include <string.h>
 #if defined(linux)

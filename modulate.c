@@ -1,9 +1,10 @@
-// $Id: modulate.c,v 1.10 2018/04/22 22:44:14 karn Exp karn $
+// $Id: modulate.c,v 1.11 2018/06/17 20:23:41 karn Exp karn $
 // Simple I/Q AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
+#include <assert.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <math.h>
 #include <complex.h>
 #include <limits.h>
@@ -14,6 +15,7 @@
 #include <sys/resource.h>
 
 #include "misc.h"
+#include "dsp.h"
 #include "filter.h"
 #include "radio.h"
 

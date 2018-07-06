@@ -1,20 +1,16 @@
-// $Id: am.c,v 1.31 2018/02/06 11:45:27 karn Exp karn $
+// $Id: am.c,v 1.32 2018/04/22 18:18:02 karn Exp karn $
 // AM envelope demodulator thread for 'radio'
 // Copyright Oct 9 2017, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <complex.h>
 #include <math.h>
 #include <assert.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <limits.h>
 #include <pthread.h>
-#include <string.h>
 
 #include "misc.h"
+#include "dsp.h"
 #include "filter.h"
 #include "radio.h"
-#include "audio.h"
 
 void *demod_am(void *arg){
   pthread_setname("am");

@@ -1,14 +1,12 @@
-// $Id: display.c,v 1.127 2018/06/23 01:47:35 karn Exp karn $
+// $Id: display.c,v 1.128 2018/07/02 17:19:02 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
 
 #define _GNU_SOURCE 1
-#include <errno.h>
-#include <stdio.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <assert.h>
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
@@ -18,22 +16,15 @@
 #include <math.h>
 #include <complex.h>
 #undef I
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <sys/time.h>
-#include <sys/resource.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <ncurses.h>
 #include <ctype.h>
 #include <sys/socket.h>
 #include <netdb.h>
 
 #include "misc.h"
+#include "dsp.h"
 #include "radio.h"
-#include "audio.h"
 #include "filter.h"
 #include "multicast.h"
 #include "bandplan.h"
@@ -1117,5 +1108,57 @@ void *display(void *arg){
 void touchitem(void *arg,int x,int y,int ev){
   touch_x = x /8;
   touch_y = y / 16;
+}
+
+// Parse a frequency entry in the form
+// 12345 (12345 Hz)
+// 12k345 (12.345 kHz)
+// 12m345 (12.345 MHz)
+// 12g345 (12.345 GHz)
+// If no g/m/k and number is too small, make a heuristic guess
+// NB! This assumes radio covers 100 kHz - 2 GHz; should make more general
+double const parse_frequency(const char *s){
+  char * const ss = alloca(strlen(s));
+
+  int i;
+  for(i=0;i<strlen(s);i++)
+    ss[i] = tolower(s[i]);
+
+  ss[i] = '\0';
+  
+  // k, m or g in place of decimal point indicates scaling by 1k, 1M or 1G
+  char *sp;
+  double mult;
+  if((sp = strchr(ss,'g')) != NULL){
+    mult = 1e9;
+    *sp = '.';
+  } else if((sp = strchr(ss,'m')) != NULL){
+    mult = 1e6;
+    *sp = '.';
+  } else if((sp = strchr(ss,'k')) != NULL){
+    mult = 1e3;
+    *sp = '.';
+  } else
+    mult = 1;
+
+  char *endptr = NULL;
+  double f = strtod(ss,&endptr);
+  if(endptr == ss || f == 0)
+    return 0; // Empty entry, or nothing decipherable
+  
+  if(mult != 1 || f >= 1e5) // If multiplier given, or frequency >= 100 kHz (lower limit), return as-is
+    return f * mult;
+    
+  // If frequency would be out of range, guess kHz or MHz
+  if(f < 100)
+    f *= 1e6;              // 0.1 - 99.999 Only MHz can be valid
+  else if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
+    f *= 1e6;
+  else if(f < 2000)        // Could be kHz or MHz, arbitarily assume kHz
+    f *= 1e3;
+  else if(f < 100000)      // Can only be kHz
+    f *= 1e3;
+
+  return f;
 }
 

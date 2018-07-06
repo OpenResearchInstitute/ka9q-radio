@@ -1,11 +1,11 @@
-// $Id: iqrecord.c,v 1.16 2018/04/23 09:52:48 karn Exp karn $
+// $Id: iqrecord.c,v 1.17 2018/06/17 20:23:41 karn Exp karn $
 // Read and record complex I/Q stream or PCM baseband audio
 // This version reverts to file I/O from an unsuccessful experiment to use mmap()
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
+#include <errno.h>
 #include <limits.h>
-#include <pthread.h>
 #include <string.h>
 #if defined(linux)
 #include <bsd/string.h>
@@ -14,20 +14,16 @@
 #include <complex.h>
 #undef I
 #include <stdio.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
-#include <sys/socket.h>
 #include <netdb.h>
-#include <sys/select.h>
-#include <sys/types.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <errno.h>
+
 
 #include "radio.h"
 #include "attr.h"

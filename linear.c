@@ -1,24 +1,20 @@
-// $Id: linear.c,v 1.20 2018/04/22 22:13:15 karn Exp karn $
+// $Id: linear.c,v 1.21 2018/06/23 01:47:51 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
 // Copyright Sept 20 2017 Phil Karn, KA9Q
 
 #define _GNU_SOURCE 1
+#include <assert.h>
 #include <complex.h>
 #include <math.h>
 #include <fftw3.h>
-#include <assert.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <limits.h>
 #include <pthread.h>
-#include <string.h>
 
 #include "misc.h"
+#include "dsp.h"
 #include "filter.h"
 #include "radio.h"
-#include "audio.h"
 
 
 void *demod_linear(void *arg){

@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.3 2018/06/10 06:36:34 karn Exp karn $
+// $Id: aprsfeed.c,v 1.4 2018/06/17 20:23:41 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -11,12 +11,9 @@
 #include <string.h>
 #include <locale.h>
 #include <errno.h>
-#include <ctype.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <math.h>
-#include <time.h>
-#include <fcntl.h>
 
 #include "multicast.h"
 #include "ax25.h"

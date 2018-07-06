@@ -1,9 +1,10 @@
-// $Id: main.c,v 1.113 2018/06/18 21:08:53 karn Exp karn $
+// $Id: main.c,v 1.114 2018/06/23 01:48:05 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
 #define _GNU_SOURCE 1
 #include <assert.h>
+#include <errno.h>
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
@@ -16,21 +17,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <locale.h>
-#include <signal.h>
-#include <sys/stat.h>
-#include <sys/select.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#include <netdb.h>
-#include <errno.h>
+#include <signal.h>
 
 #include "misc.h"
+#include "dsp.h"
 #include "multicast.h"
 #include "radio.h"
 #include "filter.h"
-#include "audio.h"
 
 #define MAXPKT 1500 // Maximum bytes of data in incoming I/Q packet
 

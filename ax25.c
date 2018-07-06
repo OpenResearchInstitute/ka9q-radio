@@ -1,4 +1,4 @@
-// $Id: ax25.c,v 1.3 2018/06/08 06:58:07 karn Exp karn $
+// $Id: ax25.c,v 1.4 2018/06/10 06:36:34 karn Exp karn $
 // AX.25 frame header decoding (this takes me wayyyyy back)
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-#include <math.h>
 
 #include "ax25.h"
 
