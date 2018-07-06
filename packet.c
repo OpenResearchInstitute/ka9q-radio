@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.12 2018/04/22 22:41:09 karn Exp karn $
+// $Id: packet.c,v 1.13 2018/04/23 09:55:11 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast UDP
 // Output framea don't have RTP headers, but they should
@@ -6,18 +6,16 @@
 
 #define _GNU_SOURCE 1
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <locale.h>
-#include <errno.h>
-#include <ctype.h>
-#include <sys/socket.h>
 #include <netdb.h>
-#include <time.h>
 
+#include "dsp.h"
 #include "filter.h"
 #include "misc.h"
 #include "multicast.h"

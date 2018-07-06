@@ -1,27 +1,24 @@
-// $Id: monitor.c,v 1.70 2018/06/17 20:23:41 karn Exp karn $
+// $Id: monitor.c,v 1.71 2018/06/23 01:49:16 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
-#include <stdatomic.h>
 #include <assert.h>
+#include <errno.h>
+#include <math.h>
 #include <pthread.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <signal.h>
 #include <limits.h>
 #include <string.h>
 #include <opus/opus.h>
 #include <sys/time.h>
-#include <sys/socket.h>
 #include <sys/resource.h>
-#include <sys/select.h>
 #include <netdb.h>
 #include <portaudio.h>
 #include <ncurses.h>
 #include <locale.h>
-#include <errno.h>
+#include <signal.h>
+
 
 #include "misc.h"
 #include "multicast.h"
