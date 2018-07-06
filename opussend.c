@@ -1,24 +1,22 @@
-// $Id: opussend.c,v 1.14 2018/04/15 08:58:33 karn Exp karn $
+// $Id: opussend.c,v 1.15 2018/06/17 20:23:41 karn Exp karn $
 // Multicast local audio with Opus
 // Copyright Feb 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <errno.h>
+#include <math.h>
 #include <pthread.h>
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
-#include <limits.h>
 #include <string.h>
 #include <opus/opus.h>
-#include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/resource.h>
-#include <netdb.h>
+#include <signal.h>
 #include <portaudio.h>
-
 
 #include "misc.h"
 #include "multicast.h"
@@ -273,11 +271,11 @@ int main(int argc,char * const argv[]){
     exit(1);
   }
   // Set up to transmit Opus RTP/UDP/IP
-
-
   unsigned long timestamp = 0;
   unsigned short seq = 0;
-  unsigned long ssrc = time(0);
+  struct timeval tp;
+  gettimeofday(&tp,NULL);
+  unsigned long ssrc = tp.tv_sec;
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);

@@ -1,23 +1,21 @@
-// $Id: pcmsend.c,v 1.4 2018/04/22 18:12:56 karn Exp karn $
+// $Id: pcmsend.c,v 1.5 2018/06/17 20:23:41 karn Exp karn $
 // Multicast local audio source with PCM
 // Copyright April 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <errno.h>
-#include <pthread.h>
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
 #include <limits.h>
 #include <string.h>
-#include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/resource.h>
-#include <netdb.h>
 #include <portaudio.h>
-
+#include <arpa/inet.h>
+#include <signal.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -206,7 +204,9 @@ int main(int argc,char * const argv[]){
 
   unsigned long timestamp = 0;
   unsigned short seq = 0;
-  unsigned long ssrc = time(0);
+  struct timeval tp;
+  gettimeofday(&tp,NULL);
+  unsigned long ssrc = tp.tv_sec;
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
