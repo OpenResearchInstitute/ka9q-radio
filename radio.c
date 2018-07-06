@@ -1,14 +1,12 @@
-// $Id: radio.c,v 1.91 2018/06/27 20:53:40 karn Exp karn $
+// $Id: radio.c,v 1.92 2018/07/02 17:12:06 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
-#include <stdint.h>
 #if defined(linux)
 #include <bsd/string.h>
 #endif
@@ -16,14 +14,12 @@
 #include <complex.h>
 #include <fftw3.h>
 #undef I
-#include <sys/time.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
 
 #include "misc.h"
+#include "dsp.h"
 #include "radio.h"
 #include "filter.h"
-#include "audio.h"
 
 
 // SDR alias keep-out region, i.e., stay between -(samprate/2 - IF_EXCLUDE) and (samprate/2 - IF_EXCLUDE)
@@ -42,6 +38,8 @@ float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset
 float const Power_alpha = 0.00001; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
 float const SCALE16 = 1./SHRT_MAX; // Scale signed 16-bit int to float in range -1, +1
 float const SCALE8 = 1./127;       // Scale signed 8-bit int to float in range -1, +1
+
+int is_phasor_init(const complex double x);
 
 void *proc_samples(void *arg){
   // gain and phase balance coefficients
@@ -566,4 +564,10 @@ float const compute_n0(struct demod const * const demod){
   }
   // return noise power per Hz
   return avg_n / (N*demod->samprate);
+}
+// Return 1 if complex phasor appears to be initialized, 0 if not
+int is_phasor_init(const complex double x){
+  if(isnan(creal(x)) || isnan(cimag(x)) || cnrm(x) < 0.9)
+    return 0;
+  return 1;
 }
