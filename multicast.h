@@ -1,10 +1,12 @@
-// $Id: multicast.h,v 1.14 2018/06/18 21:08:53 karn Exp karn $
+// $Id: multicast.h,v 1.15 2018/07/02 17:20:10 karn Exp karn $
 // Multicast and RTP functions, constants and structures
 // Not every RTP module uses these yet, they need to be revised
 // Copyright 2018, Phil Karn, KA9Q
 
 #ifndef _MULTICAST_H
-#define _MULTICAST_H
+#define _MULTICAST_H 1
+#include <stdint.h>
+
 int setup_mcast(char const *target,int output);
 extern char Default_mcast_port[];
 extern int Mcast_ttl;

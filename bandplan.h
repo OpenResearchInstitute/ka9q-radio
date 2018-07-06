@@ -1,6 +1,9 @@
-// $Id$
+// $Id: bandplan.h,v 1.5 2018/04/22 18:10:19 karn Exp karn $
 // Bandplan routine data structures and definitions
 // Copyright 2018, Phil Karn, KA9Q
+
+#ifndef _BANDPLAN_H
+#define _BANDPLAN_H 1
 
 // Amateur license classes authorized for each band segment
 #define NOVICE_CLASS 1
@@ -24,3 +27,5 @@ struct bandplan {
 };
 
 struct bandplan *lookup_frequency(double);
+
+#endif
