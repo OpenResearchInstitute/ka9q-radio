@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.5 2018/07/03 16:13:37 karn Exp karn $
+// $Id: hackrf.c,v 1.6 2018/07/06 06:17:00 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -28,48 +28,45 @@
 #include "decimate.h"
 
 
+// Configurable parameters
 // decibel limits for power
-float Threshold = 6; // maintain signal level at nominal +/- 6 dB 
-float Nominal = 25; // Saturation is +42 dB
-#define BUFFERSIZE (1<<19) // Upcalls seem to be 256KB; don't make too big or we may blow out of the cache
+float Upper_limit = -15;
+float Lower_limit = -30;
+
 int ADC_samprate; // Computed from Out_samprate * Decimate
 int Out_samprate = 192000;
 int Decimate = 64;
 int Log_decimate = 6; // Computed from Decimate
+float Filter_atten = 1;
 int Blocksize = 350;
-int Device = 0;
-float const DC_alpha = 0.01;    // high pass filter coefficient for DC offset estimates, per sample
-float const Power_alpha = 0.05; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
-int const stage_threshold = 8; // point at which to switch to filter f8
-
-
-
-
+int Device = 0;      // Which of several to use
 int Verbose;
-int Device;       // Which of several to use
 int Offset=1;     // Default to offset high by +Fs/4 downconvert in software to avoid DC
 
+float const DC_alpha = 1.0e-7;  // high pass filter coefficient for DC offset estimates, per sample
+float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
+int const stage_threshold = 8; // point at which to switch to filter f8
+#define BUFFERSIZE  (1<<19) // Upcalls seem to be 256KB; don't make too big or we may blow out of the cache
+const float SCALE8 = 1./127.;   // Scale 8-bit samples to unity range floats
+
+
 struct sdrstate {
-  // Stuff for sending commands
+  hackrf_device *device;
   struct status status;     // Frequency and gain settings, grouped for transmission in RTP packet
 
-  // Analog gain settings
-  int agc_holdoff_count;
-
-  float power;              // Running estimate of unfiltered signal power
-  int lastclips;            // Clips in previous measurement period
+  float in_power;              // Running estimate of unfiltered A/D signal power
+  float out_power;             // Filtered output power
+  
   int clips;                // Sample clips since last reset
-  int samples;            // Complex Samples since last reset
 
-  hackrf_device *device;
-  complex float DC;
-  float sinphi;          // smoothed estimate of I/Q phase error
+  // Smoothed error estimates
+  complex float DC;      // DC offset
+  float sinphi;          // I/Q phase error
   float imbalance;       // Ratio of I power to Q power
 };
 
 struct sdrstate HackCD;
 char *Locale;
-
 
 pthread_t Display_thread;
 pthread_t Process_thread;
@@ -105,13 +102,15 @@ float tanphi = 0;
 
 // Callback called with incoming receiver data from A/D
 int rx_callback(hackrf_transfer *transfer){
-  int remain = transfer->valid_length;
+
+  int remain = transfer->valid_length; // Count of individual samples; divide by 2 to get complex samples
+  int samples = remain / 2;            // Complex samples
   unsigned char *dp = transfer->buffer;
 
   complex float samp_sum = 0;
-  complex float samp_sq_sum = 0;
+  float i_energy=0,q_energy=0;
   float dotprod = 0;                           // sum of I*Q, for phase balance
-  float blocks_p_samp = 1./remain; // avoid divisions later
+  float scale_factor = 1./(ADC_samprate * Power_alpha);
 
   while(remain > 0){
     complex float samp;
@@ -119,27 +118,25 @@ int rx_callback(hackrf_transfer *transfer){
     int isamp_q = (char)*dp++;
     remain -= 2;
 
-    HackCD.samples++;
     if(isamp_q == -128){
       HackCD.clips++;
       isamp_q = -127;
     }
-    if(isamp_q == -128){
+    if(isamp_i == -128){
       HackCD.clips++;
-      isamp_q = -127;
+      isamp_i = -127;
     }
-    samp = CMPLXF(isamp_i,isamp_q);
+    samp = CMPLXF(isamp_i,isamp_q) * SCALE8; // -1.0 to +1.0
 
-    // Update DC totals - can be done as integers
-    // Is this necessary when Offset is active?
     samp_sum += samp;
 
-    // Convert to float, remove DC offset (which can be fractional)
+    // remove DC offset (which can be fractional)
     samp -= HackCD.DC;
     
     // Must correct gain and phase before frequency shift
     // accumulate I and Q energies before gain correction
-    samp_sq_sum += CMPLXF(crealf(samp) * crealf(samp), cimagf(samp) * cimagf(samp));
+    i_energy += crealf(samp) * crealf(samp);
+    q_energy += cimagf(samp) * cimagf(samp);
     
     // Balance gains, keeping constant total energy
     __real__ samp *= gain_i;
@@ -151,21 +148,20 @@ int rx_callback(hackrf_transfer *transfer){
     // Correct phase
     __imag__ samp = secphi * cimagf(samp) - tanphi * crealf(samp);
     
-
     Sampbuffer[Samp_wp] = samp;
     Samp_wp = (Samp_wp + 1) & (BUFFERSIZE-1);
   }
   pthread_cond_signal(&Buf_cond); // Wake him up only after we're done
   // Update every block
   // estimates of DC offset, signal powers and phase error
-  HackCD.DC += DC_alpha * (blocks_p_samp * samp_sum - HackCD.DC);
-  float block_energy = crealf(samp_sq_sum) + cimagf(samp_sq_sum);
+  HackCD.DC += DC_alpha * (samp_sum - samples*HackCD.DC);
+  float block_energy = 0.5 * (i_energy + q_energy); // Normalize for complex pairs
   if(block_energy > 0){ // Avoid divisions by 0, etc
-    HackCD.power += Power_alpha * (0.5*blocks_p_samp * block_energy - HackCD.power); // Average A/D output power per channel
-    HackCD.imbalance += Power_alpha *
-      (crealf(samp_sq_sum) / cimagf(samp_sq_sum) - HackCD.imbalance);
-    float dpn = 2 * dotprod / block_energy;
-    HackCD.sinphi += Power_alpha * (dpn - HackCD.sinphi);
+    //HackCD.in_power += scale_factor * (block_energy - samples*HackCD.in_power); // Average A/D output power per channel  
+    HackCD.in_power = block_energy/samples; // Average A/D output power per channel  
+    HackCD.imbalance += scale_factor * samples * ((i_energy / q_energy) - HackCD.imbalance);
+    float dpn = dotprod / block_energy;
+    HackCD.sinphi += scale_factor  * samples * (dpn - HackCD.sinphi);
     gain_q = sqrtf(0.5 * (1 + HackCD.imbalance));
     gain_i = sqrtf(0.5 * (1 + 1./HackCD.imbalance));
     secphi = 1/sqrtf(1 - HackCD.sinphi * HackCD.sinphi); // sec(phi) = 1/cos(phi)
@@ -197,6 +193,7 @@ void *process(void *arg){
   memset(hb3state_imag,0,sizeof(hb3state_imag));
 
 #if 0
+  // Verify SIMD alignment
   assert(((uint64_t)hb15_state_real & 15) == 0);
   assert(((uint64_t)hb15_state_imag & 15) == 0);
 #endif
@@ -278,13 +275,15 @@ void *process(void *arg){
     for(; j>=0;j--)
       hb15_block(&hb15_state_real[j],workblock_real,workblock_real,(1<<j)*Blocksize);
 
+    float output_energy = 0;
     signed short *up = (signed short *)dp;
     loop_limit = Blocksize;
     for(int j=0;j<loop_limit;j++){
-      *up++ = (short)round(workblock_real[j]);
+      float s = workblock_real[j] * Filter_atten;
+      output_energy += s*s;
+      *up++ = (short)round(32767 * s);
       up++;
     }
-
 
     // Imaginary channel decimation
     for(j=Log_decimate-1;j>=stage_threshold;j--)
@@ -297,9 +296,13 @@ void *process(void *arg){
     up = (signed short *)dp;
     loop_limit = Blocksize;
     for(int j=0;j<loop_limit;j++){
+      float s = workblock_imag[j] * Filter_atten;
+      output_energy += s*s;
       up++;
-      *up++ = (short)round(workblock_imag[j]);
+      *up++ = (short)round(32767 * s);
     }
+
+    HackCD.out_power = 0.5 * output_energy / Blocksize;
     dp = (unsigned char *)up;
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
       perror("send");
@@ -371,6 +374,7 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Decimation ratios must currently be a power of 2\n");
     exit(1);
   }
+  Filter_atten = powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
 
   setlocale(LC_ALL,Locale);
   
@@ -531,25 +535,26 @@ int main(int argc,char *argv[]){
 void *display(void *arg){
   pthread_setname("hackrf-disp");
 
-  fprintf(stderr,"               |-------GAINS-----|  Levels    DC offsets  ---Errors--           clips\n");
-  fprintf(stderr,"Frequency      LNA  mixer baseband Sig   A/D     I     Q  phase  gain\n");
-  fprintf(stderr,"Hz                     dB  dB       dB    dB                deg    dB\n");   
+  fprintf(stderr,"               |---Gains dB---|      |----Levels dB --|   |---------Errors---------|          clips\n");
+  fprintf(stderr,"Frequency      LNA  mixer bband          RF   A/D   Out     DC-I   DC-Q  phase  gain\n");
+  fprintf(stderr,"Hz                                                                         deg    dB\n");   
 
   while(1){
-    float powerdB = 10*log10f(HackCD.power);
+    float powerdB = 10*log10f(HackCD.in_power);
 
-    fprintf(stderr,"%'-15.0lf%3d%7d%4d%'9.1f%'6.1f%6.1f%6.1f%7.2f%6.2f%'16d    \r",
+    fprintf(stderr,"%'-15.0lf%3d%7d%6d%'12.1f%'6.1f%'6.1f%9.4f%7.4f%7.2f%6.2f%'16d    \r",
 	    HackCD.status.frequency,
 	    HackCD.status.lna_gain,	    
 	    HackCD.status.mixer_gain,
 	    HackCD.status.if_gain,
-	    HackCD.status.lna_gain + HackCD.status.mixer_gain + HackCD.status.if_gain + powerdB,
+	    powerdB - (HackCD.status.lna_gain + HackCD.status.mixer_gain + HackCD.status.if_gain),
 	    powerdB,
+	    10*log10f(HackCD.out_power),
 	    crealf(HackCD.DC),
 	    cimagf(HackCD.DC),
 	    (180/M_PI) * asin(HackCD.sinphi),
 	    10*log10(HackCD.imbalance),
-	    HackCD.lastclips);
+	    HackCD.clips);
     
 
 
@@ -560,11 +565,16 @@ void *display(void *arg){
 
 void *agc(void *arg){
   while(1){
-    float powerdB = 10*log10f(HackCD.power);
-    int change = (int)round(Nominal - powerdB);
+    usleep(100000);
+    float powerdB = 10*log10f(HackCD.in_power);
+    int change;
+    if(powerdB > Upper_limit || powerdB < Lower_limit)
+      change = (Upper_limit + Lower_limit)/2 - powerdB;
+    else
+      continue;
     
     int ret __attribute__((unused)) = HACKRF_SUCCESS; // Won't be used when asserts are disabled
-    if(change >= Threshold){
+    if(change > 0){
       // Increase gain, LNA first, then mixer, and finally IF
       if(change >= 14 && HackCD.status.lna_gain < 14){
 	HackCD.status.lna_gain = 14;
@@ -588,7 +598,7 @@ void *agc(void *arg){
 	ret = hackrf_set_vga_gain(HackCD.device,HackCD.status.if_gain);
 	assert(ret == HACKRF_SUCCESS);
       }
-    } else if(change <= -Threshold){
+    } else if(change < 0){
       // Reduce gain (IF first), start counter
       int old_if_gain = HackCD.status.if_gain;
       int new_if_gain = max(0,old_if_gain + 2*(change/2));
@@ -615,7 +625,6 @@ void *agc(void *arg){
 	assert(ret == HACKRF_SUCCESS);
       }
     }
-    usleep(100000); // 100 ms
   }
 }
 
