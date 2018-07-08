@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.92 2018/07/02 17:12:06 karn Exp karn $
+// $Id: radio.c,v 1.93 2018/07/06 06:14:28 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -34,8 +34,9 @@ const int ADC_samprate = 192000;
 // Update power measurement
 // Pass to input of pre-demodulation filter
 
-float const DC_alpha = 0.00001;    // high pass filter coefficient for DC offset estimates, per sample
-float const Power_alpha = 0.00001; // high pass filter coefficient for power and I/Q imbalance estimates, per sample
+float const DC_alpha = 1e-7;    // high pass filter coefficient for DC offset estimates, per sample
+float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
+
 float const SCALE16 = 1./SHRT_MAX; // Scale signed 16-bit int to float in range -1, +1
 float const SCALE8 = 1./127;       // Scale signed 8-bit int to float in range -1, +1
 
@@ -59,6 +60,7 @@ void *proc_samples(void *arg){
   float tanphi = 0;
   int in_cnt = 0;
   struct packet *pkt = NULL;
+
 
   while(1){
     // Pull next I/Q data packet off queue
@@ -146,9 +148,14 @@ void *proc_samples(void *arg){
       // Correct phase
       samp_q = secphi * samp_q - tanphi * samp_i;
       complex float samp = CMPLXF(samp_i,samp_q);
+      // Scale down according to analog gain from SDR front end
+      // samp *= demod->gain_factor;
+
+#if 0
       // Experimental notch filter
       if(demod->nf)
 	samp = notch(demod->nf,samp);
+#endif
 
       // Apply 2nd LO
       samp *= demod->second_LO_phasor;
@@ -168,14 +175,19 @@ void *proc_samples(void *arg){
 	
 	// Update every fft block
 	// estimates of DC offset, signal powers and phase error
+	float scale_factor = 1./(demod->samprate * Power_alpha);
+	if(isnan(scale_factor) || isinf(scale_factor))
+	  scale_factor = 1;
+
 	demod->DC_i += DC_alpha * (samp_i_sum - in_cnt * demod->DC_i);
 	demod->DC_q += DC_alpha * (samp_q_sum - in_cnt * demod->DC_q);
-	float block_energy = samp_i_sq_sum + samp_q_sq_sum;
-	demod->imbalance += Power_alpha * in_cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
-	demod->if_power += Power_alpha * (block_energy - in_cnt * demod->if_power); // Average IF power
+	float block_energy = 0.5 * (samp_i_sq_sum + samp_q_sq_sum); // Scale for two components per complex sample
+	demod->imbalance += scale_factor * in_cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
+	//	demod->if_power += scale_factor * (block_energy - in_cnt * demod->if_power); // Average IF power
+	demod->if_power = block_energy / in_cnt;
 
-	float dpn = 2 * dotprod / block_energy;
-	demod->sinphi += Power_alpha * in_cnt * (dpn - demod->sinphi);
+	float dpn = dotprod / block_energy;
+	demod->sinphi += scale_factor * in_cnt * (dpn - demod->sinphi);
 	gain_q = sqrtf(0.5 * (1 + demod->imbalance));
 	gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
 	secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
@@ -512,6 +524,8 @@ void update_status(struct demod *demod,struct status *new_status){
 	sig++;
       }
       if(sig){
+	// Voltage gain to normalize signal power for analog gain settings
+	demod->gain_factor = powf(10.,-0.05*(demod->status.lna_gain + demod->status.if_gain + demod->status.mixer_gain));
 	// Something changed, store the new status and let everybody know
 	pthread_mutex_lock(&demod->status_mutex);
 	pthread_cond_broadcast(&demod->status_cond);
@@ -534,6 +548,7 @@ float const compute_n0(struct demod const * const demod){
   
   // Compute smoothed power spectrum
   // There will be some spectral leakage because the convolution FFT we're using is unwindowed
+  // Includes both real and imaginary components, so this will have to be divided by 2 to get 0dBFS convention
   for(int n=0;n<N;n++)
     power_spectrum[n] = cnrmf(f->fdomain[n]);
 
@@ -562,8 +577,8 @@ float const compute_n0(struct demod const * const demod){
     new_avg_n /= noisebins;
     avg_n = new_avg_n;
   }
-  // return noise power per Hz
-  return avg_n / (N*demod->samprate);
+  // return noise power per Hz, normalized to 0dBFS
+  return avg_n / (2*N*demod->samprate);
 }
 // Return 1 if complex phasor appears to be initialized, 0 if not
 int is_phasor_init(const complex double x){

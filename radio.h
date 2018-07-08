@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.66 2018/04/23 09:53:58 karn Exp karn $
+// $Id: radio.h,v 1.67 2018/07/06 06:14:00 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -84,6 +84,8 @@ struct demod {
   struct packet *queue;
 
   struct rtp_state rtp_state; // State of the I/Q RTP receiver
+
+  float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
 
   // Processes sequenced RTP packets from the RTP receiver thread
   // Apply I/Q corrections, spin down with 2nd (software) local oscillator,
