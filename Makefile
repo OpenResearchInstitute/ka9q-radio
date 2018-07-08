@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.45 2018/07/03 16:12:12 karn Exp karn $
+# $Id: Makefile,v 1.103 2018/07/06 06:15:03 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
@@ -60,7 +60,7 @@ libradio.a: attr.o ax25.o decimate.o dsp.o filter.o misc.o multicast.o
 	ranlib $@
 
 # Main program objects
-aprs.o: aprs.c ax25.h multicast.h misc.h
+aprs.o: aprs.c ax25.h multicast.h misc.h dsp.h
 aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
 hackrf.o: hackrf.c sdr.h radio.h misc.h multicast.h decimate.h
