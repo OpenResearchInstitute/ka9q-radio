@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.21 2018/06/23 01:47:51 karn Exp karn $
+// $Id: linear.c,v 1.22 2018/07/06 06:06:12 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -294,8 +294,8 @@ void *demod_linear(void *arg){
       // I on left, Q on right
       send_stereo_audio(audio,(float *)filter->output.c,filter->olen);
     }
-    // Total baseband power (I+Q)
-    demod->bb_power = (signal + noise) / filter->olen;
+    // Total baseband power (I+Q), scaled to each sample
+    demod->bb_power = (signal + noise) / (2*filter->olen);
     // PLL loop SNR, if used
     if(noise != 0 && (demod->flags & PLL)){
       demod->snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
