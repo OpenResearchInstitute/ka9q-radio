@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.6 2018/07/06 06:17:00 karn Exp karn $
+// $Id: hackrf.c,v 1.7 2018/07/08 10:08:25 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -31,7 +31,7 @@
 // Configurable parameters
 // decibel limits for power
 float Upper_limit = -15;
-float Lower_limit = -30;
+float Lower_limit = -25;
 
 int ADC_samprate; // Computed from Out_samprate * Decimate
 int Out_samprate = 192000;
@@ -110,7 +110,7 @@ int rx_callback(hackrf_transfer *transfer){
   complex float samp_sum = 0;
   float i_energy=0,q_energy=0;
   float dotprod = 0;                           // sum of I*Q, for phase balance
-  float scale_factor = 1./(ADC_samprate * Power_alpha);
+  float rate_factor = 1./(ADC_samprate * Power_alpha);
 
   while(remain > 0){
     complex float samp;
@@ -157,11 +157,11 @@ int rx_callback(hackrf_transfer *transfer){
   HackCD.DC += DC_alpha * (samp_sum - samples*HackCD.DC);
   float block_energy = 0.5 * (i_energy + q_energy); // Normalize for complex pairs
   if(block_energy > 0){ // Avoid divisions by 0, etc
-    //HackCD.in_power += scale_factor * (block_energy - samples*HackCD.in_power); // Average A/D output power per channel  
+    //HackCD.in_power += rate_factor * (block_energy - samples*HackCD.in_power); // Average A/D output power per channel  
     HackCD.in_power = block_energy/samples; // Average A/D output power per channel  
-    HackCD.imbalance += scale_factor * samples * ((i_energy / q_energy) - HackCD.imbalance);
+    HackCD.imbalance += rate_factor * samples * ((i_energy / q_energy) - HackCD.imbalance);
     float dpn = dotprod / block_energy;
-    HackCD.sinphi += scale_factor  * samples * (dpn - HackCD.sinphi);
+    HackCD.sinphi += rate_factor  * samples * (dpn - HackCD.sinphi);
     gain_q = sqrtf(0.5 * (1 + HackCD.imbalance));
     gain_i = sqrtf(0.5 * (1 + 1./HackCD.imbalance));
     secphi = 1/sqrtf(1 - HackCD.sinphi * HackCD.sinphi); // sec(phi) = 1/cos(phi)
@@ -418,6 +418,7 @@ int main(int argc,char *argv[]){
   ret = hackrf_set_sample_rate(HackCD.device,(double)ADC_samprate);
   assert(ret == HACKRF_SUCCESS);
   HackCD.status.samprate = Out_samprate;
+
   uint32_t bw = hackrf_compute_baseband_filter_bw_round_down_lt(ADC_samprate);
   ret = hackrf_set_baseband_filter_bandwidth(HackCD.device,bw);
   assert(ret == HACKRF_SUCCESS);
@@ -537,7 +538,7 @@ void *display(void *arg){
 
   fprintf(stderr,"               |---Gains dB---|      |----Levels dB --|   |---------Errors---------|          clips\n");
   fprintf(stderr,"Frequency      LNA  mixer bband          RF   A/D   Out     DC-I   DC-Q  phase  gain\n");
-  fprintf(stderr,"Hz                                                                         deg    dB\n");   
+  fprintf(stderr,"Hz                                           dBFS  dBFS                    deg    dB\n");   
 
   while(1){
     float powerdB = 10*log10f(HackCD.in_power);
@@ -568,8 +569,10 @@ void *agc(void *arg){
     usleep(100000);
     float powerdB = 10*log10f(HackCD.in_power);
     int change;
-    if(powerdB > Upper_limit || powerdB < Lower_limit)
-      change = (Upper_limit + Lower_limit)/2 - powerdB;
+    if(powerdB > Upper_limit)
+      change = Upper_limit - powerdB;
+    else if(powerdB < Lower_limit)
+      change = Lower_limit - powerdB;
     else
       continue;
     
