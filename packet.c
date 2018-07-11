@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.13 2018/04/23 09:55:11 karn Exp karn $
+// $Id: packet.c,v 1.14 2018/07/06 06:07:32 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast UDP
 // Output framea don't have RTP headers, but they should
@@ -31,6 +31,8 @@ struct session {
   char port[NI_MAXSERV];    // RTP Sender source port
 
   struct rtp_state rtp_state;
+  uint16_t oseq;            // Output sequence number
+  uint32_t totalbytes;
 
   int input_pointer;
   struct filter_in *filter_in;
@@ -41,7 +43,7 @@ struct session {
 
 
 char *Mcast_address_text = "pcm.vhf.mcast.local";
-char *Decode_mcast_address_text = "ax25.vhf.mcast.local:8192";
+char *Decode_mcast_address_text = "ax25.vhf.mcast.local";
 float const SCALE = 1./32768;
 int const Bufsize = 2048;
 int const AN = 2048; // Should be power of 2 for FFT efficiency
@@ -192,7 +194,22 @@ void *decode_task(void *arg){
 		printf("ssrc %x packet %d len %d:\n",sp->ssrc,sp->decoded_packets++,bytes);
 		dump_frame(hdlc_frame,bytes);
 	      }
-	      send(Output_fd,hdlc_frame,bytes,0);
+	      struct rtp_header rtp;
+	      memset(&rtp,0,sizeof(rtp));
+	      rtp.version = 2;
+	      rtp.type = AX25_PT;
+	      rtp.seq = sp->oseq++;
+	      // RTP timestamp??
+	      rtp.timestamp = sp->totalbytes;
+	      sp->totalbytes += bytes;
+	      rtp.ssrc = sp->ssrc; // Copied from source
+
+	      unsigned char packet[2048],*dp;
+	      dp = packet;
+	      dp = hton_rtp(dp,&rtp);
+	      memcpy(dp,hdlc_frame,bytes);
+	      dp += bytes;
+	      send(Output_fd,packet,dp - packet,0);
 	    }
 	  }
 	  if(1 || frame_bit != 0){
