@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.114 2018/06/23 01:48:05 karn Exp karn $
+// $Id: main.c,v 1.115 2018/07/06 06:06:12 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -47,6 +47,7 @@ int Verbose = 0;
 char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
 int Update_interval = 100;  // 100 ms between screen updates
+int SDR_correct = 0;
 
 void audio_cleanup(void *);
 
@@ -129,7 +130,7 @@ int main(int argc,char *argv[]){
   set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:v";
+  char optstring[] = "cd:f:I:k:l:L:m:M:r:R:qs:t:T:u:v";
   while(getopt(argc,argv,optstring) != EOF)
     ;
   if(argc > optind)
@@ -142,6 +143,9 @@ int main(int argc,char *argv[]){
   int c;
   while((c = getopt(argc,argv,optstring)) != EOF){
     switch(c){
+    case 'c':
+      SDR_correct = 1;
+      break;
     case 'd':
       demod->doppler_command = optarg;
       break;
@@ -252,7 +256,7 @@ int main(int argc,char *argv[]){
   // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
   fprintf(stderr,"Waiting for SDR response...\n");
   set_freq(demod,demod->freq,NAN); 
-  demod->gain = dB2voltage(30.); // Empirical starting value
+  demod->gain = dB2voltage(100.0); // Empirical starting value
   set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
 
   // Graceful signal catch
