@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.93 2018/07/06 06:14:28 karn Exp karn $
+// $Id: radio.c,v 1.94 2018/07/08 10:07:04 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -34,7 +34,7 @@ const int ADC_samprate = 192000;
 // Update power measurement
 // Pass to input of pre-demodulation filter
 
-float const DC_alpha = 1e-7;    // high pass filter coefficient for DC offset estimates, per sample
+float const DC_alpha = 1e-6;    // high pass filter coefficient for DC offset estimates, per sample
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
 
 float const SCALE16 = 1./SHRT_MAX; // Scale signed 16-bit int to float in range -1, +1
@@ -129,27 +129,30 @@ void *proc_samples(void *arg){
 	samp_q = *cp++ * SCALE8;
 	break;
       }
-      // Remove and update DC offsets
-      samp_i_sum += samp_i;
-      samp_q_sum += samp_q;
-      samp_i -= demod->DC_i;
-      samp_q -= demod->DC_q;
-
+      if(SDR_correct){
+	// Remove and update DC offsets
+	samp_i_sum += samp_i;
+	samp_q_sum += samp_q;
+	samp_i -= demod->DC_i;
+	samp_q -= demod->DC_q;
+      }
+	
       // accumulate I and Q energies before gain correction
       samp_i_sq_sum += samp_i * samp_i;
       samp_q_sq_sum += samp_q * samp_q;
-      
-      // Balance gains, keeping constant total energy
-      samp_i *= gain_i;                  samp_q *= gain_q;
-      
-      // Accumulate phase error
-      dotprod += samp_i * samp_q;
-
-      // Correct phase
-      samp_q = secphi * samp_q - tanphi * samp_i;
-      complex float samp = CMPLXF(samp_i,samp_q);
+	
+      if(SDR_correct){
+	// Balance gains, keeping constant total energy
+	samp_i *= gain_i;                  samp_q *= gain_q;
+	
+	// Accumulate phase error
+	dotprod += samp_i * samp_q;
+	
+	// Correct phase
+	samp_q = secphi * samp_q - tanphi * samp_i;
+      }
       // Scale down according to analog gain from SDR front end
-      // samp *= demod->gain_factor;
+      complex float samp = CMPLXF(samp_i,samp_q) * demod->gain_factor;
 
 #if 0
       // Experimental notch filter
@@ -175,19 +178,20 @@ void *proc_samples(void *arg){
 	
 	// Update every fft block
 	// estimates of DC offset, signal powers and phase error
-	float scale_factor = 1./(demod->samprate * Power_alpha);
-	if(isnan(scale_factor) || isinf(scale_factor))
-	  scale_factor = 1;
+	float smooth_factor = 1./(demod->samprate * Power_alpha);
+	if(isnan(smooth_factor) || isinf(smooth_factor))
+	  smooth_factor = 1;
 
 	demod->DC_i += DC_alpha * (samp_i_sum - in_cnt * demod->DC_i);
 	demod->DC_q += DC_alpha * (samp_q_sum - in_cnt * demod->DC_q);
 	float block_energy = 0.5 * (samp_i_sq_sum + samp_q_sq_sum); // Scale for two components per complex sample
-	demod->imbalance += scale_factor * in_cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
-	//	demod->if_power += scale_factor * (block_energy - in_cnt * demod->if_power); // Average IF power
-	demod->if_power = block_energy / in_cnt;
+	demod->imbalance += smooth_factor * in_cnt * ((samp_i_sq_sum / samp_q_sq_sum) - demod->imbalance);
+	demod->level = block_energy / in_cnt; // Raw A/D level, without analog gain adjustment
+	// gain_factor is a voltage ratio, square to get power ratio
+	demod->if_power = demod->gain_factor * demod->gain_factor * block_energy / in_cnt; // Signal level after gain adjustment
 
 	float dpn = dotprod / block_energy;
-	demod->sinphi += scale_factor * in_cnt * (dpn - demod->sinphi);
+	demod->sinphi += smooth_factor * in_cnt * (dpn - demod->sinphi);
 	gain_q = sqrtf(0.5 * (1 + demod->imbalance));
 	gain_i = sqrtf(0.5 * (1 + 1./demod->imbalance));
 	secphi = 1/sqrtf(1 - demod->sinphi * demod->sinphi); // sec(phi) = 1/cos(phi)
