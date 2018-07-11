@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.4 2018/06/17 20:23:41 karn Exp karn $
+// $Id: aprsfeed.c,v 1.5 2018/07/06 06:06:12 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -19,7 +19,7 @@
 #include "ax25.h"
 #include "misc.h"
 
-char *Mcast_address_text = "ax25.vhf.mcast.local:8192";
+char *Mcast_address_text = "ax25.vhf.mcast.local";
 char *Host = "noam.aprs2.net";
 char *Port = "14580";
 char *User;
@@ -124,21 +124,31 @@ int main(int argc,char *argv[]){
   int pktlen;
 
   while((pktlen = recv(Input_fd,packet,sizeof(packet),0)) > 0){
+    struct rtp_header rtp_header;
+    unsigned char *dp = packet;
+
+    dp = ntoh_rtp(&rtp_header,dp);
+    pktlen -= dp - packet;
+
+    if(rtp_header.type != AX25_PT)
+      continue; // Wrong type
+
     // Emit local timestamp
     if(Verbose){
       time_t t;
       struct tm *tmp;
       time(&t);
       tmp = gmtime(&t);
-      fprintf(stderr,"%d %s %04d %02d:%02d:%02d UTC: ",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
+      fprintf(stderr,"%d %s %04d %02d:%02d:%02d UTC",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
 	      tmp->tm_hour,tmp->tm_min,tmp->tm_sec);
+      fprintf(stderr," ssrc %x seq %d",rtp_header.ssrc,rtp_header.seq);
     }
 
     // Parse incoming AX.25 frame
     struct ax25_frame frame;
-    if(ax25_parse(&frame,packet,pktlen-2) < 0){
+    if(ax25_parse(&frame,dp,pktlen) < 0){
       if(Verbose)
-	fprintf(stderr,"Unparsable packet\n");
+	fprintf(stderr," Unparsable packet\n");
       continue;
     }
 		
@@ -186,25 +196,25 @@ int main(int argc,char *argv[]){
     }      
     assert(sizeof(monstring) - sspace - 1 == strlen(monstring));
     if(Verbose)
-      fprintf(stderr,"%s\n",monstring);
+      fprintf(stderr," %s\n",monstring);
     if(frame.control != 0x03 || frame.type != 0xf0){
       if(Verbose)
-	fprintf(stderr,"Not relaying: invalid ax25 ctl/protocol\n");
+	fprintf(stderr," Not relaying: invalid ax25 ctl/protocol\n");
       continue;
     }
     if(infolen == 0){
       if(Verbose)
-	fprintf(stderr,"Not relaying: empty I field\n");
+	fprintf(stderr," Not relaying: empty I field\n");
       continue;
     }
     if(is_tcpip){
       if(Verbose)
-	fprintf(stderr,"Not relaying: Internet relayed packet\n");
+	fprintf(stderr," Not relaying: Internet relayed packet\n");
       continue;
     }
     if(frame.information[0] == '{'){
       if(Verbose)
-	fprintf(stderr,"Not relaying: third party traffic\n");	
+	fprintf(stderr," Not relaying: third party traffic\n");	
       continue;
     }
 
@@ -217,7 +227,7 @@ int main(int argc,char *argv[]){
       *cp++ = '\n';
       len += 2;
       if(write(Network_fd,monstring,len) != len){
-	perror("network report write");
+	perror(" network report write");
 	break;
       }
     }
