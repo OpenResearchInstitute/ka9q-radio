@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.71 2018/06/23 01:49:16 karn Exp karn $
+// $Id: monitor.c,v 1.72 2018/07/06 06:07:32 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -243,7 +243,7 @@ int main(int argc,char * const argv[]){
   outputParameters.channelCount = 2;
   outputParameters.device = inDevNum;
   outputParameters.sampleFormat = paFloat32;
-  outputParameters.suggestedLatency = 0.010; // 0 doesn't seem to be a good value on OSX, lots of underruns and stutters
+  outputParameters.suggestedLatency = 0.020; // 0 doesn't seem to be a good value on OSX, lots of underruns and stutters
   
   r = Pa_OpenStream(&Pa_Stream,
 		    NULL,
