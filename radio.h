@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.67 2018/07/06 06:14:00 karn Exp karn $
+// $Id: radio.h,v 1.68 2018/07/08 10:07:04 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -91,6 +91,8 @@ struct demod {
   // Apply I/Q corrections, spin down with 2nd (software) local oscillator,
   // apply Doppler corrections (if used), and pass to input half of pre-detection filter
   pthread_t proc_samples;
+
+  float level;           // Input level, unity == 0dBFS
 
   // I/Q correction parameters
   float DC_i,DC_q;       // Average DC offsets
@@ -205,6 +207,7 @@ extern int Nmodes;
 extern struct audio Audio;
 extern int DAC_samprate;
 extern int Verbose;
+extern int SDR_correct;
 
 // Functions/methods to control a demod instance
 void *filtert(void *arg);
