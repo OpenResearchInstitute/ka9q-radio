@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.22 2018/07/06 06:06:12 karn Exp karn $
+// $Id: linear.c,v 1.23 2018/07/08 10:05:51 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -37,7 +37,7 @@ void *demod_linear(void *arg){
 #endif
   int const hangmax = demod->hangtime / samptime; // samples before AGC increase
   if(isnan(demod->gain))
-    demod->gain = dB2voltage(20.0); // initial setting - a little quiet to avoid blasting
+    demod->gain = dB2voltage(100.0); // initial setting
 
   // Coherent mode parameters
   float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
