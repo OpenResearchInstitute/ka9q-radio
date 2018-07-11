@@ -1,4 +1,4 @@
-// $Id: ax25.c,v 1.4 2018/06/10 06:36:34 karn Exp karn $
+// $Id: ax25.c,v 1.5 2018/07/06 06:06:12 karn Exp karn $
 // AX.25 frame header decoding (this takes me wayyyyy back)
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -200,7 +200,7 @@ int ax25_parse(struct ax25_frame *out,unsigned char *in,int len){
   }
   out->control = in[ctl_offs];
   out->type = in[ctl_offs+1];
-  out->info_len = len - (ctl_offs+2);
+  out->info_len = len - (ctl_offs+2) - 2; // drop ctl/type before, crc after
 
   if(out->info_len > sizeof(out->information))
     return -1;
