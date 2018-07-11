@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.128 2018/07/02 17:19:02 karn Exp karn $
+// $Id: display.c,v 1.129 2018/07/06 06:06:12 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -340,8 +340,8 @@ void *display(void *arg){
   col += 25;
   WINDOW * const options = newwin(12,12,row,col); // Demod options
   col += 12;
-  WINDOW * const sdr = newwin(12,24,row,col); // SDR information
-  col += 24;
+  WINDOW * const sdr = newwin(12,25,row,col); // SDR information
+  col += 25;
 
   WINDOW * const modes = newwin(Nmodes+2,7,row,col);
   col += Nmodes+2;
@@ -523,11 +523,11 @@ void *display(void *arg){
 
     row = 1;
     col = 1;
-    mvwprintw(sig,row,col,"%15.1f dBFS",power2dB(demod->if_power));
+    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->if_power));
     mvwaddstr(sig,row++,col,"IF");
-    mvwprintw(sig,row,col,"%15.1f dBFS",power2dB(demod->bb_power));
+    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->bb_power));
     mvwaddstr(sig,row++,col,"Baseband");
-    mvwprintw(sig,row,col,"%15.1f dBFS/Hz",power2dB(demod->n0));
+    mvwprintw(sig,row,col,"%15.1f dB/Hz",power2dB(demod->n0));
     mvwaddstr(sig,row++,col,"N0");
     mvwprintw(sig,row,col,"%15.1f dBHz",10*log10f(sn0));
     mvwaddstr(sig,row++,col,"S/N0");
@@ -583,17 +583,21 @@ void *display(void *arg){
     col = 1;
     mvwprintw(sdr,row,col,"%'18d Hz",demod->status.samprate); // Nominal
     mvwaddstr(sdr,row++,col,"Samprate");
-    mvwprintw(sdr,row,col,"%+18.6f",demod->DC_i);  // Scaled to +/-1
-    mvwaddstr(sdr,row++,col,"I offset");
-    mvwprintw(sdr,row,col,"%+18.6f",demod->DC_q);
-    mvwaddstr(sdr,row++,col,"Q offset");
-    mvwprintw(sdr,row,col,"%+18.3f dB",power2dB(demod->imbalance));
-    mvwaddstr(sdr,row++,col,"I/Q imbal");
-    mvwprintw(sdr,row,col,"%+18.1f deg",demod->sinphi*DEGPRA);
-    mvwaddstr(sdr,row++,col,"I/Q phi");
-    mvwprintw(sdr,row,col,"%18u",demod->status.lna_gain);   // SDR dependent
+    mvwprintw(sdr,row,col,"%'18.1f dBFS",power2dB(demod->level));
+    mvwprintw(sdr,row++,col,"Level");
+    if(SDR_correct){
+      mvwprintw(sdr,row,col,"%+18.6f",demod->DC_i);  // Scaled to +/-1
+      mvwaddstr(sdr,row++,col,"I offset");
+      mvwprintw(sdr,row,col,"%+18.6f",demod->DC_q);
+      mvwaddstr(sdr,row++,col,"Q offset");
+      mvwprintw(sdr,row,col,"%+18.3f dB",power2dB(demod->imbalance));
+      mvwaddstr(sdr,row++,col,"I/Q imbal");
+      mvwprintw(sdr,row,col,"%+18.1f deg",demod->sinphi*DEGPRA);
+      mvwaddstr(sdr,row++,col,"I/Q phi");
+    }
+    mvwprintw(sdr,row,col,"%18u dB",demod->status.lna_gain);   // SDR dependent
     mvwaddstr(sdr,row++,col,"LNA");
-    mvwprintw(sdr,row,col,"%18u",demod->status.mixer_gain); // SDR dependent
+    mvwprintw(sdr,row,col,"%18u dB",demod->status.mixer_gain); // SDR dependent
     mvwaddstr(sdr,row++,col,"Mix gain");
     mvwprintw(sdr,row,col,"%18u dB",demod->status.if_gain); // SDR dependent    
     mvwaddstr(sdr,row++,col,"IF gain");
