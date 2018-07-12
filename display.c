@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.129 2018/07/06 06:06:12 karn Exp karn $
+// $Id: display.c,v 1.130 2018/07/11 06:56:02 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -28,6 +28,11 @@
 #include "filter.h"
 #include "multicast.h"
 #include "bandplan.h"
+
+// Control code to compute actual I/Q sample rate
+// Doesn't work that well because NTP steers the clock of the host computer
+#undef ACTUAL_SAMPLE_RATE
+
 
 float Spare; // General purpose knob for experiments
 
@@ -369,10 +374,12 @@ void *display(void *arg){
   mousemask(mask,NULL);
   MEVENT mouse_event;
 
+#if ACTUAL_SAMPLE_RATE
   struct timeval last_time;
   gettimeofday(&last_time,NULL);
   long long lastsamples = demod->samples;
   float actual_sample_rate = demod->samprate; // Initialize with nominal
+#endif
 
   for(;;){
     // update display indefinitely, handle user commands
@@ -663,6 +670,12 @@ void *display(void *arg){
     col = 1;
     extern uint32_t Ssrc;
 
+    wmove(network,0,0);
+    wclrtobot(network);
+    mvwprintw(network,row++,col,"Source: %s:%s -> %s SSRC %0lx",source,sport,demod->iq_mcast_address_text,demod->rtp_state.ssrc);
+
+
+#if ACTUAL_SAMPLE_RATE
     // Estimate actual I/Q sample rate against local time of day clock
     struct timeval current_time;
     gettimeofday(&current_time,NULL);
@@ -674,12 +687,12 @@ void *display(void *arg){
 
     last_time = current_time;
     lastsamples = demod->samples;
-
-    wmove(network,0,0);
-    wclrtobot(network);
-    mvwprintw(network,row++,col,"Source: %s:%s -> %s SSRC %0lx",source,sport,demod->iq_mcast_address_text,demod->rtp_state.ssrc);
     mvwprintw(network,row++,col,"IQ pkts %'llu samples %'llu rate %'.3lf Hz",
 	      demod->rtp_state.packets,demod->samples,actual_sample_rate);
+#else
+    mvwprintw(network,row++,col,"IQ pkts %'llu samples %'llu",
+	      demod->rtp_state.packets,demod->samples);
+#endif    
     if(demod->rtp_state.drops)
       wprintw(network," drops %'llu",demod->rtp_state.drops);
     if(demod->rtp_state.dupes)
