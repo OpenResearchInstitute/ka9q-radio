@@ -1,10 +1,10 @@
-# $Id: Makefile,v 1.103 2018/07/06 06:15:03 karn Exp karn $
+# $Id: Makefile,v 1.104 2018/07/08 22:29:51 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LDLIBS=-lpthread -lbsd -lm
-EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio
+EXECS=aprs aprsfeed funcube nfuncube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio
 AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)
@@ -23,6 +23,9 @@ aprs: aprs.o ax25.o libradio.a
 aprsfeed: aprsfeed.o libradio.a
 funcube: funcube.o libradio.a libfcd.a
 	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lbsd -lm -lpthread
+
+nfuncube: nfuncube.o libradio.a libfcd.a
+	$(CC) -g -o $@ $^ -lportaudio -lusb-1.0 -lbsd -lm -lpthread
 
 hackrf: hackrf.o libradio.a
 	$(CC) -g -o $@ $^ -lhackrf -lbsd -lpthread -lm
