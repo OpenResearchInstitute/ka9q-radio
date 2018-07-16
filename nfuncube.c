@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.38 2018/07/11 06:56:37 karn Exp $
+// $Id: nfuncube.c,v 1.1 2018/07/16 12:39:31 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -433,7 +433,12 @@ void *fcd_command(void *arg){
       }
       unsigned char val;
       fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_LNA_GAIN,&val,sizeof(val));
-      FCD.status.lna_gain = val ? 24:0;
+      if(val){
+	if(FCD.intfreq >= 420000000)
+	  FCD.status.lna_gain = 7;
+	else
+	  FCD.status.lna_gain = 24;
+      }
 
       fcdAppGetParam(FCD.phd,FCD_CMD_APP_GET_MIXER_GAIN,&val,sizeof(val));
       FCD.status.mixer_gain = val ? 19 : 0;
@@ -623,6 +628,14 @@ double fcd_actual(unsigned int u32Freq){
 // Crude analog AGC just to keep signal roughly within A/D range
 // average energy (I+Q) in each sample, current block,
 void *agc(void *arg){
+  // Crank gains all the way down to start, bring up as necessary
+  FCD.status.mixer_gain = 0;
+  FCD.status.if_gain = 0;
+  FCD.status.lna_gain = 0;
+  unsigned char val = 0;
+  fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&val,sizeof(val));
+  fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&val,sizeof(val));
+  fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_IF_GAIN1,&val,sizeof(val));
   while(1){
     usleep(100000); // 100 ms
   
