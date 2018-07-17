@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.105 2018/07/16 12:39:25 karn Exp karn $
+# $Id: Makefile,v 1.106 2018/07/16 14:08:48 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
@@ -74,7 +74,7 @@ modulate.o: modulate.c misc.h filter.h radio.h sdr.h
 monitor.o: monitor.c misc.h multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
-packet.o: packet.c filter.h misc.h multicast.h ax25.h
+packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h
 pcmsend.o: pcmsend.c misc.h multicast.h
 
 # Components of libfcd.a
