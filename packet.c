@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.15 2018/07/11 07:01:14 karn Exp karn $
+// $Id: packet.c,v 1.16 2018/07/17 00:59:57 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast UDP
 // Output framea don't have RTP headers, but they should
@@ -258,7 +258,7 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  Mcast_ttl = 5; // Low intensity, higher default is OK
+  Mcast_ttl = 10; // Low intensity, higher default is OK
   while((c = getopt(argc,argv,"I:R:vT:")) != EOF){
     switch(c){
     case 'v':
