@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.72 2018/07/06 06:07:32 karn Exp karn $
+// $Id: monitor.c,v 1.73 2018/07/11 07:00:45 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -96,6 +96,7 @@ struct session *Current;
 
 unsigned long long Samples;
 unsigned long long Callbacks;
+unsigned long long Callback_entries;
 pthread_t Display_task;
 
 
@@ -384,6 +385,7 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
 		       const PaStreamCallbackTimeInfo* timeInfo,
 		       PaStreamCallbackFlags statusFlags,
 		       void *userData){
+  Callback_entries++;
   if(!outputBuffer)
     return paAbort; // can this happen??
   
@@ -595,15 +597,35 @@ void *display(void *arg){
   noecho();
   
   Mainscr = stdscr;
+  unsigned long long last_callback;
+
+  last_callback = Callbacks;
 
   while(1){
 
     if(!Current)
       Current = Session;
 
+    if(last_callback == Callbacks){
+      Pa_StopStream(Pa_Stream);
+      int r = Pa_StartStream(Pa_Stream);
+      if(r != paNoError){
+	fprintf(stderr,"error: %s\n",Pa_GetErrorText(r));
+	assert(r == paNoError); // will fail
+      }
+    }
+    last_callback = Callbacks;
+
+    assert(Pa_IsStreamActive(Pa_Stream));
+
     int row = 2;
     wmove(Mainscr,row,0);
     wclrtobot(Mainscr);
+    mvwprintw(Mainscr,row++,0,"Callbacks: %llu entries: %llu\n",Callbacks,
+	      Callback_entries);
+
+    wmove(Mainscr,row,0);
+
     mvwprintw(Mainscr,row++,0,"Type        ch BW Gain   Pan      SSRC  Queue Source/Dest");
     for(struct session *sp = Session; sp; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
