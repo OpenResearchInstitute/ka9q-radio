@@ -1,4 +1,4 @@
-// $Id: aprs.c,v 1.9 2018/07/06 06:06:12 karn Exp karn $
+// $Id: aprs.c,v 1.11 2018/07/11 07:02:06 karn Exp karn $
 // Process AX.25 frames containing APRS data, extract lat/long/altitude, compute az/el
 // INCOMPLETE, doesn't yet drive antenna rotors
 // Should also use RTP for AX.25 frames
@@ -24,7 +24,7 @@
 #include "multicast.h"
 #include "ax25.h"
 
-char *Mcast_address_text = "ax25.vhf.mcast.local:8192";
+char *Mcast_address_text = "ax25.mcast.local:5004";
 char *Source = NULL;
 
 double const WGS84_E = 0.081819190842622;  // Eccentricity
