@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.16 2018/07/17 00:59:57 karn Exp karn $
+// $Id: packet.c,v 1.17 2018/07/19 00:02:41 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast UDP
 // Output framea don't have RTP headers, but they should
@@ -61,6 +61,9 @@ int Output_fd = -1;
 struct session *Session;
 extern float Kaiser_beta;
 int Verbose;
+pthread_mutex_t Output_mutex;
+
+
 
 struct session *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   struct session *sp;
@@ -189,11 +192,15 @@ void *decode_task(void *arg){
 		struct tm *tmp;
 		time(&t);
 		tmp = gmtime(&t);
+		// Lock output to prevent intermingled output
+		pthread_mutex_lock(&Output_mutex);
+
 		printf("%d %s %04d %02d:%02d:%02d UTC ",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
 		       tmp->tm_hour,tmp->tm_min,tmp->tm_sec);
 		
 		printf("ssrc %x packet %d len %d:\n",sp->ssrc,sp->decoded_packets++,bytes);
 		dump_frame(hdlc_frame,bytes);
+		pthread_mutex_unlock(&Output_mutex);
 	      }
 	      struct rtp_header rtp;
 	      memset(&rtp,0,sizeof(rtp));
@@ -308,6 +315,8 @@ int main(int argc,char *argv[]){
 	    Decode_mcast_address_text);
     exit(1);
   }
+  pthread_mutex_init(&Output_mutex,NULL);
+
   struct rtp_header rtp;
   struct sockaddr sender;
   // audio input thread
