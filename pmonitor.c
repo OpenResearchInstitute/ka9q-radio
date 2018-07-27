@@ -1,6 +1,6 @@
 // $Id: nmonitor.c,v 1.1 2018/07/24 00:27:52 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
-// this version uses blocking portaudio rather than callbacks
+// and this version simply pipes to aplay
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -80,7 +80,7 @@ struct session {
   unsigned long packets;    // RTP packets for this session
   unsigned long empties;    // RTP but no data
 
-  PaStream *stream;
+  FILE *stream;
 
   int terminate;
 };
@@ -89,12 +89,8 @@ struct session *Current;
 unsigned long long Samples;
 pthread_t Display_task;
 
-pthread_mutex_t Pa_mutex;   // Mutex protecting calls to portaudio
-
-
 
 void cleanup(void){
-  Pa_Terminate();
   if(!Quiet){
     echo();
     nocbreak();
@@ -154,64 +150,6 @@ int main(int argc,char * const argv[]){
       exit(1);
     }
   }
-  pthread_mutex_init(&Pa_mutex,NULL);
-
-  //  atexit(cleanup);
-  PaError r = Pa_Initialize();
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
-    cleanup();
-    exit(1);
-  }
-
-  if(List_audio){
-    // On stdout, not stderr, so we can toss ALSA's noisy error messages
-    printf("Audio devices:\n");
-    int numDevices = Pa_GetDeviceCount();
-    for(int inDevNum=0; inDevNum < numDevices; inDevNum++){
-      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
-      printf("%d: %s; latencies",	     inDevNum,deviceInfo->name);
-      if(deviceInfo->defaultLowInputLatency != -1.0)
-	printf(" input low %f, high %f",
-	       deviceInfo->defaultLowInputLatency,
-	       deviceInfo->defaultHighInputLatency);
-      if(deviceInfo->defaultLowOutputLatency != -1.0)
-	printf(" output low %f, high %f",
-	       deviceInfo->defaultLowOutputLatency,
-	       deviceInfo->defaultHighOutputLatency);
-      printf("\n");
-
-    }
-    cleanup();
-    exit(0);
-  }
-  char *nextp = NULL;
-  int d;
-  int numDevices = Pa_GetDeviceCount();
-  if(strlen(Audiodev) == 0){
-    // not specified; use default
-    inDevNum = Pa_GetDefaultOutputDevice();
-  } else if(d = strtol(Audiodev,&nextp,0),nextp != Audiodev && *nextp == '\0'){
-    if(d >= numDevices){
-      fprintf(stderr,"%d is out of range, use %s -L for a list\n",d,argv[0]);
-      cleanup();
-      exit(1);
-    }
-    inDevNum = d;
-  } else {
-    for(inDevNum=0; inDevNum < numDevices; inDevNum++){
-      const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(inDevNum);
-      if(strcmp(deviceInfo->name,Audiodev) == 0)
-	break;
-    }
-  }
-  if(inDevNum == paNoDevice){
-    fprintf(stderr,"Portaudio: no available devices\n");
-    return -1;
-  }
-  if(Verbose)
-    fprintf(stderr,"inDevNum %d\n",inDevNum);
-
   if(Nfds == 0){
     fprintf(stderr,"At least one -I option required\n");
       cleanup();
@@ -245,8 +183,6 @@ int main(int argc,char * const argv[]){
   signal(SIGHUP,closedown);  
   signal(SIGPIPE,SIG_IGN);
 #endif
-
-  Pa_Terminate();
 
   if(!Quiet)
     pthread_create(&Display_task,NULL,display,NULL);
@@ -357,14 +293,7 @@ void decode_task_cleanup(void *arg){
   struct session *sp = (struct session *)arg;
   assert(sp);
 
-  pthread_mutex_lock(&Pa_mutex);
-
-  int r = Pa_StopStream(sp->stream);
-  assert (r == paNoError);
-  r = Pa_CloseStream(sp->stream);
-  assert (r == paNoError);
   sp->stream = NULL;
-  pthread_mutex_unlock(&Pa_mutex);
   pthread_mutex_destroy(&sp->qmutex);
   pthread_cond_destroy(&sp->qcond);
   if(sp->opus){
@@ -386,51 +315,13 @@ void *decode_task(void *arg){
   pthread_setname("decode");
   pthread_cleanup_push(decode_task_cleanup,arg);
 
-  // Create portaudio stream.
-  Pa_Initialize();
+  sp->stream = popen("aplay --file-type=raw --channels=2 --format=FLOAT_LE --rate=48000 --stop-delay=10000000 -","w");
 
-  __sync_synchronize();
-  pthread_mutex_lock(&Pa_mutex);
-  PaStreamParameters outputParameters;
-  memset(&outputParameters,0,sizeof(outputParameters));
-  outputParameters.channelCount = 2;
-  outputParameters.device = inDevNum;
-  outputParameters.sampleFormat = paFloat32;
-  outputParameters.suggestedLatency =
-    Pa_GetDeviceInfo(inDevNum)->defaultLowOutputLatency;
-
-  int r = Pa_OpenStream(&sp->stream,
-			NULL,
-			&outputParameters,
-			SAMPRATE,
-			paFramesPerBufferUnspecified,
-			//			1920,
-			0,
-			NULL,
-			NULL);
-  
-  PaStream *stream;
-  stream = sp->stream;
-
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-  }
-  {
-  int r = Pa_StartStream(sp->stream);
-  pthread_mutex_unlock(&Pa_mutex);
-  if(r != paNoError){
-    fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-      cleanup();
-    exit(1);
-  }
-  }
   sp->gain = 1;    // 0 dB by default
   sp->pan = 0;     // center by default
 
   // Main loop; run until asked to quit
   while(!sp->terminate){
-    __sync_synchronize();
-    assert(stream == sp->stream);
 
     struct packet *pkt = NULL;
     // Wait for packet to appear on queue
@@ -441,7 +332,6 @@ void *decode_task(void *arg){
     sp->queue = pkt->next;
     pkt->next = NULL;
     pthread_mutex_unlock(&sp->qmutex);
-    __sync_synchronize();
 
     sp->packets++;
       
@@ -500,24 +390,6 @@ void *decode_task(void *arg){
     }
     assert(left_delay >= 0 && right_delay >= 0);
 
-    // (re)start stream if necessary
-    // Are both necessary??
-    pthread_mutex_lock(&Pa_mutex);
-    if(Pa_IsStreamStopped(sp->stream) || !Pa_IsStreamActive(sp->stream)){
-      int r = Pa_StopStream(sp->stream);
-      if(r != paNoError){
-	fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-      cleanup();
-	exit(1);
-      }
-      r = Pa_StartStream(sp->stream);
-      if(r != paNoError){
-	fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));      
-      cleanup();
-	exit(1);
-      }
-    }
-    pthread_mutex_unlock(&Pa_mutex);
     if(samples_skipped > 0){
       // Missing data -- if marker, just reset decoder and recover lost time
       if(sp->type == OPUS_PT && sp->opus){
@@ -537,11 +409,8 @@ void *decode_task(void *arg){
 	      bounce[i][1] *= right_gain;
 	    }
 	    {
-	      pthread_mutex_lock(&Pa_mutex);
 	      assert(samples_skipped < 3840);
-	      int r = Pa_WriteStream(sp->stream,bounce,samples_skipped);
-	      assert(r == paNoError);
-	      pthread_mutex_unlock(&Pa_mutex);
+	      fwrite(bounce,sizeof(float)*2,samples_skipped,sp->stream);
 	    }
 	  }
 	} // No opus encoder reset
@@ -552,10 +421,7 @@ void *decode_task(void *arg){
 	  float bounce[samples_skipped][2];
 	  memset(bounce,0,sizeof(bounce));
 	  assert(samples_skipped < 3840);
-	  pthread_mutex_lock(&Pa_mutex);
-	  int r = Pa_WriteStream(sp->stream,bounce,samples_skipped);
-	  pthread_mutex_unlock(&Pa_mutex);
-	  assert(r == paNoError);
+	  fwrite(bounce,sizeof(float)*2,samples_skipped,sp->stream);
 	}
       }	  
     }
@@ -598,15 +464,14 @@ void *decode_task(void *arg){
     assert(sp->frame_size < 3840 && sp->frame_size > 0);
     assert(sp->stream != NULL);
     //    fprintf(stderr,"write(%p,%p,%d)\n",sp->stream,bounce,sp->frame_size);
-    pthread_mutex_lock(&Pa_mutex);
-    int r = Pa_WriteStream(sp->stream,bounce,sp->frame_size);
-    pthread_mutex_unlock(&Pa_mutex);
-    assert(r == paNoError);
+    fwrite(bounce,sizeof(float)*2,sp->frame_size,sp->stream);
+
     free(bounce); bounce = NULL;
 
     free(pkt); pkt = NULL;
   }
   pthread_cleanup_pop(1);
+  pclose(sp->stream); sp->stream = NULL;
   return NULL;
 }
 // Use ncurses to display streams
@@ -620,8 +485,6 @@ void *display(void *arg){
   noecho();
   
   Mainscr = stdscr;
-
-
 
   while(1){
 
@@ -680,10 +543,6 @@ void *display(void *arg){
       char temp[strlen(sp->addr)+strlen(sp->port)+strlen(sp->dest) + 20]; // Allow some room
       snprintf(temp,sizeof(temp),"%s:%s -> %s",sp->addr,sp->port,sp->dest);
 
-      pthread_mutex_lock(&Pa_mutex);
-      PaStreamInfo const *pi = Pa_GetStreamInfo(sp->stream);
-      pthread_mutex_unlock(&Pa_mutex);
-
       mvwprintw(Mainscr,row,0,"%-12s%2d%3d%+5.0lf%+6.2lf%10x %s",
 		type,
 		sp->channels,
@@ -701,10 +560,6 @@ void *display(void *arg){
       if(sp->rtp_state.resyncs)
 	wprintw(Mainscr," resyncs %lu",sp->rtp_state.resyncs);
       
-      if(pi != NULL){
-	wprintw(Mainscr," latency %.3f",pi->outputLatency);
-      }
-
 
       if(sp == Current)
 	mvwchgat(Mainscr,row,18,10,A_STANDOUT,0,NULL);
