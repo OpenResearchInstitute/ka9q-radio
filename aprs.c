@@ -1,4 +1,4 @@
-// $Id: aprs.c,v 1.11 2018/07/11 07:02:06 karn Exp karn $
+// $Id: aprs.c,v 1.12 2018/07/24 00:26:43 karn Exp karn $
 // Process AX.25 frames containing APRS data, extract lat/long/altitude, compute az/el
 // INCOMPLETE, doesn't yet drive antenna rotors
 // Should also use RTP for AX.25 frames
@@ -45,14 +45,21 @@ int main(int argc,char *argv[]){
 
 #if 0
   // Use defaults - KA9Q location, be sure to change elsewhere!!
+  // KA9Q
   latitude = 32.8604;
-    longitude = -117.1889;
-    altitude = 0;
+  longitude = -117.1889;
+  altitude = 0;
+#elif 0
+  // MCHSARC
+  latitude = 32.967233;
+  longitude = -117.122382;
+  altitude = 200;
 #else
-    // MCHSARC
-    latitude = 32.967233;
-    longitude = -117.122382;
-    altitude = 200;
+  // UCSD Atkinson Hall
+  latitude = 32.8825852;
+  longitude = -117.2347093;
+  altitude = 200; // estimate
+
 #endif
     
   int c;
