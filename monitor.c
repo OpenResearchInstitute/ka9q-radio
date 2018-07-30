@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.74 2018/07/24 00:27:29 karn Exp karn $
+// $Id: monitor.c,v 1.75 2018/07/27 16:59:35 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -437,6 +437,16 @@ void *decode_task(void *arg){
   // Main loop; run until asked to quit
   while(!sp->terminate){
 
+#if 0
+    // Wait until the buffer drains a bit
+    // Give input packet sorting a chance to work on out of sequence packets
+    while(1){
+      __sync_synchronize(); // ensure rptr is current?
+      if(signmod(sp->wptr - sp->rptr) < 960) // 20 ms @ 48 kHz
+	break;
+      usleep(1000); // 1 ms
+    }
+#endif
     struct packet *pkt = NULL;
     // Wait for packet to appear on queue
     pthread_mutex_lock(&sp->qmutex);
@@ -483,10 +493,10 @@ void *decode_task(void *arg){
 	sp->wptr = (sp->wptr + samples_skipped) & (BUFFERSIZE-1);
       }	  
       for(int i=0; i < sp->frame_size; i++){
-	sp->output_buffer[(sp->wptr + left_delay) & (BUFFERSIZE-1)][0] = SCALE * (signed short)ntohs(*data_ints++) * left_gain;
-	sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = SCALE * (signed short)ntohs(*data_ints++) * right_gain;
-	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
+	sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = SCALE * (signed short)ntohs(*data_ints++) * left_gain;
+	sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = SCALE * (signed short)ntohs(*data_ints++) * right_gain;
       }
+      sp->wptr = (sp->wptr + sp->frame_size) & (BUFFERSIZE-1);
       break;
     case PCM_MONO_PT:
       sp->type = PCM_MONO_PT;
@@ -499,10 +509,10 @@ void *decode_task(void *arg){
       }	  
       for(int i=0; i < sp->frame_size; i++){
 	float s = SCALE * (signed short)ntohs(*data_ints++);
-	sp->output_buffer[(sp->wptr + left_delay) & (BUFFERSIZE-1)][0] = s * left_gain;
-	sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = s * right_gain;
-	sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
+	sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = s * left_gain;
+	sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = s * right_gain;
       }
+      sp->wptr = (sp->wptr + sp->frame_size) & (BUFFERSIZE-1);
       break;
     case OPUS_PT:
     case 20:
@@ -525,10 +535,10 @@ void *decode_task(void *arg){
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],samples_skipped,1);
 	  assert(samples <= samples_skipped);
 	  for(int i=0; i<samples; i++){
-	    sp->output_buffer[(sp->wptr +  left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
-	    sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
-	    sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
+	    sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
+	    sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
 	  }
+	  sp->wptr = (sp->wptr + samples) & (BUFFERSIZE-1);
 	}
       }
       {
@@ -536,10 +546,10 @@ void *decode_task(void *arg){
 	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);
 	assert(samples <= sp->frame_size);
 	for(int i=0; i<samples; i++){
-	  sp->output_buffer[(sp->wptr + left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
-	  sp->output_buffer[(sp->wptr + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
-	  sp->wptr = (sp->wptr + 1) & (BUFFERSIZE-1);
+	  sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
+	  sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
 	}
+	sp->wptr = (sp->wptr + samples) & (BUFFERSIZE-1);
       }
       break;
     default:
