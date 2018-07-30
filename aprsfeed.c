@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.5 2018/07/06 06:06:12 karn Exp karn $
+// $Id: aprsfeed.c,v 1.6 2018/07/11 07:03:22 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -19,9 +19,9 @@
 #include "ax25.h"
 #include "misc.h"
 
-char *Mcast_address_text = "ax25.vhf.mcast.local";
+char *Mcast_address_text = "ax25.mcast.local";
 char *Host = "noam.aprs2.net";
-char *Port = "14580";
+char *Port = "5004";
 char *User;
 char *Passcode;
 
