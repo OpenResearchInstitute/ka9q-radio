@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.17 2018/07/19 00:02:41 karn Exp karn $
+// $Id: packet.c,v 1.18 2018/07/24 00:28:23 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast UDP
 // Output framea don't have RTP headers, but they should
@@ -43,7 +43,7 @@ struct session {
 };
 
 char *Mcast_address_text[MAX_MCAST];
-char *Decode_mcast_address_text = "ax25.vhf.mcast.local";
+char *Decode_mcast_address_text = "ax25.mcast.local";
 float const SCALE = 1./32768;
 int const Bufsize = 2048;
 int const AN = 2048; // Should be power of 2 for FFT efficiency
