@@ -58,7 +58,7 @@ int main(int argc,char *argv[]){
   // UCSD Atkinson Hall
   latitude = 32.8825852;
   longitude = -117.2347093;
-  altitude = 200; // estimate
+  altitude = 144; // estimate
 
 #endif
     
