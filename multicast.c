@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.21 2018/07/02 17:12:06 karn Exp karn $
+// $Id: multicast.c,v 1.22 2018/07/06 06:06:12 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -35,6 +35,8 @@ static void soptions(int fd){
   if(setsockopt(fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) != 0){
     perror("so_ttl failed");
   }
+  int tos = 0x2e << 2; // EF (expedited forwarding)
+  setsockopt(fd,IPPROTO_IP,IP_TOS,&tos,sizeof(tos));
 }
 
 // Join a socket to a multicast group
