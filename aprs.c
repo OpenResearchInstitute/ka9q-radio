@@ -1,4 +1,4 @@
-// $Id: aprs.c,v 1.12 2018/07/24 00:26:43 karn Exp karn $
+// $Id: aprs.c,v 1.14 2018/07/30 19:59:08 karn Exp karn $
 // Process AX.25 frames containing APRS data, extract lat/long/altitude, compute az/el
 // INCOMPLETE, doesn't yet drive antenna rotors
 // Should also use RTP for AX.25 frames
@@ -96,8 +96,8 @@ int main(int argc,char *argv[]){
   } else {
     printf("Watching all stations\n");
   }
-  printf("Station coordinates: longitude %.6lf deg; latitude %.6lf deg; altitude %.1lf m\n",
-	 longitude,latitude,altitude);
+  printf("Station coordinates: latitude %.6lf deg; longitude %.6lf deg; altitude %.1lf m\n",
+	 latitude,longitude,altitude);
 
   // Station position in earth-centered ROTATING coordinate system
   double station_x,station_y,station_z;
@@ -286,7 +286,7 @@ char *parse_timestamp(char *data,int *days,int *hours, int *minutes, int *second
     *seconds = t;
     break;
   case 'z':
-    // day, hours minutes zulo
+    // day, hours minutes zulu
     *days = t / 10000;
     t -= *days * 10000;
     *hours = t / 100;
