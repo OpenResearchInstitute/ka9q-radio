@@ -1,4 +1,4 @@
-// $Id: nfuncube.c,v 1.2 2018/07/16 14:08:48 karn Exp karn $
+// $Id: funcube.c,v 1.39 2018/08/04 21:33:54 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -191,7 +191,7 @@ int main(int argc,char *argv[]){
   // bind control socket to next sequential port after our multicast source port
   struct sockaddr_in ctl_sockaddr;
   socklen_t siz = sizeof(ctl_sockaddr);
-  if(getsockname(Rtp_sock,&ctl_sockaddr,&siz) == -1){
+  if(getsockname(Rtp_sock,(struct sockaddr *)&ctl_sockaddr,&siz) == -1){
     perror("getsockname on ctl port");
     exit(1);
   }
@@ -199,7 +199,7 @@ int main(int argc,char *argv[]){
   locsock.sin_family = AF_INET;
   locsock.sin_port = htons(ntohs(ctl_sockaddr.sin_port)+1);
   locsock.sin_addr.s_addr = INADDR_ANY;
-  bind(Ctl_sock,&locsock,sizeof(locsock));
+  bind(Ctl_sock,(struct sockaddr *)&locsock,sizeof(locsock));
 
   // Catch signals so portaudio can be shut down
   signal(SIGPIPE,SIG_IGN);
@@ -453,7 +453,9 @@ void *fcd_command(void *arg){
     // Should probably log these
     struct sockaddr_in6 command_address;
     addrlen = sizeof(command_address);
-    if((r = recvfrom(Ctl_sock,&requested_status,sizeof(requested_status),0,&command_address,&addrlen)) <= 0){
+    if((r = recvfrom(Ctl_sock,(struct sockaddr *)&requested_status,
+		     sizeof(requested_status),0,
+		     (struct sockaddr *)&command_address,&addrlen)) <= 0){
       if(r < 0)
 	perror("recv");
       sleep(50000); // don't loop tightly
