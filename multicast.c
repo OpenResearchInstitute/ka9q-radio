@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.23 2018/07/30 19:35:49 karn Exp karn $
+// $Id: multicast.c,v 1.24 2018/08/04 08:26:46 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -255,7 +255,6 @@ int rtp_process(struct rtp_state *state,struct rtp_header *rtp,int sampcnt){
     }
     state->drops += seq_step;
   }
-  state->seq_err = 0;
   state->expected_seq = rtp->seq + 1;
 
   int time_step = (int)(rtp->timestamp - state->expected_timestamp);

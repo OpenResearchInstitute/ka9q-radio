@@ -1,4 +1,4 @@
-// $Id: multicast.h,v 1.16 2018/07/06 06:10:04 karn Exp karn $
+// $Id: multicast.h,v 1.17 2018/07/11 07:00:02 karn Exp karn $
 // Multicast and RTP functions, constants and structures
 // Not every RTP module uses these yet, they need to be revised
 // Copyright 2018, Phil Karn, KA9Q
@@ -49,8 +49,6 @@ struct rtp_state {
   long long packets;
   long long drops;
   long long dupes;
-  int seq_err;
-  int resyncs;
 };
 
 // Function to process incoming RTP packet headers
