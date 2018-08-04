@@ -5,7 +5,7 @@ CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LDLIBS=-lpthread -lbsd -lm
-EXECS=aprs aprsfeed funcube nfuncube hackrf iqplay iqrecord modulate monitor nmonitor opus opussend packet pcmsend pmonitor radio
+EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio 
 AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)
@@ -23,9 +23,6 @@ clean:
 aprs: aprs.o ax25.o libradio.a
 aprsfeed: aprsfeed.o libradio.a
 funcube: funcube.o libradio.a libfcd.a
-	$(CC) -g -o $@ $^ -lasound -lusb-1.0 -lbsd -lm -lpthread
-
-nfuncube: nfuncube.o libradio.a libfcd.a
 	$(CC) -g -o $@ $^ -lportaudio -lusb-1.0 -lbsd -lm -lpthread
 
 hackrf: hackrf.o libradio.a
@@ -38,12 +35,6 @@ modulate: modulate.o libradio.a
 
 monitor: monitor.o libradio.a
 	$(CC) -g -o $@ $^ -lopus -lportaudio -lncurses -lbsd -lm -lpthread
-
-nmonitor: nmonitor.o libradio.a
-	$(CC) -g -o $@ $^ -lopus -lportaudio -lncurses -lbsd -lm -lpthread
-
-pmonitor: pmonitor.o libradio.a
-	$(CC) -g -o $@ $^ -lopus -lncurses -lbsd -lm -lpthread
 
 opus: opus.o libradio.a
 	$(CC) -g -o $@ $^ -lopus -lbsd -lm
@@ -75,14 +66,11 @@ libradio.a: attr.o ax25.o decimate.o dsp.o filter.o misc.o multicast.o
 aprs.o: aprs.c ax25.h multicast.h misc.h dsp.h
 aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
-nfuncube.o: nfuncube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
 hackrf.o: hackrf.c sdr.h radio.h misc.h multicast.h decimate.h
 iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
 iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
 modulate.o: modulate.c misc.h filter.h radio.h sdr.h
 monitor.o: monitor.c misc.h multicast.h
-nmonitor.o: nmonitor.c misc.h multicast.h
-pmonitor.o: pmonitor.c misc.h multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h
