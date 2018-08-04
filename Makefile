@@ -1,6 +1,6 @@
-# $Id: Makefile,v 1.108 2018/07/24 00:28:56 karn Exp karn $
-#COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+# $Id: Makefile,v 1.109 2018/07/27 16:58:43 karn Exp karn $
+COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+#COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
