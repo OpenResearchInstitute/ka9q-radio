@@ -1,9 +1,9 @@
-# $Id: Makefile.osx,v 1.48 2018/07/11 07:03:44 karn Exp karn $
+# $Id: Makefile.osx,v 1.49 2018/07/12 00:52:24 karn Exp karn $
 CFLAGS=-g -O3 -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
-EXECS=aprs iqplay iqrecord modulate monitor opus opussend packet radio pcmsend aprsfeed hackrf
+EXECS=aprs iqplay iqrecord modulate monitor nmonitor opus opussend packet pmonitor radio pcmsend aprsfeed hackrf
 AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)
@@ -27,6 +27,12 @@ aprsfeed: aprsfeed.o libradio.a
 
 hackrf: hackrf.o libradio.a
 	$(CC) -g -o $@ $^ -lhackrf -lm -lpthread
+
+nmonitor: nmonitor.o libradio.a
+	$(CC) -g -o $@ $^ -lopus -lportaudio -lncurses -lm -lpthread
+
+pmonitor: pmonitor.o libradio.a
+	$(CC) -g -o $@ $^ -lopus -lncurses -lm -lpthread
 
 packet: packet.o ax25.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lm -lpthread 
@@ -75,6 +81,8 @@ iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
 iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
 modulate.o: modulate.c misc.h filter.h radio.h sdr.h
 monitor.o: monitor.c misc.h multicast.h
+nmonitor.o: nmonitor.c misc.h multicast.h
+pmonitor.o: pmonitor.c misc.h multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
 pcmsend.o: pcmsend.c misc.h multicast.h

@@ -1,6 +1,6 @@
-// $Id: nmonitor.c,v 1.1 2018/07/24 00:27:52 karn Exp karn $
-// Listen to multicast group(s), send audio to local sound device via portaudio
-// and this version simply pipes to aplay
+// $Id: pmonitor.c,v 1.1 2018/07/27 17:00:02 karn Exp karn $
+// Listen to multicast group(s), send audio to local sound device
+// Experimental: this version simply pipes to aplay
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -557,8 +557,6 @@ void *display(void *arg){
 	wprintw(Mainscr," dupes %lu",sp->rtp_state.dupes);
       if(sp->rtp_state.drops)
 	wprintw(Mainscr," drops %lu",sp->rtp_state.drops);
-      if(sp->rtp_state.resyncs)
-	wprintw(Mainscr," resyncs %lu",sp->rtp_state.resyncs);
       
 
       if(sp == Current)
@@ -620,7 +618,6 @@ void *display(void *arg){
       // Reset counters
       Current->packets = 0;
       Current->rtp_state.dupes = 0;
-      Current->rtp_state.resyncs = 0;
       Current->rtp_state.drops = 0;
       break;
     break;
