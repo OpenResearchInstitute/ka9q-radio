@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.22 2018/07/06 06:06:12 karn Exp karn $
+// $Id: multicast.c,v 1.23 2018/07/30 19:35:49 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -249,18 +249,11 @@ int rtp_process(struct rtp_state *state,struct rtp_header *rtp,int sampcnt){
   // Sequence number check
   short seq_step = (short)(rtp->seq - state->expected_seq);
   if(seq_step != 0){
-    if(seq_step > 0)
-      state->drops++;	  
-    else if(seq_step < 0)
+    if(seq_step < 0){
       state->dupes++;
-
-    if(++state->seq_err < 3){ // Look for three consecutive out-of-sequence packets
       return -1;
     }
-    // Three invalid sequence numbers in a row; probably a restarted stream so accept this sequence number
-    state->drops = state->dupes = 0; // Not really meaningful after a resync
-    state->expected_timestamp = rtp->timestamp;
-    state->resyncs++;
+    state->drops += seq_step;
   }
   state->seq_err = 0;
   state->expected_seq = rtp->seq + 1;
