@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.7 2018/07/30 19:47:58 karn Exp karn $
+// $Id: aprsfeed.c,v 1.8 2018/07/31 11:25:32 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -33,6 +33,10 @@ void *netreader(void *arg);
 
 int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
+  setlinebuf(stdout);
+
+  if(Verbose)
+    fprintf(stdout,"APRS feeder program by KA9Q\n");
 
   int c;
   while((c = getopt(argc,argv,"u:p:I:vh:")) != EOF){
@@ -53,15 +57,13 @@ int main(int argc,char *argv[]){
       Mcast_address_text = optarg;
       break;
     default:
-      fprintf(stderr,"Usage: %s -u user -p passcode [-v] [-I mcast_address][-h host]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -I %s -h %s\n",argv[0],Mcast_address_text,Host);
+      fprintf(stdout,"Usage: %s -u user -p passcode [-v] [-I mcast_address][-h host]\n",argv[0]);
+      fprintf(stdout,"Defaults: %s -I %s -h %s\n",argv[0],Mcast_address_text,Host);
       exit(1);
     }
   }
-  if(Verbose)
-    fprintf(stderr,"APRS feeder program by KA9Q\n");
   if(User == NULL || Passcode == NULL){
-    fprintf(stderr,"Must specify -u User -p passcode\n");
+    fprintf(stdout,"Must specify -u User -p passcode\n");
     exit(1);
   }
 
@@ -74,11 +76,12 @@ int main(int argc,char *argv[]){
   hints.ai_flags = AI_CANONNAME|AI_ADDRCONFIG;
 
   if(Verbose)
-    fprintf(stderr,"APRS server: %s:%s\n",Host,Port);
+    fprintf(stdout,"APRS server: %s:%s\n",Host,Port);
+
   struct addrinfo *results = NULL;
   int ecode;
   if((ecode = getaddrinfo(Host,Port,&hints,&results)) != 0){
-    fprintf(stderr,"Can't getaddrinfo(%s,%s): %s\n",Host,Port,gai_strerror(ecode));
+    fprintf(stdout,"Can't getaddrinfo(%s,%s): %s\n",Host,Port,gai_strerror(ecode));
     exit(1);
   }
   struct addrinfo *resp;
@@ -90,12 +93,13 @@ int main(int argc,char *argv[]){
     close(Network_fd); Network_fd = -1;
   }
   if(resp == NULL){
-    fprintf(stderr,"Can't connect to server %s:%s\n",Host,Port);
+    fprintf(stdout,"Can't connect to server %s:%s\n",Host,Port);
     exit(1);
   }
-  if(Verbose)
-    fprintf(stderr,"Connected to server %s port %s\n",
+  if(Verbose){
+    fprintf(stdout,"Connected to server %s port %s\n",
 	    resp->ai_canonname,Port);
+  }
   freeaddrinfo(results);
   }
   
@@ -118,7 +122,7 @@ int main(int argc,char *argv[]){
   // Set up multicast input
   Input_fd = setup_mcast(Mcast_address_text,0);
   if(Input_fd == -1){
-    fprintf(stderr,"Can't set up input from %s\n",
+    fprintf(stdout,"Can't set up input from %s\n",
 	    Mcast_address_text);
     exit(1);
   }
@@ -141,16 +145,16 @@ int main(int argc,char *argv[]){
       struct tm *tmp;
       time(&t);
       tmp = gmtime(&t);
-      fprintf(stderr,"%d %s %04d %02d:%02d:%02d UTC",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
+      fprintf(stdout,"%d %s %04d %02d:%02d:%02d UTC",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
 	      tmp->tm_hour,tmp->tm_min,tmp->tm_sec);
-      fprintf(stderr," ssrc %x seq %d",rtp_header.ssrc,rtp_header.seq);
+      fprintf(stdout," ssrc %x seq %d",rtp_header.ssrc,rtp_header.seq);
     }
 
     // Parse incoming AX.25 frame
     struct ax25_frame frame;
     if(ax25_parse(&frame,dp,pktlen) < 0){
       if(Verbose)
-	fprintf(stderr," Unparsable packet\n");
+	fprintf(stdout," Unparsable packet\n");
       continue;
     }
 		
@@ -198,25 +202,25 @@ int main(int argc,char *argv[]){
     }      
     assert(sizeof(monstring) - sspace - 1 == strlen(monstring));
     if(Verbose)
-      fprintf(stderr," %s\n",monstring);
+      fprintf(stdout," %s\n",monstring);
     if(frame.control != 0x03 || frame.type != 0xf0){
       if(Verbose)
-	fprintf(stderr," Not relaying: invalid ax25 ctl/protocol\n");
+	fprintf(stdout," Not relaying: invalid ax25 ctl/protocol\n");
       continue;
     }
     if(infolen == 0){
       if(Verbose)
-	fprintf(stderr," Not relaying: empty I field\n");
+	fprintf(stdout," Not relaying: empty I field\n");
       continue;
     }
     if(is_tcpip){
       if(Verbose)
-	fprintf(stderr," Not relaying: Internet relayed packet\n");
+	fprintf(stdout," Not relaying: Internet relayed packet\n");
       continue;
     }
     if(frame.information[0] == '{'){
       if(Verbose)
-	fprintf(stderr," Not relaying: third party traffic\n");	
+	fprintf(stdout," Not relaying: third party traffic\n");	
       continue;
     }
 
