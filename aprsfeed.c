@@ -261,8 +261,10 @@ void *netreader(void *arg){
     int r = read(Network_fd,&c,1);
     if(r < 0)
       break;
-    if(Logfile)
+    if(Logfile){
       fputc(c,Logfile);
+      fflush(Logfile);
+    }
 
     if(Verbose){
       if(write(1,&c,1) != 1){
