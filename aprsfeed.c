@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.9 2018/08/06 06:29:26 karn Exp karn $
+// $Id: aprsfeed.c,v 1.10 2018/08/24 16:23:27 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -24,6 +24,8 @@ char *Host = "noam.aprs2.net";
 char *Port = "14580";
 char *User;
 char *Passcode;
+char *Logfilename;
+FILE *Logfile;
 
 int Verbose;
 int Input_fd = -1;
@@ -39,8 +41,11 @@ int main(int argc,char *argv[]){
     fprintf(stdout,"APRS feeder program by KA9Q\n");
 
   int c;
-  while((c = getopt(argc,argv,"u:p:I:vh:")) != EOF){
+  while((c = getopt(argc,argv,"u:p:I:vh:f:")) != EOF){
     switch(c){
+    case 'f':
+      Logfilename = optarg;
+      break;
     case 'u':
       User = optarg;
       break;
@@ -62,6 +67,10 @@ int main(int argc,char *argv[]){
       exit(1);
     }
   }
+  if(Logfilename){
+    Logfile = fopen(Logfilename,"a");
+  }
+
   if(User == NULL || Passcode == NULL){
     fprintf(stdout,"Must specify -u User -p passcode\n");
     exit(1);
@@ -95,6 +104,10 @@ int main(int argc,char *argv[]){
   if(resp == NULL){
     fprintf(stdout,"Can't connect to server %s:%s\n",Host,Port);
     exit(1);
+  }
+  if(Logfile){
+    fprintf(Logfile,"Connected to server %s port %s\n",
+	    resp->ai_canonname,Port);
   }
   if(Verbose){
     fprintf(stdout,"Connected to server %s port %s\n",
@@ -248,6 +261,9 @@ void *netreader(void *arg){
     int r = read(Network_fd,&c,1);
     if(r < 0)
       break;
+    if(Logfile)
+      fputc(c,Logfile);
+
     if(Verbose){
       if(write(1,&c,1) != 1){
 	perror("server echo write");
