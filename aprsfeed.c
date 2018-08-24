@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.8 2018/07/31 11:25:32 karn Exp karn $
+// $Id: aprsfeed.c,v 1.9 2018/08/06 06:29:26 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -104,8 +104,7 @@ int main(int argc,char *argv[]){
   }
   
   pthread_t read_thread;
-  if(Verbose)
-    pthread_create(&read_thread,NULL,netreader,NULL);
+  pthread_create(&read_thread,NULL,netreader,NULL);
 
   // Log into the network
   {
@@ -249,9 +248,11 @@ void *netreader(void *arg){
     int r = read(Network_fd,&c,1);
     if(r < 0)
       break;
-    if(write(1,&c,1) != 1){
-      perror("server echo write");
-      break;
+    if(Verbose){
+      if(write(1,&c,1) != 1){
+	perror("server echo write");
+	break;
+      }
     }
   }
   return NULL;
