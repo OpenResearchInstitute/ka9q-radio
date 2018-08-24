@@ -215,6 +215,10 @@ int main(int argc,char *argv[]){
     assert(sizeof(monstring) - sspace - 1 == strlen(monstring));
     if(Verbose)
       fprintf(stdout," %s\n",monstring);
+    if(Logfile){
+      fprintf(Logfile," %s\n",monstring);
+      fflush(Logfile);
+    }
     if(frame.control != 0x03 || frame.type != 0xf0){
       if(Verbose)
 	fprintf(stdout," Not relaying: invalid ax25 ctl/protocol\n");
