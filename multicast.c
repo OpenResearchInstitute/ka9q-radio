@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.25 2018/08/04 21:06:16 karn Exp karn $
+// $Id: multicast.c,v 1.26 2018/08/24 01:55:08 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -16,9 +16,11 @@ int Mcast_ttl = 1;
 // Set options on multicast socket
 static void soptions(int fd){
   // Failures here are not fatal
+#if defined(linux)
   int freebind = 1;
   if(setsockopt(fd,IPPROTO_IP,IP_FREEBIND,&freebind,sizeof(freebind)) != 0)
     perror("freebind failed");
+#endif
 
   int reuse = 1;
   if(setsockopt(fd,SOL_SOCKET,SO_REUSEPORT,&reuse,sizeof(reuse)) != 0)
