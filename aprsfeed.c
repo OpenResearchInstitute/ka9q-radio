@@ -152,15 +152,22 @@ int main(int argc,char *argv[]){
       continue; // Wrong type
 
     // Emit local timestamp
+    time_t t;
+    struct tm *tmp;
+    time(&t);
+    tmp = gmtime(&t);
     if(Verbose){
-      time_t t;
-      struct tm *tmp;
-      time(&t);
-      tmp = gmtime(&t);
       fprintf(stdout,"%d %s %04d %02d:%02d:%02d UTC",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
 	      tmp->tm_hour,tmp->tm_min,tmp->tm_sec);
       fprintf(stdout," ssrc %x seq %d",rtp_header.ssrc,rtp_header.seq);
     }
+    if(Logfile){
+      fprintf(Logfile,"%d %s %04d %02d:%02d:%02d UTC",tmp->tm_mday,Months[tmp->tm_mon],tmp->tm_year+1900,
+	      tmp->tm_hour,tmp->tm_min,tmp->tm_sec);
+      fprintf(Logfile," ssrc %x seq %d",rtp_header.ssrc,rtp_header.seq);
+      fflush(Logfile);
+    }
+
 
     // Parse incoming AX.25 frame
     struct ax25_frame frame;
