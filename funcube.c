@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.40 2018/08/04 22:20:08 karn Exp karn $
+// $Id: funcube.c,v 1.41 2018/08/24 01:55:43 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -69,6 +69,7 @@ int Dongle = 0;
 char *Locale;
 double Calibration = 0;
 int Daemonize;
+uint32_t Ssrc;
 
 
 void *fcd_command(void *arg);
@@ -129,7 +130,7 @@ int main(int argc,char *argv[]){
   int c;
   int List_audio = 0;
 
-  while((c = getopt(argc,argv,"dc:vl:b:oR:T:LI:")) != -1){
+  while((c = getopt(argc,argv,"dc:vl:b:oR:T:LI:S:")) != -1){
     switch(c){
     case 'd':
       Daemonize++;
@@ -160,6 +161,9 @@ int main(int argc,char *argv[]){
       break;
     case 'T':
       Mcast_ttl = strtol(optarg,NULL,0);
+      break;
+    case 'S':
+      Ssrc = strtol(optarg,NULL,0);
       break;
     default:
     case '?':
@@ -305,11 +309,11 @@ int main(int argc,char *argv[]){
   if(Status)
     pthread_create(&Display_thread,NULL,display,NULL);
 
-  time_t tt;
-  time(&tt);
-  long ssrc;
-  ssrc = tt & 0xffffffff; // low 32 bits of clock time
-
+  if(Ssrc == 0){
+    time_t tt;
+    time(&tt);
+    Ssrc = tt & 0xffffffff; // low 32 bits of clock time
+  }
   int timestamp = 0;
   int seq = 0;
   // Gain and phase corrections. These will be updated every block
@@ -329,7 +333,7 @@ int main(int argc,char *argv[]){
     memset(&rtp,0,sizeof(rtp));
     rtp.version = RTP_VERS;
     rtp.type = IQ_PT;         // ordinarily dynamically allocated
-    rtp.ssrc = ssrc;
+    rtp.ssrc = Ssrc;
     rtp.seq = seq++;
     rtp.timestamp = timestamp;
 
