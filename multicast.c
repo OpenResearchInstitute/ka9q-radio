@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.26 2018/08/24 01:55:08 karn Exp karn $
+// $Id: multicast.c,v 1.27 2018/08/24 02:03:21 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -103,7 +103,13 @@ int setup_mcast(char const *target,int output){
 
   struct addrinfo *results = NULL;
   int ecode;
-  if((ecode = getaddrinfo(host,port,&hints,&results)) != 0){
+  // Try a few times in case we come up before the resolver is quite ready
+  for(int tries=0; tries < 10; tries++){
+    if((ecode = getaddrinfo(host,port,&hints,&results)) == 0)
+      break;
+    usleep(500000);
+  }    
+  if(ecode != 0){
     fprintf(stderr,"setup_mcast getaddrinfo(%s,%s): %s\n",host,port,gai_strerror(ecode));
     return -1;
   }
@@ -115,17 +121,20 @@ int setup_mcast(char const *target,int output){
 
     soptions(fd);
     if(output){
-      // Try up to 10 times at 1 sec intervals
+      // Try up to 10 times
       // this connect can fail with an unreachable when brought up by systemd at boot
       // multicast 
       for(int tries=0; tries < 10; tries++){
 	if((connect(fd,resp->ai_addr,resp->ai_addrlen) == 0))
 	  goto done;
-	usleep(1000000);
+	usleep(500000);
       }
     } else { // input
-      if((bind(fd,resp->ai_addr,resp->ai_addrlen) == 0))
-	break;
+      for(int tries=0; tries < 10; tries++){
+	if((bind(fd,resp->ai_addr,resp->ai_addrlen) == 0))
+	  goto done;
+	usleep(500000);
+      }
     }
     close(fd);
     fd = -1;
