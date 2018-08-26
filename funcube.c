@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.41 2018/08/24 01:55:43 karn Exp karn $
+// $Id: funcube.c,v 1.42 2018/08/26 18:20:23 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -199,7 +199,12 @@ int main(int argc,char *argv[]){
     mkdir("/run/funcube",0775); // Ensure it exists, let everybody read it
     
     // see if one is already running
-    asprintf(&Pid_filename,"/run/funcube/%d.pid",Dongle);
+    int r = asprintf(&Pid_filename,"/run/funcube/%d.pid",Dongle);
+    if(r == -1){
+      // Unlikely, but it makes the compiler happy
+      errmsg("asprintf error");
+      exit(1);
+    }
     FILE *pidfile = fopen(Pid_filename,"r");
     if(pidfile){
       // pid file exists; read it and see if process exists
@@ -219,7 +224,13 @@ int main(int argc,char *argv[]){
       fprintf(pidfile,"%d\n",pid);
       fclose(pidfile);
     }
-    asprintf(&Status_filename,"/run/funcube/%d.status",Dongle);
+    r = asprintf(&Status_filename,"/run/funcube/%d.status",Dongle);
+    if(r == -1){
+      // Unlikely, but it makes the compiler happy
+      errmsg("asprintf error");
+      exit(1);
+    }
+
     unlink(Status_filename); // Remove any orphaned version
     Status = fopen(Status_filename,"w");
     if(Status == NULL){
