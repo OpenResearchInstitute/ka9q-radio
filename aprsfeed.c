@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.10 2018/08/24 16:23:27 karn Exp karn $
+// $Id: aprsfeed.c,v 1.14 2018/08/24 16:44:07 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -34,6 +34,11 @@ int Network_fd = -1;
 void *netreader(void *arg);
 
 int main(int argc,char *argv[]){
+  // Quickly drop root if we have it
+  // The sooner we do this, the fewer options there are for abuse
+  if(seteuid(getuid()) != 0)
+    fprintf(stderr,"seteuid: %s\n",strerror(errno));
+
   setlocale(LC_ALL,getenv("LANG"));
   setlinebuf(stdout);
 
