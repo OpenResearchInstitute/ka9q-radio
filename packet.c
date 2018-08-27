@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.19 2018/07/30 19:52:12 karn Exp karn $
+// $Id: packet.c,v 1.20 2018/08/06 06:29:26 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -262,6 +262,10 @@ void *decode_task(void *arg){
 
 
 int main(int argc,char *argv[]){
+  // Drop root if we have it
+  if(seteuid(getuid()) != 0)
+    fprintf(stderr,"seteuid: %s\n",strerror(errno));
+
   setlocale(LC_ALL,getenv("LANG"));
   // Unlike aprs and aprsfeed, stdout is not line buffered because each packet
   // generates a multi-line dump. So we have to be sure to fflush(stdout) after each
