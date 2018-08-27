@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.42 2018/08/26 18:20:23 karn Exp karn $
+// $Id: funcube.c,v 1.43 2018/08/26 18:27:04 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -102,9 +102,9 @@ void errmsg(const char *fmt,...){
 
   if(Daemonize)
     vsyslog(LOG_INFO,fmt,ap);
-  else if(Status){
-    vfprintf(Status,fmt,ap);
-    fflush(Status);
+  else {
+    vfprintf(stderr,fmt,ap);
+    fflush(stderr);
   }
   va_end(ap);
 }
@@ -669,8 +669,7 @@ void *display(void *arg){
 // If we don't stop the A/D, it'll take several seconds to overflow and stop by itself,
 // and during that time we can't restart
 void closedown(int a){
-  if(Status)
-    errmsg("funcube: caught signal %d: %s\n",a,strsignal(a));
+  errmsg("funcube: caught signal %d: %s\n",a,strsignal(a));
   unlink(Pid_filename);
   Pa_Terminate();
   if(a == SIGTERM) // sent by systemd when shutting down. Return success
