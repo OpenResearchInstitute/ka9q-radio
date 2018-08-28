@@ -1,3 +1,7 @@
+# $Id$
+# Systemd unit to start up funcube daemon for funcube dongle 1
+# Phil Karn, KA9Q Aug 2018
+
 [Unit]
 Description=Funcube 1 daemon
 After=sound.target
@@ -8,11 +12,14 @@ After=multi-user.target
 Requires=multi-user.target
 
 [Service]
+User=funcube
+Group=nogroup
 Type=forking
 PermissionsStartOnly=1
-ExecStartPre=mkdir /run/funcube
-ExecStartPre=chmod 0777 /run/funcube
-ExecStart=/usr/local/bin/funcube -d -I 1 -R iq.vhf.mcast.local
+ExecStartPre=/bin/mkdir /run/funcube
+ExecStartPre=/bin/chmod 0755 /run/funcube
+ExecStartPre=/bin/chown funcube /run/funcube
+ExecStart=/usr/local/bin/funcube -d -I 1 -R iq.hf.mcast.local
 PIDFile=/run/funcube/1.pid
 
 [Install]
