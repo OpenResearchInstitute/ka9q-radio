@@ -17,6 +17,7 @@ install: all
 	install -D --target-directory=$(LIBDIR) $(AFILES)
 	install -o root -m 0644 -D --target-directory=/etc/systemd/system $(SYSTEMD_FILES)
 	install -o root -m 0644 -D --target-directory=/etc/udev/rules.d $(UDEV_FILES)
+	adduser --system aprsfeed funcube hackrf
 
 clean:
 	rm -f *.o *.a $(EXECS)
