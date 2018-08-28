@@ -1,5 +1,7 @@
+# $Id$
 # Bring up KA9Q funcube multicast daemon(s) when funcube pro+ dongle is inserted
-# Not sure this works correctly on second dongle
+# Phil Karn, KA9Q, Aug 2018
+
 KERNEL=="card*", SUBSYSTEM=="sound", ATTR{id}=="V20", ATTR{number}=="1", ENV{SYSTEMD_WANTS}="funcube0.service", TAG+="systemd"
 KERNEL=="card*", SUBSYSTEM=="sound", ATTR{id}=="V20", ATTR{number}=="2", ENV{SYSTEMD_WANTS}="funcube1.service", TAG+="systemd"
 KERNEL=="card*", SUBSYSTEM=="sound", ATTR{id}=="V20", ATTR{number}=="3", ENV{SYSTEMD_WANTS}="funcube2.service", TAG+="systemd"
