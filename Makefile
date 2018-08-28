@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.113 2018/08/28 21:39:39 karn Exp karn $
+# $Id: Makefile,v 1.114 2018/08/28 21:48:41 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -16,10 +16,12 @@ install: all
 	install -o root -m 04755 -D --target-directory=$(BINDIR) $(EXECS)
 	install -D --target-directory=$(LIBDIR) $(AFILES)
 	install -o root -m 0644 -D --target-directory=/etc/systemd/system $(SYSTEMD_FILES)
+	systemctl daemon-reload
 	install -o root -m 0644 -D --target-directory=/etc/udev/rules.d $(UDEV_FILES)
 	adduser --system aprsfeed
 	adduser --system funcube
 	adduser --system hackrf
+
 
 clean:
 	rm -f *.o *.a $(EXECS)
