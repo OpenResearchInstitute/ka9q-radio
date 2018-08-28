@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.14 2018/08/24 16:44:07 karn Exp karn $
+// $Id: aprsfeed.c,v 1.15 2018/08/27 11:06:25 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -94,7 +94,13 @@ int main(int argc,char *argv[]){
 
   struct addrinfo *results = NULL;
   int ecode;
-  if((ecode = getaddrinfo(Host,Port,&hints,&results)) != 0){
+  // Try a few times in case we come up before the resolver is quite ready
+  for(int tries=0; tries < 10; tries++){
+    if((ecode = getaddrinfo(Host,Port,&hints,&results)) == 0)
+      break;
+    usleep(500000);
+  }    
+  if(ecode != 0){
     fprintf(stdout,"Can't getaddrinfo(%s,%s): %s\n",Host,Port,gai_strerror(ecode));
     exit(1);
   }
