@@ -1,0 +1,17 @@
+[Unit]
+Description=HackRF 0 daemon
+After=network-online.target
+Requires=network-online.target
+After=multi-user.target
+Requires=multi-user.target
+
+[Service]
+Type=forking
+PermissionsStartOnly=1
+ExecStartPre=mkdir /run/hackrf
+ExecStartPre=chmod0777 /run/hackrf
+ExecStart=/usr/local/bin/hackrf -d -I 0 -R iq.hackrf.mcast.local
+PIDFile=/run/hackrf/0.pid
+
+[Install]
+#WantedBy=multi-user.target
