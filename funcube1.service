@@ -1,0 +1,19 @@
+[Unit]
+Description=Funcube 1 daemon
+After=sound.target
+Requires=sound.target
+After=network-online.target
+Requires=network-online.target
+After=multi-user.target
+Requires=multi-user.target
+
+[Service]
+Type=forking
+PermissionsStartOnly=1
+ExecStartPre=mkdir /run/funcube
+ExecStartPre=chmod 0777 /run/funcube
+ExecStart=/usr/local/bin/funcube -d -I 1 -R iq.vhf.mcast.local
+PIDFile=/run/funcube/1.pid
+
+[Install]
+#WantedBy=multi-user.target
