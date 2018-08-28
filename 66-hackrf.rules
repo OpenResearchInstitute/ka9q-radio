@@ -1,0 +1,2 @@
+# run in addition to standard rules to launch KA9Q hackrf daemon
+ATTR{idVendor}=="1d50", ATTR{idProduct}=="6089", ENV{SYSTEMD_WANTS}="hackrf0.service", TAG+="systemd"
