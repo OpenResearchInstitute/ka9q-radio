@@ -1,3 +1,8 @@
+# $Id$
+# Systemd service file for KA9Q's HackRF One daemon
+# Note - this is a rather compute intensive program
+# Phil Karn, KA9Q, Aug 2018
+
 [Unit]
 Description=HackRF 0 daemon
 After=network-online.target
@@ -6,10 +11,12 @@ After=multi-user.target
 Requires=multi-user.target
 
 [Service]
+User=hackrf
+Group=none
 Type=forking
 PermissionsStartOnly=1
-ExecStartPre=mkdir /run/hackrf
-ExecStartPre=chmod0777 /run/hackrf
+ExecStartPre=/bin/mkdir /run/hackrf
+ExecStartPre=/bin/chmod 0755 /run/hackrf
 ExecStart=/usr/local/bin/hackrf -d -I 0 -R iq.hackrf.mcast.local
 PIDFile=/run/hackrf/0.pid
 
