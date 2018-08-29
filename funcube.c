@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.47 2018/08/29 00:16:50 karn Exp karn $
+// $Id: funcube.c,v 1.48 2018/08/29 01:34:15 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -267,7 +267,7 @@ int main(int argc,char *argv[]){
   signal(SIGSEGV,closedown);
 #endif
 
-  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,dest,Blocksize,Ssrc,Status_filename);
+
 
   // Load/save calibration file
   {
@@ -333,6 +333,7 @@ int main(int argc,char *argv[]){
     time(&tt);
     Ssrc = tt & 0xffffffff; // low 32 bits of clock time
   }
+  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,dest,Blocksize,Ssrc,Status_filename);
   int timestamp = 0;
   int seq = 0;
   // Gain and phase corrections. These will be updated every block
