@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.8 2018/07/11 07:00:22 karn Exp karn $
+// $Id: hackrf.c,v 1.9 2018/08/27 10:22:58 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -62,6 +62,9 @@ int Blocksize = 350;
 int Device = 0;      // Which of several to use
 int Offset=1;     // Default to offset high by +Fs/4 downconvert in software to avoid DC
 int Daemonize = 0;
+
+char *Rundir = "/run/hackrf";
+
 
 float const DC_alpha = 1.0e-7;  // high pass filter coefficient for DC offset estimates, per sample
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
@@ -406,10 +409,12 @@ int main(int argc,char *argv[]){
 
     openlog("hackrf",LOG_PID,LOG_DAEMON);
 
-    mkdir("/run/hackrf",0775); // Ensure it exists, let everybody read it
+#if 0 // Now handled by systemd
+    mkdir(Rundir,0775); // Ensure it exists, let everybody read it
+#endif
     
     // see if one is already running
-    int r = asprintf(&Pid_filename,"/run/hackrf/%d.pid",Device);
+    int r = asprintf(&Pid_filename,"%s%d/pid",Rundir,Device);
     if(r == -1){
       // Unlikely, but it makes the compiler happy
       errmsg("asprintf error");
@@ -434,7 +439,7 @@ int main(int argc,char *argv[]){
       fprintf(pidfile,"%d\n",pid);
       fclose(pidfile);
     }
-    r = asprintf(&Status_filename,"/run/hackrf/%d.status",Device);
+    r = asprintf(&Status_filename,"%s%d/status",Rundir,Device);
     if(r == -1){
       // Unlikely, but it makes the compiler happy
       errmsg("asprintf error");
