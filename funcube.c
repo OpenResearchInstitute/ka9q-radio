@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.45 2018/08/27 10:48:03 karn Exp karn $
+// $Id: funcube.c,v 1.46 2018/08/27 21:41:14 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -200,6 +200,7 @@ int main(int argc,char *argv[]){
       exit(1);
 
     openlog("funcube",LOG_PID,LOG_DAEMON);
+#if 0 // Now handled by systemd
     struct stat statbuf;
     if(stat(Rundir,&statbuf) == -1){
       if(mkdir(Rundir,0775) != 0) // Ensure it exists, let everybody read it
@@ -207,8 +208,9 @@ int main(int argc,char *argv[]){
     } else if(!(statbuf.st_mode & S_IFDIR)){
       errmsg("%s already exists as non-directory\n",Rundir);
     }
+#endif
     // see if one is already running
-    int r = asprintf(&Pid_filename,"%s/%d.pid",Rundir,Device);
+    int r = asprintf(&Pid_filename,"%s%d/pid",Rundir,Device);
     if(r == -1){
       // Unlikely, but it makes the compiler happy
       errmsg("asprintf error");
@@ -233,7 +235,7 @@ int main(int argc,char *argv[]){
       fprintf(pidfile,"%d\n",pid);
       fclose(pidfile);
     }
-    r = asprintf(&Status_filename,"%s/%d.status",Rundir,Device);
+    r = asprintf(&Status_filename,"%s%d/status",Rundir,Device);
     if(r == -1){
       // Unlikely, but it makes the compiler happy
       errmsg("asprintf error");

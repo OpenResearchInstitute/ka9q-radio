@@ -1,4 +1,4 @@
-# $Id: funcube1.service,v 1.3 2018/08/28 22:25:28 karn Exp karn $
+# $Id: funcube1.service,v 1.5 2018/08/28 22:43:12 karn Exp karn $
 # Systemd unit to start up funcube daemon for funcube dongle 1
 # Phil Karn, KA9Q Aug 2018
 
@@ -12,13 +12,14 @@ After=multi-user.target
 Requires=multi-user.target
 
 [Service]
+Nice=-10
 User=funcube
 Group=users
 Type=forking
 PermissionsStartOnly=1
-ExecStartPre=-/bin/mkdir /run/funcube ; -/bin/chmod 0755 /run/funcube ; -/bin/chown funcube /run/funcube
+RuntimeDirectory=funcube/1
 ExecStart=/usr/local/bin/funcube -d -I 1 -R iq.hf.mcast.local
-PIDFile=/run/funcube/1.pid
+PIDFile=/run/funcube/1/pid
 
 [Install]
 #WantedBy=multi-user.target
