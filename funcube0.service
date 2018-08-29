@@ -12,13 +12,16 @@ After=multi-user.target
 Requires=multi-user.target
 
 [Service]
+Nice=-10
 User=funcube
 Group=users
 Type=forking
-PermissionsStartOnly=1
-ExecStartPre=-/bin/mkdir /run/funcube ; -/bin/chmod 0755 /run/funcube ; -/bin/chown funcube /run/funcube
+PermissionsStartOnly=true
+RuntimeDirectory=funcube0
+RuntimeDirectoryMode=0755
+WorkingDirectory=/tmp
 ExecStart=/usr/local/bin/funcube -d -I 0 -R iq.hf.mcast.local
-PIDFile=/run/funcube/0.pid
+PIDFile=/run/funcube0/pid
 
 [Install]
 #WantedBy=multi-user.target
