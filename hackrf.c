@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.9 2018/08/27 10:22:58 karn Exp karn $
+// $Id: hackrf.c,v 1.10 2018/08/29 00:45:49 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -343,6 +343,7 @@ void *process(void *arg){
 
 
 int main(int argc,char *argv[]){
+#if 0 // Better handled in systemd?
   // if we have root, up our priority and drop privileges
   int prio = getpriority(PRIO_PROCESS,0);
   prio = setpriority(PRIO_PROCESS,0,prio - 10);
@@ -351,6 +352,7 @@ int main(int argc,char *argv[]){
   // The sooner we do this, the fewer options there are for abuse
   if(seteuid(getuid()) != 0)
     errmsg("seteuid: %s",strerror(errno));
+#endif
 
   char *dest = "239.1.6.1"; // Default for testing
 

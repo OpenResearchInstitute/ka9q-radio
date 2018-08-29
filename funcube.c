@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.46 2018/08/27 21:41:14 karn Exp karn $
+// $Id: funcube.c,v 1.47 2018/08/29 00:16:50 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -113,6 +113,7 @@ void errmsg(const char *fmt,...){
 
 
 int main(int argc,char *argv[]){
+#if 0 // Better handled in systemd?
   // if we have root, up our priority and drop privileges
   int prio = getpriority(PRIO_PROCESS,0);
   prio = setpriority(PRIO_PROCESS,0,prio - 10);
@@ -121,6 +122,7 @@ int main(int argc,char *argv[]){
   // The sooner we do this, the fewer options there are for abuse
   if(seteuid(getuid()) != 0)
     fprintf(stderr,"seteuid: %s\n",strerror(errno));
+#endif
 
   char *dest = NULL;
 
