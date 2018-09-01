@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.78 2018/08/28 18:09:47 karn Exp karn $
+// $Id: monitor.c,v 1.79 2018/09/01 03:15:21 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -71,9 +71,8 @@ struct session {
   unsigned long packets;    // RTP packets for this session
   unsigned long empties;    // RTP but no data
 
-  float output_buffer[BUFFERSIZE][2]; // Decoded audio output, written by processing thread and read by PA callback
-  int wptr;                        // Write pointer into output_buffer
-  int rptr;                        // Read pointer into output buffer
+  long long wptr;           // Unwrapped write pointer, not wrapped (will wrap in 6 million years!)
+
   int terminate;
 };
 
@@ -95,6 +94,8 @@ struct timeval Start_unix_time;
 PaTime Start_pa_time;
 struct session *Current;
 pthread_t Display_task;
+float Output_buffer[BUFFERSIZE][2]; // Decoded audio output, written by processing thread and read by PA callback
+long long Rptr;                // Unwrapped read pointer (will overflow in 6 million years)
 
 void cleanup(void){
   Pa_Terminate();
@@ -119,16 +120,6 @@ int close_session(struct session *);
 static int pa_callback(const void *,void *,unsigned long,const PaStreamCallbackTimeInfo*,PaStreamCallbackFlags,void *);
 void *decode_task(void *x);
 void *sockproc(void *arg);
-
-// Convert unsigned number modulo buffersize to a signed 2's complement
-static inline int signmod(unsigned int const a){
-  int y = a & (BUFFERSIZE-1);
-  
-  if(y >= BUFFERSIZE/2)
-    y -= BUFFERSIZE;
-  assert(y >= -BUFFERSIZE/2 && y < BUFFERSIZE/2);
-  return y;
-}
 
 int main(int argc,char * const argv[]){
   // Try to improve our priority, then drop root
@@ -377,27 +368,13 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
     return paAbort; // can this happen??
   
   assert(framesPerBuffer < BUFFERSIZE/2); // Make sure ring buffer is big enough
-  memset(outputBuffer,0,2 * sizeof(float) * framesPerBuffer); // In case of no active streams
-  // Walk through each decoder control block and add its decoded audio into output
-  for(struct session *sp=Session; sp; sp=sp->next){
-    __sync_synchronize(); // ensure wptr is current?
-    int num = signmod(sp->wptr - sp->rptr);
-    if(num <= 0)
-      continue;
-    if(num > framesPerBuffer)
-      num = framesPerBuffer;
-
-    assert(0 <= num && num <= framesPerBuffer);
-    float *out = outputBuffer;
-    for(int n=0; n < num; n++){
-      *out++ += sp->output_buffer[sp->rptr][0];
-      *out++ += sp->output_buffer[sp->rptr][1];
-      // Burn after reading since writers may skip over silence, or the stream may stall
-      // This prevents repeated playback of the same final snippet
-      sp->output_buffer[sp->rptr][0] = 0;
-      sp->output_buffer[sp->rptr][1] = 0;
-      sp->rptr = (sp->rptr + 1) & (BUFFERSIZE-1);
-    }
+  float *out = outputBuffer;
+  for(int n=0; n < framesPerBuffer; n++){
+    int rptr = Rptr++ & (BUFFERSIZE-1);
+    *out++ = Output_buffer[rptr][0];
+    *out++ = Output_buffer[rptr][1];
+    Output_buffer[rptr][0] = 0;
+    Output_buffer[rptr][1] = 0;
   }
   return paContinue;
 }
@@ -430,21 +407,11 @@ void *decode_task(void *arg){
 
   sp->gain = 1;    // 0 dB by default
   sp->pan = 0;     // center by default
-  sp->wptr = 0;
+  sp->wptr = Rptr;
 
   // Main loop; run until asked to quit
   while(!sp->terminate){
 
-#if 0
-    // Wait until the buffer drains a bit
-    // Give input packet sorting a chance to work on out of sequence packets
-    while(1){
-      __sync_synchronize(); // ensure rptr is current?
-      if(signmod(sp->wptr - sp->rptr) < 960) // 20 ms @ 48 kHz
-	break;
-      usleep(1000); // 1 ms
-    }
-#endif
     struct packet *pkt = NULL;
     // Wait for packet to appear on queue
     pthread_mutex_lock(&sp->qmutex);
@@ -455,11 +422,12 @@ void *decode_task(void *arg){
     pkt->next = NULL;
     pthread_mutex_unlock(&sp->qmutex);
 
+    sp->type = pkt->rtp.type;
     sp->packets++; // Count all packets, regardless of type
       
     int samples_skipped = rtp_process(&sp->rtp_state,&pkt->rtp,0); // get rid of last arg
     if(samples_skipped < 0)
-      goto done; // old dupe?
+      goto done; // old dupe? What if it's simply out of sequence?
 
     // Compute gains and delays for stereo imaging
     // -6dB for each channel in the center
@@ -470,90 +438,90 @@ void *decode_task(void *arg){
     int right_delay = 0;
     // Also delay less favored channel 1 ms max
     // This is really what drives source localization in humans
-    if(sp->pan > 0){
-      // Delay left channel
-      left_delay = round(sp->pan * .001 * SAMPRATE);
-    } else if(sp->pan < 0){
-      // Delay right channel
-      right_delay = round(-sp->pan * .001 * SAMPRATE);
-    }
+    if(sp->pan > 0)
+      left_delay = round(sp->pan * .001 * SAMPRATE); // Delay left channel
+    else if(sp->pan < 0)
+      right_delay = round(-sp->pan * .001 * SAMPRATE); // Delay right channel
+
     assert(left_delay >= 0 && right_delay >= 0);
 
-    // Decode frame, write into output buffer
-    signed short *data_ints = (signed short *)&pkt->data[0];
-    switch(pkt->rtp.type){
-    case PCM_STEREO_PT:
-      sp->type = PCM_STEREO_PT;
-      sp->channels = 2;
-      sp->frame_size = pkt->len / 4; // Number of stereo samples
-      if(samples_skipped > 0 && !pkt->rtp.marker && samples_skipped < 3840){
-	// Short loss; pad with implicit zeroes
-	sp->wptr = (sp->wptr + samples_skipped) & (BUFFERSIZE-1);
-      }	  
-      for(int i=0; i < sp->frame_size; i++){
-	sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = SCALE * (signed short)ntohs(*data_ints++) * left_gain;
-	sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = SCALE * (signed short)ntohs(*data_ints++) * right_gain;
-      }
-      sp->wptr = (sp->wptr + sp->frame_size) & (BUFFERSIZE-1);
-      break;
-    case PCM_MONO_PT:
-      sp->type = PCM_MONO_PT;
-      sp->channels = 1;
-      sp->frame_size = pkt->len / 2; // Number of stereo samples
+    if(samples_skipped > 0){
       // gap in PCM data
-      if(samples_skipped > 0 && !pkt->rtp.marker && samples_skipped < 3840){
-	// Short loss; pad with implicit zeroes
-	sp->wptr = (sp->wptr + samples_skipped) & (BUFFERSIZE-1);
-      }	  
-      for(int i=0; i < sp->frame_size; i++){
-	float s = SCALE * (signed short)ntohs(*data_ints++);
-	sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = s * left_gain;
-	sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = s * right_gain;
-      }
-      sp->wptr = (sp->wptr + sp->frame_size) & (BUFFERSIZE-1);
-      break;
-    case OPUS_PT:
-    case 20:
-      sp->type = OPUS_PT;
-      sp->channels = 2;
-      sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
-      sp->opus_bandwidth = opus_packet_get_bandwidth(pkt->data);
-
-      if(!sp->opus){
-	int error;
-	sp->opus = opus_decoder_create(SAMPRATE,2,&error);
-	assert(sp->opus);
-      }
-      if(samples_skipped > 0){
-	if(pkt->rtp.marker || samples_skipped >= 3840) {
+      if(pkt->rtp.marker || samples_skipped >= 3840){
+	if(sp->opus)
 	  opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder and catch up
-	} else {
+      } else {
+	// Short gap
+ 	if(sp->opus && sp->wptr >= Rptr){ // Don't do this if it's already too late
 	  // Decode any FEC, otherwise interpolate or create comfort noise
 	  float bounce[samples_skipped][2]; // pick a better number
 	  int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],samples_skipped,1);
 	  assert(samples <= samples_skipped);
+	  int left = sp->wptr + left_delay;
+	  int right = sp->wptr + right_delay;
 	  for(int i=0; i<samples; i++){
-	    sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
-	    sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
+	    Output_buffer[left++ & (BUFFERSIZE-1)][0] += bounce[i][0] * left_gain;
+	    Output_buffer[right++ & (BUFFERSIZE-1)][1] += bounce[i][1] * right_gain;
 	  }
-	  sp->wptr = (sp->wptr + samples) & (BUFFERSIZE-1);
 	}
+      }
+      sp->wptr += samples_skipped;	  // Short loss; pad with implicit zeroes
+    }
+
+    // Catch up to any overrun by adding playout delay
+    if(sp->wptr < Rptr)
+      sp->wptr = Rptr;      // Underrun, catch up
+
+    // Decode frame, add into output buffer
+    int left = sp->wptr + left_delay;
+    int right = sp->wptr + right_delay;
+    signed short *data_ints = (signed short *)&pkt->data[0];	
+
+    switch(pkt->rtp.type){
+    case PCM_STEREO_PT:
+      sp->channels = 2;
+      sp->frame_size = pkt->len / 4; // Number of stereo samples
+      for(int i=0; i < sp->frame_size; i++){
+	Output_buffer[left++ & (BUFFERSIZE-1)][0] += SCALE * (signed short)ntohs(*data_ints++) * left_gain;
+	Output_buffer[right++ & (BUFFERSIZE-1)][1] += SCALE * (signed short)ntohs(*data_ints++) * right_gain;
+      }
+      break;
+    case PCM_MONO_PT:
+      sp->channels = 1;
+      sp->frame_size = pkt->len / 2; // Number of stereo samples
+      for(int i=0; i < sp->frame_size; i++){
+	float s = SCALE * (signed short)ntohs(*data_ints++);
+	Output_buffer[left++ & (BUFFERSIZE-1)][0] += s * left_gain;
+	Output_buffer[right++ & (BUFFERSIZE-1)][1] += s * right_gain;
+      }
+      break;
+    case OPUS_PT:
+    case 20:
+      sp->channels = 2;
+      sp->frame_size = opus_packet_get_nb_samples(pkt->data,pkt->len,SAMPRATE);
+      sp->opus_bandwidth = opus_packet_get_bandwidth(pkt->data);
+      
+      if(!sp->opus){
+	int error;
+	sp->opus = opus_decoder_create(SAMPRATE,2,&error);
+	assert(sp->opus);
       }
       {
 	float bounce[sp->frame_size][2];
 	int samples = opus_decode_float(sp->opus,pkt->data,pkt->len,&bounce[0][0],sp->frame_size,0);
 	assert(samples <= sp->frame_size);
 	for(int i=0; i<samples; i++){
-	  sp->output_buffer[(sp->wptr + i + left_delay) & (BUFFERSIZE-1)][0] = bounce[i][0] * left_gain;
-	  sp->output_buffer[(sp->wptr + i + right_delay) & (BUFFERSIZE-1)][1] = bounce[i][1] * right_gain;
+	  Output_buffer[left++ & (BUFFERSIZE-1)][0] += bounce[i][0] * left_gain;
+	  Output_buffer[right++ & (BUFFERSIZE-1)][1] += bounce[i][1] * right_gain;
 	}
-	sp->wptr = (sp->wptr + samples) & (BUFFERSIZE-1);
       }
       break;
     default:
+      sp->channels = 0;
       sp->frame_size = 0;
       break;
     }
+    sp->wptr += sp->frame_size;
     sp->rtp_state.expected_timestamp = pkt->rtp.timestamp + sp->frame_size;
   done:;
     free(pkt); pkt = NULL;
@@ -584,7 +552,7 @@ void *display(void *arg){
 
     wmove(Mainscr,row,0);
 
-    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain   Pan      SSRC  Queue Source/Dest");
+    mvwprintw(Mainscr,row++,0,"Type        ch BW Gain   Pan      SSRC     Queue Source/Dest");
     for(struct session *sp = Session; sp; sp = sp->next){
       int bw = 0; // Audio bandwidth (not bitrate) in kHz
       char *type,typebuf[30];
@@ -640,8 +608,8 @@ void *display(void *arg){
       }      
       char temp[strlen(sp->src_addr)+strlen(sp->src_port)+strlen(sp->dest) + 20]; // Allow some room
       snprintf(temp,sizeof(temp),"%s:%s -> %s",sp->src_addr,sp->src_port,sp->dest);
-      double queue =  (double)signmod(sp->wptr - sp->rptr)/SAMPRATE;
-      mvwprintw(Mainscr,row,0,"%-12s%2d%3d%+5.0lf%+6.2lf%10x%7.3lf %s",
+      double queue =  (double)(sp->wptr - Rptr)/SAMPRATE;
+      mvwprintw(Mainscr,row,0,"%-12s%2d%3d%+5.0lf%+6.2lf%10x%10.2lf %s",
 		type,
 		sp->channels,
 		bw,
@@ -657,7 +625,7 @@ void *display(void *arg){
       if(sp->rtp_state.drops)
 	wprintw(Mainscr," drops %'lu",sp->rtp_state.drops);
       
-      if(queue != 0)
+      if(queue >= 0)
 	mvwchgat(Mainscr,row,40,5,A_BOLD,0,NULL);
 
       if(sp == Current)
@@ -724,7 +692,7 @@ void *display(void *arg){
       break;
     case 'r':
       // Reset playout queue
-      Current->wptr = Current->rptr;
+      Current->wptr = Rptr;
       // Reset counters
       Current->packets = 0;
       Current->rtp_state.dupes = 0;
