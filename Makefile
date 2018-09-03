@@ -1,11 +1,11 @@
-# $Id: Makefile,v 1.115 2018/08/28 22:39:18 karn Exp karn $
+# $Id: Makefile,v 1.116 2018/08/29 09:26:00 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LDLIBS=-lpthread -lbsd -lm
-EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio 
+EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio pcmcat
 AFILES=bandplan.txt help.txt modes.txt
 SYSTEMD_FILES=funcube0.service funcube1.service hackrf0.service radio34.service radio39.service packet.service aprsfeed.service opus-hf.service opus-vhf.service opus-hackrf.service opus-uhf.service
 UDEV_FILES=66-hackrf.rules 69-funcube-ka9q.rules
@@ -54,6 +54,9 @@ opussend: opussend.o libradio.a
 packet: packet.o ax25.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lbsd -lm -lpthread
 
+pcmcat: pcmcat.o libradio.a
+	$(CC) -g -o $@ $^ -lm -lbsd -lpthread 
+
 pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lbsd
 
@@ -81,6 +84,7 @@ monitor.o: monitor.c misc.h multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h
+pcmcat.o: pcmcat.c multicast.h
 pcmsend.o: pcmsend.c misc.h multicast.h
 
 # Components of libfcd.a
