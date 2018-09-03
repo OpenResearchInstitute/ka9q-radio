@@ -1,4 +1,4 @@
-// $Id: pcmcat.c,v 1.2 2018/02/22 06:52:04 karn Exp karn $
+// $Id: pcmcat.c,v 1.3 2018/09/03 04:51:35 karn Exp karn $
 // Receive and stream PCM RTP data to stdout
 
 #define _GNU_SOURCE 1
@@ -100,7 +100,7 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"vs:")) != EOF){
+  while((c = getopt(argc,argv,"vhs:")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
@@ -108,13 +108,15 @@ int main(int argc,char *argv[]){
     case 's':
       Ssrc = strtol(optarg,NULL,0);
       break;
+    case 'h':
     default:
       fprintf(stderr,"Usage: %s [-v] [-s ssrc] mcast_address\n",argv[0]);
+      fprintf(stderr,"       hex ssrc requires 0x prefix\n");
       exit(1);
     }
   }
-  if(optind < argc-1){
-      fprintf(stderr,"Usage: %s [-v] mcast_address\n",argv[0]);
+  if(optind != argc-1){
+    fprintf(stderr,"mcast_address not specified\n");
       exit(1);
   }
   Mcast_address_text = argv[optind];
@@ -164,7 +166,7 @@ int main(int argc,char *argv[]){
       // Not found
       if(Sessions || (Ssrc !=0 && rtp.ssrc != Ssrc)){
 	// Only take specified SSRC or first SSRC for now
-	fprintf(stderr,"Ignoring new SSRC %x\n",rtp.ssrc);
+	fprintf(stderr,"Ignoring new SSRC 0x%x\n",rtp.ssrc);
 	continue;
       }
 
@@ -176,7 +178,7 @@ int main(int argc,char *argv[]){
 		  //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
       if(Verbose)
-	fprintf(stderr,"New session from %s:%s, type %d, ssrc %x\n",sp->addr,sp->port,rtp.type,sp->ssrc);
+	fprintf(stderr,"New session from %s:%s, type %d, ssrc 0x%x\n",sp->addr,sp->port,rtp.type,sp->ssrc);
       Sessions++;
     }
     int samples_skipped = rtp_process(&sp->rtp_state,&rtp,0); // get rid of last arg
