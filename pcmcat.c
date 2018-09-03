@@ -39,6 +39,7 @@ uint32_t Ssrc;
 struct pcmstream *Pcmstream;
 int Verbose;
 int Sessions; // Session count - limit to 1 for now
+int Stereo;   // Force stereo output
 
 struct pcmstream *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   struct pcmstream *sp;
@@ -100,8 +101,11 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"vhs:")) != EOF){
+  while((c = getopt(argc,argv,"vhs:2")) != EOF){
     switch(c){
+    case '2': // Force stereo
+      Stereo++;
+      break;
     case 'v':
       Verbose++;
       break;
@@ -128,14 +132,15 @@ int main(int argc,char *argv[]){
 	    Mcast_address_text);
     exit(1);
   }
-  unsigned char buffer[Bufsize];
-  struct sockaddr sender;
+
 
   // audio input thread
   // Receive audio multicasts, multiplex into sessions, send to output
   // What do we do if we get different streams?? think about this
   while(1){
+    struct sockaddr sender;
     socklen_t socksize = sizeof(sender);
+    unsigned char buffer[Bufsize];
     int size = recvfrom(Input_fd,buffer,sizeof(buffer),0,&sender,&socksize);
     if(size == -1){
       if(errno != EINTR){ // Happens routinely
@@ -158,7 +163,7 @@ int main(int argc,char *argv[]){
     if(size <= 0)
       continue;
 
-    if(rtp.type != 10 && rtp.type != 11) // 1 byte, no need to byte swap
+    if(rtp.type != PCM_STEREO_PT && rtp.type != PCM_MONO_PT)
       continue; // Discard unknown RTP types to avoid polluting session table
 
     struct pcmstream *sp = lookup_session(&sender,rtp.ssrc);
@@ -166,7 +171,8 @@ int main(int argc,char *argv[]){
       // Not found
       if(Sessions || (Ssrc !=0 && rtp.ssrc != Ssrc)){
 	// Only take specified SSRC or first SSRC for now
-	fprintf(stderr,"Ignoring new SSRC 0x%x\n",rtp.ssrc);
+	if(Verbose)
+	  fprintf(stderr,"Ignoring new SSRC 0x%x\n",rtp.ssrc);
 	continue;
       }
 
@@ -177,8 +183,17 @@ int main(int argc,char *argv[]){
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
 		  //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
-      if(Verbose)
-	fprintf(stderr,"New session from %s:%s, type %d, ssrc 0x%x\n",sp->addr,sp->port,rtp.type,sp->ssrc);
+      if(Verbose){
+	fprintf(stderr,"New session from %s:%s, type %d (%s), ssrc 0x%x\n",sp->addr,sp->port,rtp.type,
+		rtp.type == PCM_STEREO_PT ? "Stereo" : rtp.type == PCM_MONO_PT ? "Mono" : "??",
+		sp->ssrc);
+	if(rtp.type == PCM_STEREO_PT && !Stereo){
+	  fprintf(stderr,"Downmixing to mono\n");
+	} else if(rtp.type == PCM_MONO_PT && Stereo){
+	  fprintf(stderr,"Expanding to pseudo-stereo\n");
+	}
+
+      }
       Sessions++;
     }
     int samples_skipped = rtp_process(&sp->rtp_state,&rtp,0); // get rid of last arg
@@ -188,15 +203,39 @@ int main(int argc,char *argv[]){
     sp->type = rtp.type;
     int samples = 0;
 
+    signed short *sdp = (signed short *)dp;
     switch(rtp.type){
-    case 11: // Mono only for now
+    case PCM_STEREO_PT: // Stereo
+      samples = size / 4;
+      while(samples-- > 0){
+	// Swap sample to host order, cat to stdout
+	signed short left = ntohs(*sdp++);
+	signed short right = ntohs(*sdp++);
+	if(Stereo){
+	  putchar(left);
+	  putchar(left >> 8);
+	  putchar(right);
+	  putchar(right >> 8);
+	} else {
+	  // Downmix to mono
+	  signed short samp = (left + right) / 2;
+	  putchar(samp);
+	  putchar(samp >> 8);
+	}
+      }
+      break;
+    case PCM_MONO_PT: // Mono
       samples = size / 2;
-      signed short *sdp = (signed short *)dp;
       while(samples-- > 0){
 	// Swap sample to host order, cat to stdout
 	signed short d = ntohs(*sdp++);
-	putchar(d & 0xff);
-	putchar((d >> 8) & 0xff);
+	putchar(d);
+	putchar(d >> 8);
+	if(Stereo){
+	  // Force to pseudo-stereo
+	  putchar(d);
+	  putchar(d >> 8);
+	}
       }
       break;
     default:
