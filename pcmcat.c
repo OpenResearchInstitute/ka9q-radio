@@ -1,4 +1,4 @@
-// $Id: pcmcat.c,v 1.1 2018/02/22 06:25:32 karn Exp karn $
+// $Id: pcmcat.c,v 1.2 2018/02/22 06:52:04 karn Exp karn $
 // Receive and stream PCM RTP data to stdout
 
 #define _GNU_SOURCE 1
@@ -21,32 +21,24 @@ struct pcmstream {
   struct pcmstream *prev;       // Linked list pointers
   struct pcmstream *next; 
   uint32_t ssrc;            // RTP Sending Source ID
-  int eseq;                 // Next expected RTP sequence number
-  int etime;                // Next expected RTP timestamp
   int type;                 // RTP type (10,11,20)
   
   struct sockaddr sender;
   char addr[NI_MAXHOST];    // RTP Sender IP address
   char port[NI_MAXSERV];    // RTP Sender source port
 
-
-  unsigned long age;
-  unsigned long rtp_packets;    // RTP packets for this session
-  unsigned long drops;      // Apparent rtp packet drops
-  unsigned long invalids;   // Unknown RTP type
-  unsigned long empties;    // RTP but no data
-  unsigned long dupes;      // Duplicate or old serial numbers
+  struct rtp_state rtp_state;
 };
 
-
-
-char *Mcast_address_text = "audio-pcm-mcast.local";
+char *Mcast_address_text;
 int const Bufsize = 2048;
 float const Samprate = 48000;
 
 int Input_fd = -1;
+uint32_t Ssrc;
 struct pcmstream *Pcmstream;
 int Verbose;
+int Sessions; // Session count - limit to 1 for now
 
 struct pcmstream *lookup_session(const struct sockaddr *sender,const uint32_t ssrc){
   struct pcmstream *sp;
@@ -78,8 +70,6 @@ struct pcmstream *make_session(struct sockaddr const *sender,uint32_t ssrc,uint1
   // Initialize entry
   memcpy(&sp->sender,sender,sizeof(struct sockaddr));
   sp->ssrc = ssrc;
-  sp->eseq = seq;
-  sp->etime = timestamp;
 
   // Put at head of bucket chain
   sp->next = Pcmstream;
@@ -110,20 +100,24 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"I:v")) != EOF){
+  while((c = getopt(argc,argv,"vs:")) != EOF){
     switch(c){
     case 'v':
       Verbose++;
       break;
-    case 'I':
-      Mcast_address_text = optarg;
+    case 's':
+      Ssrc = strtol(optarg,NULL,0);
       break;
     default:
-      fprintf(stderr,"Usage: %s [-v] [-I mcast_address]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -I %s\n",argv[0],Mcast_address_text);
+      fprintf(stderr,"Usage: %s [-v] [-s ssrc] mcast_address\n",argv[0]);
       exit(1);
     }
   }
+  if(optind < argc-1){
+      fprintf(stderr,"Usage: %s [-v] mcast_address\n",argv[0]);
+      exit(1);
+  }
+  Mcast_address_text = argv[optind];
 
   // Set up multicast input
   Input_fd = setup_mcast(Mcast_address_text,0);
@@ -132,32 +126,15 @@ int main(int argc,char *argv[]){
 	    Mcast_address_text);
     exit(1);
   }
-  struct iovec iovec[2];
-  struct rtp_header rtp;
-  signed short data[Bufsize];
-  
-  iovec[0].iov_base = &rtp;
-  iovec[0].iov_len = sizeof(rtp);
-  iovec[1].iov_base = data;
-  iovec[1].iov_len = sizeof(data);
-
-  struct msghdr message;
+  unsigned char buffer[Bufsize];
   struct sockaddr sender;
-  message.msg_name = &sender;
-  message.msg_namelen = sizeof(sender);
-  message.msg_iov = &iovec[0];
-  message.msg_iovlen = 2;
-  message.msg_control = NULL;
-  message.msg_controllen = 0;
-  message.msg_flags = 0;
 
   // audio input thread
   // Receive audio multicasts, multiplex into sessions, send to output
   // What do we do if we get different streams?? think about this
   while(1){
-    int size;
-
-    size = recvmsg(Input_fd,&message,0);
+    socklen_t socksize = sizeof(sender);
+    int size = recvfrom(Input_fd,buffer,sizeof(buffer),0,&sender,&socksize);
     if(size == -1){
       if(errno != EINTR){ // Happens routinely
 	perror("recvmsg");
@@ -165,67 +142,57 @@ int main(int argc,char *argv[]){
       }
       continue;
     }
-    if(size < sizeof(rtp)){
-      usleep(500); // Avoid tight loop
+    if(size < RTP_MIN_SIZE)
       continue; // Too small to be valid RTP
+
+    struct rtp_header rtp;
+    unsigned char *dp = ntoh_rtp(&rtp,buffer);
+    size -= dp - buffer;
+    if(rtp.pad){
+      // Remove padding
+      size -= dp[size-1];
+      rtp.pad = 0;
     }
-    // To host order
-    rtp.ssrc = ntohl(rtp.ssrc);
-    rtp.seq = ntohs(rtp.seq);
-    rtp.timestamp = ntohl(rtp.timestamp);
+    if(size <= 0)
+      continue;
 
-    if(rtp.mpt != 10 && rtp.mpt != 20 && rtp.mpt != 11) // 1 byte, no need to byte swap
-      goto endloop; // Discard unknown RTP types to avoid polluting session table
-
+    if(rtp.type != 10 && rtp.type != 11) // 1 byte, no need to byte swap
+      continue; // Discard unknown RTP types to avoid polluting session table
 
     struct pcmstream *sp = lookup_session(&sender,rtp.ssrc);
     if(sp == NULL){
       // Not found
+      if(Sessions || (Ssrc !=0 && rtp.ssrc != Ssrc)){
+	// Only take specified SSRC or first SSRC for now
+	fprintf(stderr,"Ignoring new SSRC %x\n",rtp.ssrc);
+	continue;
+      }
+
       if((sp = make_session(&sender,rtp.ssrc,rtp.seq,rtp.timestamp)) == NULL){
 	fprintf(stderr,"No room for new session!!\n");
-	goto endloop;
+	continue;
       }
       getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
 		  //		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
-      sp->dupes = 0;
-      sp->age = 0;
       if(Verbose)
-	fprintf(stderr,"New session from %s, ssrc %x\n",sp->addr,sp->ssrc);
+	fprintf(stderr,"New session from %s:%s, type %d, ssrc %x\n",sp->addr,sp->port,rtp.type,sp->ssrc);
+      Sessions++;
     }
-    sp->age = 0;
-    int drop = 0;
+    int samples_skipped = rtp_process(&sp->rtp_state,&rtp,0); // get rid of last arg
+    if(samples_skipped < 0)
+      continue; // old dupe? What if it's simply out of sequence?
 
-    sp->rtp_packets++;
-    if(rtp.seq != sp->eseq){
-      int const diff = (int)(rtp.seq - sp->eseq);
-      if(Verbose > 1)
-	fprintf(stderr,"ssrc %lx: expected %d got %d\n",(unsigned long)rtp.ssrc,sp->eseq,rtp.seq);
-      if(diff < 0 && diff > -10){
-	sp->dupes++;
-	goto endloop;	// Drop probable duplicate
-      }
-      drop = diff; // Apparent # packets dropped
-      sp->drops += abs(drop);
-      // Should probably emit 0 padding here
-    }
-    sp->eseq = (rtp.seq + 1) & 0xffff;
-
-    sp->type = rtp.mpt;
-    size -= sizeof(rtp); // Bytes in payload
-    if(size <= 0){
-      sp->empties++;
-      goto endloop; // empty?!
-    }
+    sp->type = rtp.type;
     int samples = 0;
 
-    switch(rtp.mpt){
+    switch(rtp.type){
     case 11: // Mono only for now
       samples = size / 2;
-      signed short *dp = data;
+      signed short *sdp = (signed short *)dp;
       while(samples-- > 0){
 	// Swap sample to host order, cat to stdout
-	signed short d = ntohs(*dp++);
+	signed short d = ntohs(*sdp++);
 	putchar(d & 0xff);
 	putchar((d >> 8) & 0xff);
       }
@@ -234,9 +201,6 @@ int main(int argc,char *argv[]){
       samples = 0;
       break; // ignore
     }
-    sp->etime = rtp.timestamp + samples;
-
-  endloop:;
   }
   exit(0);
 }
