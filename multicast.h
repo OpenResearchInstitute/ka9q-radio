@@ -1,4 +1,4 @@
-// $Id: multicast.h,v 1.17 2018/07/11 07:00:02 karn Exp karn $
+// $Id: multicast.h,v 1.18 2018/08/04 21:06:16 karn Exp karn $
 // Multicast and RTP functions, constants and structures
 // Not every RTP module uses these yet, they need to be revised
 // Copyright 2018, Phil Karn, KA9Q
@@ -54,5 +54,49 @@ struct rtp_state {
 // Function to process incoming RTP packet headers
 // Returns number of samples dropped or skipped by silence suppression, if any
 int rtp_process(struct rtp_state *state,struct rtp_header *rtp,int samples);
+
+// Utility routines for reading from, and writing integers to, network format in char buffers
+static inline unsigned short get8(unsigned char const *dp){
+  return *dp;
+}
+
+static inline unsigned short get16(unsigned char const *dp){
+  return dp[0] << 8 | dp[1];
+}
+
+static inline unsigned long get24(unsigned char const *dp){
+  return dp[0] << 16 | dp[1] << 8 | dp[2];
+}
+
+static inline unsigned long get32(unsigned char const *dp){
+  return dp[0] << 24 | dp[1] << 16 | dp[2] << 8 | dp[3];
+}
+
+static inline unsigned char *put8(unsigned char *dp,uint8_t x){
+  *dp++ = x;
+  return dp;
+}
+
+static inline unsigned char *put16(unsigned char *dp,uint16_t x){
+  *dp++ = x >> 8;
+  *dp++ = x;
+  return dp;
+}
+
+static inline unsigned char *put24(unsigned char *dp,uint32_t x){
+  *dp++ = x >> 16;
+  *dp++ = x >> 8;
+  *dp++ = x;
+  return dp;
+}
+
+static inline unsigned char *put32(unsigned char *dp,uint32_t x){
+  *dp++ = x >> 24;
+  *dp++ = x >> 16;
+  *dp++ = x >> 8;
+  *dp++ = x;
+  return dp;
+}
+
 
 #endif
