@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.28 2018/08/26 07:29:26 karn Exp karn $
+// $Id: multicast.c,v 1.29 2018/09/01 22:32:05 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -214,14 +214,6 @@ int setup_mcast(char const *target,int output){
 // Convert RTP header from network (wire) big-endian format to internal host structure
 // Written to be insensitive to host byte order and C structure layout and padding
 // Use of unsigned formats is important to avoid unwanted sign extension
-
-static inline unsigned short get16(unsigned char *dp){
-  return dp[0] << 8 | dp[1];
-}
-static inline unsigned long get32(unsigned char *dp){
-  return dp[0] << 24 | dp[1] << 16 | dp[2] << 8 | dp[3];
-}
-
 unsigned char *ntoh_rtp(struct rtp_header *rtp,unsigned char *data){
   unsigned char *dp = data;
 
@@ -262,21 +254,6 @@ unsigned char *ntoh_rtp(struct rtp_header *rtp,unsigned char *data){
 
 // Convert RTP header from internal host structure to network (wire) big-endian format
 // Written to be insensitive to host byte order and C structure layout and padding
-
-static inline unsigned char *put16(unsigned char *dp,uint16_t x){
-  *dp++ = x >> 8;
-  *dp++ = x;
-  return dp;
-}
-static inline unsigned char *put32(unsigned char *dp,uint32_t x){
-  *dp++ = x >> 24;
-  *dp++ = x >> 16;
-  *dp++ = x >> 8;
-  *dp++ = x;
-  return dp;
-}
-
-
 unsigned char *hton_rtp(unsigned char *data, struct rtp_header *rtp){
   rtp->cc &= 0xf; // Force it to be legal
   rtp->type &= 0x7f;
