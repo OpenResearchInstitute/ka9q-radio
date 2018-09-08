@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.119 2018/09/05 08:18:22 karn Exp karn $
+// $Id: main.c,v 1.120 2018/09/08 06:06:21 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast audio
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -496,14 +496,16 @@ void *rtcp_send(void *arg){
     // CNAME
     char hostname[1024];
     gethostname(hostname,sizeof(hostname));
-    char *string;
-    asprintf(&string,"radio@%s",hostname);
-    if(strlen(string) <= 255){
+    char *string = NULL;
+    int sl = asprintf(&string,"radio@%s",hostname);
+    if(sl > 0 && sl <= 255){
       sdes[0].type = CNAME;
       strcpy(sdes[0].message,string);
       sdes[0].mlen = strlen(sdes[0].message);
     }
-    free(string); string = NULL;
+    if(string){
+      free(string); string = NULL;
+    }
 
     sdes[1].type = NAME;
     strcpy(sdes[1].message,"KA9Q Radio Program");
