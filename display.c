@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.134 2018/08/12 08:31:40 karn Exp karn $
+// $Id: display.c,v 1.135 2018/09/05 08:18:22 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -842,7 +842,7 @@ void *display(void *arg){
 	if(strlen(str) <= 0)
 	  break;
 
-	int const i = setup_mcast(str,0,0);
+	int const i = setup_mcast(str,0,0,0);
 	if(i == -1){
 	  beep();
 	  break;
