@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.70 2018/09/01 22:32:51 karn Exp karn $
+// $Id: radio.h,v 1.71 2018/09/05 08:18:22 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -206,7 +206,6 @@ extern int Tunestep;
 extern struct modetab Modes[];
 extern int Nmodes;
 extern struct audio Audio;
-extern int DAC_samprate;
 extern int Verbose;
 extern int SDR_correct;
 
@@ -253,8 +252,9 @@ void *demod_linear(void *);
 
 int send_mono_audio(struct audio *,const float *,int);
 int send_stereo_audio(struct audio *,const float *,int);
-int setup_audio(struct audio *);
+int setup_audio(struct audio *,int);
 void audio_cleanup(void *);
 
+extern int Mcast_ttl;
 
 #endif
