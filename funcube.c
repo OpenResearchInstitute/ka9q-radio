@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.51 2018/09/08 06:06:21 karn Exp karn $
+// $Id: funcube.c,v 1.52 2018/10/05 05:33:04 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -742,14 +742,40 @@ void *agc(void *arg){
   FCD.status.mixer_gain = 19;
   FCD.status.if_gain = 0;
 
-  unsigned char val = 0;
+  unsigned char val = 1;
   fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&val,sizeof(val));
   fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&val,sizeof(val));
+  val = 0;
   fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_IF_GAIN1,&val,sizeof(val));
   while(1){
     usleep(100000); // 100 ms
   
     float powerdB = 10*log10f(FCD.in_power);
+
+#if 1
+    if(powerdB > AGC_upper){
+      if(FCD.status.lna_gain){
+	val = FCD.status.lna_gain = 0;
+	fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&val,sizeof(val));
+      } else if(FCD.status.mixer_gain){
+	val = FCD.status.mixer_gain = 0;
+	fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&val,sizeof(val));
+      }
+    } else if(powerdB < AGC_lower){
+      if(FCD.status.mixer_gain == 0){
+	FCD.status.mixer_gain = 19;
+	val = 1;
+	fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_MIXER_GAIN,&val,sizeof(val));
+      } else if(FCD.status.lna_gain == 0){
+	FCD.status.lna_gain = 24;
+	val = 1;
+	fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_LNA_GAIN,&val,sizeof(val));
+      }
+    }
+
+
+#else
+    // This has problems, probably because of extra gain stages ahead of the Mirics tuner
     int change = 0;
 
     // Hysteresis to keep AGC from changing too often
@@ -760,11 +786,11 @@ void *agc(void *arg){
     } else
       continue;
     
-    // Use Mirics gain map
     int old_lna_gain = FCD.status.lna_gain;
     int old_mixer_gain = FCD.status.mixer_gain;
     int old_if_gain = FCD.status.if_gain;
 
+    // Use Mirics gain map
     int newgain = old_if_gain + old_mixer_gain + old_lna_gain + change;
 
     // For all frequencies, start by turning up the IF gain until the mixer goes on at 19 dB
@@ -801,8 +827,16 @@ void *agc(void *arg){
 	FCD.status.lna_gain = 7;	
     }
     FCD.status.if_gain = newgain - FCD.status.lna_gain - FCD.status.mixer_gain;
+#if 0
     if(FCD.status.if_gain >= 60)
       FCD.status.if_gain = 59; // Limited to +59 dB 
+#else
+    if(FCD.status.if_gain >= 10)
+      FCD.status.if_gain = 9; // Limited to +9 dB - hack
+#endif
+
+
+
 
     // Apply any changes
     if(old_lna_gain != FCD.status.lna_gain){
@@ -817,6 +851,7 @@ void *agc(void *arg){
       unsigned char val = FCD.status.if_gain;
       fcdAppSetParam(FCD.phd,FCD_CMD_APP_SET_IF_GAIN1,&val,sizeof(val));
     }
+#endif
   }
   return NULL;
 }
