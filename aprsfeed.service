@@ -1,4 +1,4 @@
-# $Id: aprsfeed.service,v 1.5 2018/10/08 08:58:23 karn Exp karn $
+# $Id: aprsfeed.service,v 1.6 2018/10/08 09:25:32 karn Exp karn $
 # Systemd startup module for APRS network feed - requires configuration with callsign and authenticator!
 # Phil Karn, KA9Q Aug 2018
 
@@ -16,6 +16,7 @@ ExecStartPre=/bin/chown aprsfeed /var/log/aprsfeed.log
 # change NOCALL to your reporting callsign
 ExecStart=/usr/local/bin/aprsfeed -I ax25.mcast.local,eth0 -u NOCALL -h sjc.aprs2.net -f /var/log/aprsfeed.log
 Restart=always
+RestartSec=1
 
 [Install]
 WantedBy=multi-user.target
