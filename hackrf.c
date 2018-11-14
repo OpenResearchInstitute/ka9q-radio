@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.12 2018/09/05 08:18:22 karn Exp karn $
+// $Id: hackrf.c,v 1.13 2018/09/08 06:06:21 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -403,10 +403,6 @@ int main(int argc,char *argv[]){
     }
   }
   if(Daemonize){
-    // I know this is deprecated, replace it someday with posix_spawn()
-    if(daemon(0,0) != 0)
-      exit(1);
-
     openlog("hackrf",LOG_PID,LOG_DAEMON);
 
 #if 0 // Now handled by systemd
