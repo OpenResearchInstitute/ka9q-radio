@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.83 2018/10/12 00:21:13 karn Exp karn $
+// $Id: monitor.c,v 1.84 2018/11/11 21:50:43 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -64,9 +64,10 @@ struct session {
   unsigned long packets;    // RTP packets for this session
   unsigned long empties;    // RTP but no data
 
-  long long wptr;           // Unwrapped write pointer, not wrapped (will wrap in 6 million years!)
+  long long wptr;           // write pointer, not wrapped (will wrap in 6 million years!)
 
   int terminate;            // Set to cause thread to terminate voluntarily
+  int muted;
 };
 
 
@@ -392,7 +393,7 @@ void decode_task_cleanup(void *arg){
   }
 }
 
-// Thread to decode incoming RTP packets for each stream
+// Thread to decode incoming RTP packets for each session
 void *decode_task(void *arg){
   struct session *sp = (struct session *)arg;
   assert(sp);
@@ -427,18 +428,21 @@ void *decode_task(void *arg){
     // Compute gains and delays for stereo imaging
     // -6dB for each channel in the center
     // when full to one side or the other, that channel is +6 dB and the other is -inf dB
-    float left_gain = sp->gain * (1 - sp->pan)/2;
-    float right_gain = sp->gain * (1 + sp->pan)/2;
-    int left_delay = 0;
-    int right_delay = 0;
-    // Also delay less favored channel 1 ms max
-    // This is really what drives source localization in humans
-    if(sp->pan > 0)
-      left_delay = round(sp->pan * .001 * SAMPRATE); // Delay left channel
-    else if(sp->pan < 0)
-      right_delay = round(-sp->pan * .001 * SAMPRATE); // Delay right channel
+    float left_gain = 0,right_gain = 0;
+    int left_delay = 0,right_delay = 0;
 
-    assert(left_delay >= 0 && right_delay >= 0);
+    if(!sp->muted){
+      left_gain = sp->gain * (1 - sp->pan)/2;
+      right_gain = sp->gain * (1 + sp->pan)/2;
+      // Also delay less favored channel 1 ms max
+      // This is really what drives source localization in humans
+      if(sp->pan > 0)
+	left_delay = round(sp->pan * .001 * SAMPRATE); // Delay left channel
+      else if(sp->pan < 0)
+	right_delay = round(-sp->pan * .001 * SAMPRATE); // Delay right channel
+
+      assert(left_delay >= 0 && right_delay >= 0);
+    }
 
     if(samples_skipped > 0){
       // gap in PCM data
@@ -608,7 +612,7 @@ void *display(void *arg){
 		type,
 		sp->channels,
 		bw,
-		20*log10(sp->gain),
+		sp->muted ? -INFINITY : 20*log10(sp->gain),
 		sp->pan,
 		sp->ssrc,
 		queue,
@@ -628,9 +632,11 @@ void *display(void *arg){
       row++;
     }
     row++;
-    mvwprintw(Mainscr,row++,0,"\u21e5 select next stream");
-    mvwprintw(Mainscr,row++,0,"d delete stream");
+    mvwprintw(Mainscr,row++,0,"\u21e5 select next session");
+    mvwprintw(Mainscr,row++,0,"d delete session");
     mvwprintw(Mainscr,row++,0,"r reset playout buffer");
+    mvwprintw(Mainscr,row++,0,"m mute session");
+    mvwprintw(Mainscr,row++,0,"u unmute session");
     mvwprintw(Mainscr,row++,0,"\u2191 volume +1 dB");
     mvwprintw(Mainscr,row++,0,"\u2193 volume -1 dB");
     mvwprintw(Mainscr,row++,0,"\u2192 stereo position right");
@@ -685,6 +691,16 @@ void *display(void *arg){
     case KEY_RIGHT:
       Current->pan = min(Current->pan + .01,+1.0);
       break;
+    case 'm': // Mute current session
+      if(Current)
+	Current->muted = 1;
+
+      break;
+    case 'u': // Unmute current session
+      if(Current)
+	Current->muted = 0;
+
+      // NOTE FALL THRU
     case 'r':
       // Reset playout queue
       Current->wptr = Rptr;
