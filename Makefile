@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.118 2018/09/05 08:19:38 karn Exp karn $
+# $Id: Makefile,v 1.119 2018/09/11 08:16:01 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -12,16 +12,17 @@ UDEV_FILES=66-hackrf.rules 68-funcube-dongle-proplus.rules 68-funcube-dongle.rul
 
 all: $(EXECS) $(AFILES) $(SYSTEMD_FILES) $(UDEV_FILES)
 
-install: all
+install: $(EXECS) $(AFILES)
 	install -o root -m 0755 -D --target-directory=$(BINDIR) $(EXECS)
 	install -D --target-directory=$(LIBDIR) $(AFILES)
+
+systemd: $(SYSTEMD_FILES) $(UDEV_FILES)
 	install -o root -m 0644 -D --target-directory=/etc/systemd/system $(SYSTEMD_FILES)
 	systemctl daemon-reload
 	install -o root -m 0644 -D --target-directory=/etc/udev/rules.d $(UDEV_FILES)
 	adduser --system aprsfeed
 	adduser --system funcube
 	adduser --system hackrf
-
 
 clean:
 	rm -f *.o *.a $(EXECS)
@@ -60,7 +61,7 @@ pcmcat: pcmcat.o libradio.a
 pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lbsd
 
-radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o knob.o touch.o libradio.a
+radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o knob.o touch.o status.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lbsd -lm -lpthread
 
 # Binary libraries
@@ -113,6 +114,7 @@ linear.o: linear.c misc.h filter.h radio.h sdr.h
 main.o: main.c radio.h sdr.h filter.h misc.h  multicast.h
 modes.o: modes.c radio.h sdr.h misc.h
 radio.o: radio.c radio.h sdr.h filter.h misc.h 
+status.o: status.c radio.h sdr.h  misc.h filter.h multicast.h
 touch.o: touch.c misc.h
 
 

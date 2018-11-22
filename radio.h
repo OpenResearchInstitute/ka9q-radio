@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.71 2018/09/05 08:18:22 karn Exp karn $
+// $Id: radio.h,v 1.72 2018/09/08 06:07:05 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -24,6 +24,7 @@ struct audio {
   char audio_mcast_address_text[256];
   int audio_mcast_fd; // File descriptor for multicast output
   int rtcp_mcast_fd;  // File descriptor for RTP control protocol
+  int status_mcast_fd; // File descriptor for receiver status
   struct rtp_state rtp;
 };
 
@@ -244,6 +245,8 @@ int savecal(struct demod *);
 void *display(void *);
 void *keyboard(void *);
 void *doppler(void *);
+void *status(void *);
+
 
 // Demodulator thread entry points
 void *demod_fm(void *);

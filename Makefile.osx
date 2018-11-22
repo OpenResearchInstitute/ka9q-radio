@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.53 2018/09/03 04:52:45 karn Exp karn $
+# $Id: Makefile.osx,v 1.54 2018/09/05 08:19:38 karn Exp karn $
 CFLAGS=-g -O3 -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -58,7 +58,7 @@ pcmcat: pcmcat.o libradio.a
 pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lm -lpthread
 
-radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o libradio.a
+radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o status.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lm -lpthread
 
 # Binary libraries
@@ -113,3 +113,4 @@ main.o: main.c radio.h sdr.h filter.h misc.h  multicast.h dsp.h
 misc.o: misc.c radio.h sdr.h
 modes.o: modes.c radio.h sdr.h misc.h
 radio.o: radio.c radio.h sdr.h filter.h misc.h
+status.o: status.c radio.h sdr.h  misc.h filter.h multicast.h dsp.h
