@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.119 2018/09/11 08:16:01 karn Exp karn $
+# $Id: Makefile,v 1.120 2018/11/22 09:59:11 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -111,7 +111,7 @@ doppler.o: doppler.c radio.h sdr.h misc.h
 fm.o: fm.c misc.h filter.h radio.h sdr.h 
 knob.o: knob.c misc.h
 linear.o: linear.c misc.h filter.h radio.h sdr.h 
-main.o: main.c radio.h sdr.h filter.h misc.h  multicast.h
+main.o: main.c radio.h sdr.h filter.h misc.h  multicast.h dsp.h
 modes.o: modes.c radio.h sdr.h misc.h
 radio.o: radio.c radio.h sdr.h filter.h misc.h 
 status.o: status.c radio.h sdr.h  misc.h filter.h multicast.h

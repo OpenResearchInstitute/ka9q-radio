@@ -1,4 +1,4 @@
-// $Id$
+// $Id: status.c,v 1.1 2018/11/22 09:58:05 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -56,20 +56,25 @@ enum status_type {
   DOPPLER_FREQUENCY,
   DOPPLER_FREQUENCY_RATE,
 
+  // Hardware gains
+  LNA_GAIN, // 23
+  MIX_GAIN,
+  IF_GAIN,
+
   // Filtering
-  LOW_EDGE, // 23
+  LOW_EDGE, // 26
   HIGH_EDGE,
   KAISER_BETA,
   FILTER_BLOCKSIZE,
   FILTER_FIR_LENGTH,
 
   // Signals
-  IF_POWER, // 28
+  IF_POWER, // 31
   BASEBAND_POWER,
   NOISE_DENSITY,
 
   // Demodulation
-  DEMOD_MODE, // 1 = AM envelope, 2 = FM, 3 = linear // 31
+  DEMOD_MODE, // 1 = AM envelope, 2 = FM, 3 = linear // 34
   INDEPENDENT_SIDEBAND,
   OUTPUT_CHANNELS,
   DEMOD_SNR,
@@ -77,11 +82,11 @@ enum status_type {
   FREQ_OFFSET,    // FM, PLL linear
 
   // FM only
-  PEAK_DEVIATION, // 37
+  PEAK_DEVIATION, // 40
   PL_TONE,
   
   // PLL linear only
-  PLL_LOCK, // 39
+  PLL_LOCK, // 43
   PLL_SQUARE,
   PLL_PHASE,
 };
@@ -93,12 +98,15 @@ unsigned char *encode_eol(unsigned char *buf){
 }
 
 
-// Big-end TLV encoding 
-
-unsigned char *encode_byte(unsigned char *buf,enum status_type type,char x){
+// Big-end TLV encoding, suppressing leading zeroes
+unsigned char *encode_byte(unsigned char *buf,enum status_type type,unsigned char x){
   *buf++ = type;
-  *buf++ = sizeof(x);
-  *buf++ = x;
+  if(x != 0){
+    *buf++ = sizeof(x);
+    *buf++ = x;
+  } else {
+    *buf++ = 0;
+  }
   return buf;
 }
 
@@ -109,7 +117,7 @@ unsigned char *encode_buf(unsigned char *buf,enum status_type type,void *data,in
   return buf + len;
 }
 
-unsigned char *encode_int16(unsigned char *buf,enum status_type type,int16_t x){
+unsigned char *encode_int16(unsigned char *buf,enum status_type type,uint16_t x){
   *buf++ = type;
   *buf++ = sizeof(x);
   *buf++ = x >> 8;
@@ -117,40 +125,42 @@ unsigned char *encode_int16(unsigned char *buf,enum status_type type,int16_t x){
   return buf;
 }
 
-unsigned char *encode_int32(unsigned char *buf,enum status_type type,int32_t x){
+unsigned char *encode_int32(unsigned char *buf,enum status_type type,uint32_t x){
+  int size = sizeof(x);
+  while((x >> 24) == 0 && size > 0){
+    size--;
+    x <<= 8;
+  }
   *buf++ = type;
-  *buf++ = sizeof(x);
-  *buf++ = x >> 24;
-  *buf++ = x >> 16;
-  *buf++ = x >> 8;
-  *buf++ = x;
+  *buf++ = size;
+  while(size--){
+    *buf++ = x >> 24;
+    x <<= 8;
+  }
   return buf;
 }
 
 
 unsigned char *encode_float(unsigned char *buf,enum status_type type,float x){
-  *buf++ = type;
-  *buf++ = sizeof(x);
-  uint32_t *p = (uint32_t *)&x;
-  *buf++ = *p >> 24;
-  *buf++ = *p >> 16;
-  *buf++ = *p >> 8;
-  *buf++ = *p;
-  return buf;
+  return encode_int32(buf,type,(uint32_t)x);
 }
 
-unsigned char *encode_int64(unsigned char *buf,enum status_type type,int64_t x){
+unsigned char *encode_int64(unsigned char *buf,enum status_type type,uint64_t x){
+  int size = sizeof(x);
+  while((x >> 56) == 0 && size > 0){
+    size--;
+    x <<= 8;
+  }
   *buf++ = type;
-  *buf++ = sizeof(x);
-  *buf++ = x >> 56;
-  *buf++ = x >> 48;
-  *buf++ = x >> 40;
-  *buf++ = x >> 32;
-  *buf++ = x >> 24;
-  *buf++ = x >> 16;
-  *buf++ = x >> 8;
-  *buf++ = x;
+  *buf++ = size;
+  while(size--){
+    *buf++ = x >> 56;
+    x <<= 8;
+  }
   return buf;
+}
+unsigned char *encode_double(unsigned char *buf,enum status_type type,double x){
+  return encode_int64(buf,type,(uint64_t)x);
 }
 
 struct state {
