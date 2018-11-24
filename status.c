@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.1 2018/11/22 09:58:05 karn Exp karn $
+// $Id: status.c,v 1.2 2018/11/24 05:36:27 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -98,36 +98,34 @@ unsigned char *encode_eol(unsigned char *buf){
 }
 
 
-// Big-end TLV encoding, suppressing leading zeroes
-unsigned char *encode_byte(unsigned char *buf,enum status_type type,unsigned char x){
-  *buf++ = type;
-  if(x != 0){
-    *buf++ = sizeof(x);
-    *buf++ = x;
-  } else {
-    *buf++ = 0;
-  }
-  return buf;
-}
-
 unsigned char *encode_buf(unsigned char *buf,enum status_type type,void *data,int len){
   *buf++ = type;
+  unsigned char *cp = data;
+
+  while(*cp == 0){
+    len--;
+    cp++;
+  }
+
   *buf++ = len;
-  memcpy(buf,data,len);
+  memcpy(buf,cp,len);
   return buf + len;
 }
 
+
+// Big-end TLV encoding, suppressing leading zeroes
+unsigned char *encode_byte(unsigned char *buf,enum status_type type,unsigned char x){
+  return encode_buf(buf,type,&x,sizeof(x));
+}
+
+
 unsigned char *encode_int16(unsigned char *buf,enum status_type type,uint16_t x){
-  *buf++ = type;
-  *buf++ = sizeof(x);
-  *buf++ = x >> 8;
-  *buf++ = x;
-  return buf;
+  return encode_buf(buf,type,&x,sizeof(x));
 }
 
 unsigned char *encode_int32(unsigned char *buf,enum status_type type,uint32_t x){
   int size = sizeof(x);
-  while((x >> 24) == 0 && size > 0){
+  while((x & 0xff000000) == 0 && size > 0){
     size--;
     x <<= 8;
   }
@@ -142,12 +140,13 @@ unsigned char *encode_int32(unsigned char *buf,enum status_type type,uint32_t x)
 
 
 unsigned char *encode_float(unsigned char *buf,enum status_type type,float x){
-  return encode_int32(buf,type,(uint32_t)x);
+  // Force the 32-bit bit pattern to that of an integer without converting it
+  return encode_int32(buf,type,*(uint32_t *)&x);
 }
 
 unsigned char *encode_int64(unsigned char *buf,enum status_type type,uint64_t x){
   int size = sizeof(x);
-  while((x >> 56) == 0 && size > 0){
+  while((x & 0xff00000000000000LL) == 0 && size > 0){
     size--;
     x <<= 8;
   }
@@ -160,7 +159,8 @@ unsigned char *encode_int64(unsigned char *buf,enum status_type type,uint64_t x)
   return buf;
 }
 unsigned char *encode_double(unsigned char *buf,enum status_type type,double x){
-  return encode_int64(buf,type,(uint64_t)x);
+  // Force the 64-bit bit pattern to that of a 64-bit integer without converting it
+  return encode_int64(buf,type,*(uint64_t *)&x);
 }
 
 struct state {
@@ -255,7 +255,7 @@ void *status(void *arg){
     }
     bp = encode_int32(bp,OUTPUT_SSRC,Audio.rtp.ssrc);
     bp = encode_byte(bp,OUTPUT_TTL,Mcast_ttl);
-    bp = encode_float(bp,OUTPUT_SAMPRATE,(float)audio->samprate);
+    bp = encode_int32(bp,OUTPUT_SAMPRATE,audio->samprate);
     bp = encode_int64(bp,INPUT_PACKETS,demod->rtp_state.packets);
     bp = encode_int64(bp,INPUT_SAMPLES,demod->samples);
     bp = encode_int64(bp,INPUT_DROPS,demod->rtp_state.drops);
@@ -263,20 +263,20 @@ void *status(void *arg){
     bp = encode_int64(bp,OUTPUT_PACKETS,audio->rtp.packets);
 
     // Tuning
-    bp = encode_float(bp,CENTER_FREQUENCY,get_freq(demod));
-    bp = encode_float(bp,INTERMEDIATE_FREQUENCY,-demod->second_LO);
-    bp = encode_float(bp,SHIFT_FREQUENCY,demod->shift);
+    bp = encode_double(bp,CENTER_FREQUENCY,get_freq(demod));
+    bp = encode_double(bp,INTERMEDIATE_FREQUENCY,-get_second_LO(demod));
+    bp = encode_double(bp,SHIFT_FREQUENCY,demod->shift);
 
     // Doppler info
-    bp = encode_float(bp,DOPPLER_FREQUENCY,get_doppler(demod));
-    bp = encode_float(bp,DOPPLER_FREQUENCY_RATE,get_doppler_rate(demod));
+    bp = encode_double(bp,DOPPLER_FREQUENCY,get_doppler(demod));
+    bp = encode_double(bp,DOPPLER_FREQUENCY_RATE,get_doppler_rate(demod));
 
     // Filtering
     bp = encode_float(bp,LOW_EDGE,demod->low);
     bp = encode_float(bp,HIGH_EDGE,demod->high);
     bp = encode_float(bp,KAISER_BETA,demod->kaiser_beta);
-    bp = encode_float(bp,FILTER_BLOCKSIZE,demod->L);
-    bp = encode_float(bp,FILTER_FIR_LENGTH,demod->M);
+    bp = encode_int32(bp,FILTER_BLOCKSIZE,demod->L);
+    bp = encode_int32(bp,FILTER_FIR_LENGTH,demod->M);
 
     // Signals - these ALWAYS change
     bp = encode_float(bp,IF_POWER,demod->if_power);
