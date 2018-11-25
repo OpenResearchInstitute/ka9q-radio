@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.2 2018/11/24 05:36:27 karn Exp karn $
+// $Id: status.c,v 1.3 2018/11/24 07:58:37 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -98,11 +98,11 @@ unsigned char *encode_eol(unsigned char *buf){
 }
 
 
-unsigned char *encode_buf(unsigned char *buf,enum status_type type,void *data,int len){
+unsigned char *encode_object(unsigned char *buf,enum status_type type,void *data,int len){
   *buf++ = type;
   unsigned char *cp = data;
 
-  while(*cp == 0){
+  while(*cp == 0 && len != 0){
     len--;
     cp++;
   }
@@ -115,52 +115,49 @@ unsigned char *encode_buf(unsigned char *buf,enum status_type type,void *data,in
 
 // Big-end TLV encoding, suppressing leading zeroes
 unsigned char *encode_byte(unsigned char *buf,enum status_type type,unsigned char x){
-  return encode_buf(buf,type,&x,sizeof(x));
+  return encode_object(buf,type,&x,sizeof(x));
 }
 
 
 unsigned char *encode_int16(unsigned char *buf,enum status_type type,uint16_t x){
-  return encode_buf(buf,type,&x,sizeof(x));
+  unsigned char data[2];
+
+  // Byteswap
+  data[0] = x >> 8;
+  data[1] = x;
+  return encode_object(buf,type,data,sizeof(data));
 }
 
 unsigned char *encode_int32(unsigned char *buf,enum status_type type,uint32_t x){
-  int size = sizeof(x);
-  while((x & 0xff000000) == 0 && size > 0){
-    size--;
-    x <<= 8;
-  }
-  *buf++ = type;
-  *buf++ = size;
-  while(size--){
-    *buf++ = x >> 24;
-    x <<= 8;
-  }
-  return buf;
+  unsigned char data[4];
+
+  // Byteswap
+  data[0] = x >> 24;
+  data[1] = x >> 16;
+  data[2] = x >> 8;
+  data[3] = x;
+  return encode_object(buf,type,data,sizeof(data));
 }
 
-
 unsigned char *encode_float(unsigned char *buf,enum status_type type,float x){
-  // Force the 32-bit bit pattern to that of an integer without converting it
-  return encode_int32(buf,type,*(uint32_t *)&x);
+  uint32_t data;
+
+  memcpy(&data,&x,sizeof(data));
+  return encode_int32(buf,type,data);
 }
 
 unsigned char *encode_int64(unsigned char *buf,enum status_type type,uint64_t x){
-  int size = sizeof(x);
-  while((x & 0xff00000000000000LL) == 0 && size > 0){
-    size--;
-    x <<= 8;
-  }
-  *buf++ = type;
-  *buf++ = size;
-  while(size--){
-    *buf++ = x >> 56;
-    x <<= 8;
-  }
-  return buf;
+  unsigned char data[8];
+  // Byteswap
+  for(int i=0;i<8;i++)
+    data[i] = x >> (56-8*i);
+
+  return encode_object(buf,type,data,sizeof(data));
 }
 unsigned char *encode_double(unsigned char *buf,enum status_type type,double x){
-  // Force the 64-bit bit pattern to that of a 64-bit integer without converting it
-  return encode_int64(buf,type,*(uint64_t *)&x);
+  uint64_t data;
+  memcpy(&data,&x,sizeof(data));
+  return encode_int64(buf,type,data);
 }
 
 struct state {
@@ -205,12 +202,12 @@ void *status(void *arg){
     switch(demod->input_source_address.ss_family){
     case AF_INET:
       sin = (struct sockaddr_in *)&demod->input_source_address;
-      bp = encode_buf(bp,INPUT_SOURCE_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
+      bp = encode_object(bp,INPUT_SOURCE_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
       bp = encode_int16(bp,INPUT_SOURCE_PORT,sin->sin_port);
       break;
     case AF_INET6:
       sin6 = (struct sockaddr_in6 *)&demod->input_source_address;
-      bp = encode_buf(bp,INPUT_SOURCE_ADDRESS,&sin6->sin6_addr,8);
+      bp = encode_object(bp,INPUT_SOURCE_ADDRESS,&sin6->sin6_addr,8);
       bp = encode_int16(bp,INPUT_SOURCE_PORT,sin6->sin6_port);
       break;
     default:
@@ -223,12 +220,12 @@ void *status(void *arg){
     switch(s.ss_family){
     case AF_INET:
       sin = (struct sockaddr_in *)&s;
-      bp = encode_buf(bp,INPUT_DEST_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
+      bp = encode_object(bp,INPUT_DEST_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
       bp = encode_int16(bp,INPUT_DEST_PORT,sin->sin_port);
       break;
     case AF_INET6:
       sin6 = (struct sockaddr_in6 *)&s;
-      bp = encode_buf(bp,INPUT_DEST_ADDRESS,(char *)&sin6->sin6_addr,8);
+      bp = encode_object(bp,INPUT_DEST_ADDRESS,(char *)&sin6->sin6_addr,8);
       bp = encode_int16(bp,INPUT_DEST_PORT,sin6->sin6_port);
       break;
     default:
@@ -242,12 +239,12 @@ void *status(void *arg){
     switch(s.ss_family){
     case AF_INET:
       sin = (struct sockaddr_in *)&s;
-      bp = encode_buf(bp,OUTPUT_DEST_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
+      bp = encode_object(bp,OUTPUT_DEST_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
       bp = encode_int16(bp,OUTPUT_DEST_PORT,sin->sin_port);
       break;
     case AF_INET6:
       sin6 = (struct sockaddr_in6 *)&s;
-      bp = encode_buf(bp,OUTPUT_DEST_ADDRESS,&sin6->sin6_addr,8);
+      bp = encode_object(bp,OUTPUT_DEST_ADDRESS,&sin6->sin6_addr,8);
       bp = encode_int16(bp,OUTPUT_DEST_PORT,sin6->sin6_port);
       break;
     default:

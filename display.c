@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.136 2018/09/08 06:06:21 karn Exp karn $
+// $Id: display.c,v 1.137 2018/10/13 23:39:15 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -1003,7 +1003,7 @@ void *display(void *arg){
 	} else if(strcasecmp(str,"pll") == 0){
 	  demod->flags |= PLL;
 	} else if(strcasecmp(str,"!pll") == 0){
-	  demod->flags &= ~(PLL|SQUARE|CAL);
+	  demod->flags &= ~(PLL|SQUARE);
 	} else if(strcasecmp(str,"square") == 0){
 	  demod->flags |= SQUARE|PLL;
 	} else if(strcasecmp(str,"!square") == 0){	  

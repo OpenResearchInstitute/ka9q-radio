@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.25 2018/04/22 22:42:53 karn Exp karn $
+// $Id: modes.c,v 1.26 2018/07/06 06:06:12 karn Exp karn $
 // Load and search mode definition table in /usr/local/share/ka9q-radio/modes.txt
 
 // Copyright 2018, Phil Karn, KA9Q
@@ -112,14 +112,10 @@ int readmodes(char *file){
 	mp->flags |= ISB;         // For independent sideband: LSB on left, USB on right
       } else if(strcasecmp(option,"flat") == 0){
 	mp->flags |= FLAT;         // FM only
-      } else if(strcasecmp(option,"cal") == 0){
-	mp->flags |= CAL|PLL; // Calibrate implies PLL
       } else if(strcasecmp(option,"square") == 0){
 	mp->flags |= SQUARE|PLL; // Square implies PLL
       } else if(strcasecmp(option,"coherent") == 0 || strcasecmp(option,"pll") == 0){
 	mp->flags |= PLL;
-      } else if(strcasecmp(option,"envelope") == 0){
-	mp->flags |= ENVELOPE | MONO; // Envelope detected AM implies mono
       } else if(strcasecmp(option,"mono") == 0){
 	mp->flags |= MONO;  // E.g., if you don't want the hilbert transform of SSB on the right channel
       }

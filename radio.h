@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.72 2018/09/08 06:07:05 karn Exp karn $
+// $Id: radio.h,v 1.73 2018/11/22 09:58:42 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -28,6 +28,11 @@ struct audio {
   struct rtp_state rtp;
 };
 
+enum demodulator {
+  AM_DEMOD = 0,     // AM envelope demodulation
+  FM_DEMOD,         // Frequency demodulation
+  LINEAR_DEMOD,      // Linear demodulation, i.e., everything else: SSB, CW, DSB, CAM, IQ
+};
 
 
 // Internal format of entries in /usr/local/share/ka9q-radio/modes.txt
@@ -176,10 +181,8 @@ struct demod {
 #define ISB 1      // Cross-conjugation of positive and negative frequencies, for ISB
 #define FLAT 2      // No baseband filtering for FM
 #define PLL 4  // Coherent carrier tracking
-#define CAL 8       // Calibrate mode in coherent demod; adjust calibrate rather than frequency
-#define SQUARE   16 // Square carrier in coherent loop (BPSK/suppressed carrier AM)
-#define ENVELOPE 32 // Envelope detection of AM
-#define MONO     64 // Only output I channel of linear mode
+#define SQUARE   8 // Square carrier in coherent loop (BPSK/suppressed carrier AM)
+#define MONO     16 // Only output I channel of linear mode
 
   // Demodulator configuration settngs
   float headroom;   // Audio level headroom
