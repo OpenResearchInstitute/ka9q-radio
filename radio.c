@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.98 2018/09/08 06:07:05 karn Exp karn $
+// $Id: radio.c,v 1.99 2018/11/11 21:50:53 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -436,8 +436,13 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
 
 
   if(defaults || isnan(demod->low) || isnan(demod->high)){
-    demod->low = Modes[mindex].low;
-    demod->high = Modes[mindex].high;
+    if(Modes[mindex].low > Modes[mindex].high){
+      demod->low = Modes[mindex].high;
+      demod->high = Modes[mindex].low;
+    } else {
+      demod->low = Modes[mindex].low;
+      demod->high = Modes[mindex].high;
+    }
   }
 
   // Ensure low < high
