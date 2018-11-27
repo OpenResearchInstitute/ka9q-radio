@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.99 2018/11/11 21:50:53 karn Exp karn $
+// $Id: radio.c,v 1.100 2018/11/25 02:54:15 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -41,6 +41,13 @@ float const SCALE16 = 1./SHRT_MAX; // Scale signed 16-bit int to float in range 
 float const SCALE8 = 1./127;       // Scale signed 8-bit int to float in range -1, +1
 
 int is_phasor_init(const complex double x);
+
+struct demodtab Demodtab[] = {
+      {AM_DEMOD,     "AM",     demod_am},     // AM evelope detection
+      {FM_DEMOD,     "FM",     demod_fm},     // NBFM and noncoherent PM
+      {LINEAR_DEMOD, "Linear", demod_linear}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
+};
+int Ndemod = sizeof(Demodtab)/sizeof(struct demodtab);
 
 void *proc_samples(void *arg){
   // gain and phase balance coefficients
@@ -181,8 +188,6 @@ void *proc_samples(void *arg){
 	execute_filter_input(demod->filter_in);
 	float block_energy = 0.5 * (samp_i_sq_sum + samp_q_sq_sum); // Scale for two components per complex sample
 	demod->level = block_energy / in_cnt; // Raw A/D level, without analog gain adjustment
-	// gain_factor is a voltage ratio, square to get power ratio
-	demod->if_power = demod->gain_factor * demod->gain_factor * demod->level; // Signal level after gain adjustment
 
 	if(SDR_correct){
 	  // Update every fft block
@@ -368,7 +373,7 @@ int LO2_in_range(struct demod * const demod,double const f,int const avoid_alias
   while(demod->samprate == 0)
     pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
   pthread_mutex_unlock(&demod->status_mutex);
-    
+
   if(avoid_alias)
     return f >= demod->min_IF + max(0.0f,demod->high)
 	    && f <= demod->max_IF + min(0.0f,demod->low);
@@ -393,7 +398,6 @@ double set_second_LO(struct demod * const demod,double const second_LO){
   // In case sample rate isn't set yet, just remember the frequency but don't divide by zero
   if(demod->samprate != 0)
     demod->second_LO_phasor_step = csincos(2*M_PI*second_LO/demod->samprate);
-
   demod->second_LO = second_LO;
   return second_LO;
 }
@@ -415,12 +419,12 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   if(demod == NULL)
     return -1;
 
-  int mindex;
-  for(mindex=0; mindex<Nmodes; mindex++){
-    if(strcasecmp(mode,Modes[mindex].name) == 0)
+  struct modetab *mp;
+  for(mp = &Modes[0]; mp < &Modes[Nmodes]; mp++){
+    if(strcasecmp(mode,mp->name) == 0)
       break;
   }
-  if(mindex == Nmodes)
+  if(mp == &Modes[Nmodes])
     return -1; // Unregistered mode
 
   // Kill current demod thread, if any, to cause clean exit
@@ -432,29 +436,22 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   if(demod->mode != mode)
     strlcpy(demod->mode,mode,sizeof(demod->mode));
 
-  strlcpy(demod->demod_name, Modes[mindex].demod_name, sizeof(demod->demod_name));
-
+  demod->demod_index = mp->demod_index;
 
   if(defaults || isnan(demod->low) || isnan(demod->high)){
-    if(Modes[mindex].low > Modes[mindex].high){
-      demod->low = Modes[mindex].high;
-      demod->high = Modes[mindex].low;
+    if(mp->low > mp->high){
+      demod->low = mp->high;
+      demod->high = mp->low;
     } else {
-      demod->low = Modes[mindex].low;
-      demod->high = Modes[mindex].high;
+      demod->low = mp->low;
+      demod->high = mp->high;
     }
   }
 
-  // Ensure low < high
-  if(demod->high < demod->low){
-    float const tmp = demod->low;
-    demod->low = demod->high;
-    demod->high = tmp;
-  }
-  demod->flags = Modes[mindex].flags;
-  demod->attack_rate = Modes[mindex].attack_rate;
-  demod->recovery_rate = Modes[mindex].recovery_rate;
-  demod->hangtime = Modes[mindex].hangtime;
+  demod->flags = mp->flags;
+  demod->attack_rate = mp->attack_rate;
+  demod->recovery_rate = mp->recovery_rate;
+  demod->hangtime = mp->hangtime;
   
   // Suppress these in display unless they're used
   demod->snr = NAN;
@@ -464,17 +461,17 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   demod->spare = NAN;
 
   if(defaults || isnan(demod->shift)){
-    if(demod->shift != Modes[mindex].shift){
+    if(demod->shift != mp->shift){
       // Adjust tuning for change in frequency shift
-      set_freq(demod,get_freq(demod) + Modes[mindex].shift - demod->shift,NAN);
+      set_freq(demod,get_freq(demod) + mp->shift - demod->shift,NAN);
     }
-    set_shift(demod,Modes[mindex].shift);
+    set_shift(demod,mp->shift);
   }
 
   // Might now be out of range because of change in filter passband
   set_freq(demod,get_freq(demod),NAN);
 
-  pthread_create(&demod->demod_thread,NULL,Modes[mindex].demod,demod);
+  pthread_create(&demod->demod_thread,NULL,Demodtab[mp->demod_index].demod,demod);
   return 0;
 }      
 
