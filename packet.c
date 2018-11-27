@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.22 2018/09/05 08:18:22 karn Exp karn $
+// $Id: packet.c,v 1.23 2018/09/08 06:06:21 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -277,7 +277,7 @@ void *decode_task(void *arg){
   assert(sp != NULL);
 
   struct filter_out *filter = create_filter_output(sp->filter_in,NULL,1,COMPLEX);
-  set_filter(filter,Samprate,+100,+4000,3.0); // Creates analytic, band-limited signal
+  set_filter(filter,+100./Samprate,+4000./Samprate,3.0); // Creates analytic, band-limited signal
 
   // Tone replica generators (-1200 and -2200 Hz)
   float complex mark_phase = 1;

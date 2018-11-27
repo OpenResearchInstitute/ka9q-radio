@@ -63,16 +63,23 @@ void *status(void *arg){
     {
       struct sockaddr_in *sin;
       struct sockaddr_in6 *sin6;
+      *bp++ = INPUT_SOURCE_SOCKET;
       switch(demod->input_source_address.ss_family){
       case AF_INET:
 	sin = (struct sockaddr_in *)&demod->input_source_address;
-	encode_object(&bp,INPUT_SOURCE_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
-	encode_int16(&bp,INPUT_SOURCE_PORT,sin->sin_port);
+	*bp++= 6;
+	memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+	bp += 4;
+	memcpy(bp,&sin->sin_port,2);
+	bp += 2;
 	break;
       case AF_INET6:
 	sin6 = (struct sockaddr_in6 *)&demod->input_source_address;
-	encode_object(&bp,INPUT_SOURCE_ADDRESS,&sin6->sin6_addr,8);
-	encode_int16(&bp,INPUT_SOURCE_PORT,sin6->sin6_port);
+	*bp++ = 10;
+	memcpy(bp,&sin6->sin6_addr,8);
+	bp += 8;
+	memcpy(bp,&sin6->sin6_port,2);
+	bp += 2;
 	break;
       default:
 	break;
@@ -85,23 +92,30 @@ void *status(void *arg){
       struct sockaddr_storage s;
       socklen_t slen = sizeof(s);
       getsockname(demod->input_fd,(struct sockaddr *)&s,&slen);
+      *bp++ = INPUT_DEST_SOCKET;
       switch(s.ss_family){
       case AF_INET:
 	sin = (struct sockaddr_in *)&s;
-	encode_object(&bp,INPUT_DEST_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
-	encode_int16(&bp,INPUT_DEST_PORT,sin->sin_port);
+	*bp++ = 6;
+	memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+	bp += 4;
+	memcpy(bp,&sin->sin_port,2);
+	bp += 2;
 	break;
       case AF_INET6:
 	sin6 = (struct sockaddr_in6 *)&s;
-	encode_object(&bp,INPUT_DEST_ADDRESS,(char *)&sin6->sin6_addr,8);
-	encode_int16(&bp,INPUT_DEST_PORT,sin6->sin6_port);
+	*bp++ = 10;
+	memcpy(bp,&sin6->sin6_addr,8);
+	bp += 8;
+	memcpy(bp,&sin6->sin6_port,2);
+	bp += 2;
 	break;
       default:
 	break;
       }
     }
     encode_int32(&bp,INPUT_SSRC,demod->rtp_state.ssrc);
-    encode_int32(&bp,INPUT_SAMPRATE,demod->status.samprate);
+    encode_double(&bp,INPUT_SAMPRATE,demod->status.samprate);
     // Where we're sending output
     {
       struct sockaddr_in *sin;
@@ -109,16 +123,23 @@ void *status(void *arg){
       struct sockaddr_storage s;
       socklen_t slen = sizeof(s);
       getpeername(audio->audio_mcast_fd,(struct sockaddr *)&s,&slen);
+      *bp++ = OUTPUT_DEST_SOCKET;
       switch(s.ss_family){
       case AF_INET:
 	sin = (struct sockaddr_in *)&s;
-	encode_object(&bp,OUTPUT_DEST_ADDRESS,&sin->sin_addr.s_addr,4); // Already in network order
-	encode_int16(&bp,OUTPUT_DEST_PORT,sin->sin_port);
+	*bp++ = 6;
+	memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+	bp += 4;
+	memcpy(bp,&sin->sin_port,2);
+	bp += 2;
 	break;
       case AF_INET6:
 	sin6 = (struct sockaddr_in6 *)&s;
-	encode_object(&bp,OUTPUT_DEST_ADDRESS,&sin6->sin6_addr,8);
-	encode_int16(&bp,OUTPUT_DEST_PORT,sin6->sin6_port);
+	*bp++ = 10;
+	memcpy(bp,&sin6->sin6_addr,8);
+	bp += 8;
+	memcpy(bp,&sin6->sin6_port,2);
+	bp += 2;
 	break;
       default:
 	break;
@@ -134,9 +155,16 @@ void *status(void *arg){
     encode_int64(&bp,OUTPUT_PACKETS,audio->rtp.packets);
 
     // Tuning
-    encode_double(&bp,CENTER_FREQUENCY,get_freq(demod));
-    encode_double(&bp,INTERMEDIATE_FREQUENCY,-get_second_LO(demod));
+    encode_double(&bp,RADIO_FREQUENCY,get_freq(demod));
+    encode_double(&bp,SECOND_LO_FREQUENCY,get_second_LO(demod));
     encode_double(&bp,SHIFT_FREQUENCY,demod->shift);
+
+    // Front end
+    encode_double(&bp,FIRST_LO_FREQUENCY,demod->status.frequency);
+    encode_byte(&bp,LNA_GAIN,demod->status.lna_gain);
+    encode_byte(&bp,MIXER_GAIN,demod->status.mixer_gain);
+    encode_byte(&bp,IF_GAIN,demod->status.if_gain);
+    encode_float(&bp,AD_LEVEL,demod->level);
 
     // Doppler info
     encode_double(&bp,DOPPLER_FREQUENCY,get_doppler(demod));
@@ -148,14 +176,15 @@ void *status(void *arg){
     encode_float(&bp,KAISER_BETA,demod->kaiser_beta);
     encode_int32(&bp,FILTER_BLOCKSIZE,demod->L);
     encode_int32(&bp,FILTER_FIR_LENGTH,demod->M);
+    if(demod->filter_out)
+      encode_float(&bp,NOISE_BANDWIDTH,demod->filter_out->noise_gain);
 
     // Signals - these ALWAYS change
-    encode_float(&bp,IF_POWER,demod->if_power);
     encode_float(&bp,BASEBAND_POWER,demod->bb_power);
     encode_float(&bp,NOISE_DENSITY,demod->n0);
 
     // Demodulation mode
-    encode_object(&bp,RADIO_MODE,demod->mode,strlen(demod->mode));
+    encode_string(&bp,RADIO_MODE,demod->mode,strlen(demod->mode));
     enum demod_type demod_type = Demodtab[demod->demod_index].demod_type;
     encode_byte(&bp,DEMOD_MODE,demod_type);
     switch(demod_type){
@@ -184,6 +213,7 @@ void *status(void *arg){
     encode_eol(&bp);
 
     int len = compact_packet(&State[0],packet,(count % 10) == 0);
+    //int len = bp - packet;
     send(audio->status_mcast_fd,packet,len,0);
     usleep(100000);
   }

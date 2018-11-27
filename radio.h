@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.73 2018/11/22 09:58:42 karn Exp karn $
+// $Id: radio.h,v 1.74 2018/11/25 02:59:20 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -28,18 +28,26 @@ struct audio {
   struct rtp_state rtp;
 };
 
-enum demodulator {
-  AM_DEMOD = 0,     // AM envelope demodulation
+enum demod_type {
+  AM_DEMOD = 1,     // AM envelope demodulation
   FM_DEMOD,         // Frequency demodulation
-  LINEAR_DEMOD,      // Linear demodulation, i.e., everything else: SSB, CW, DSB, CAM, IQ
+  LINEAR_DEMOD,     // Linear demodulation, i.e., everything else: SSB, CW, DSB, CAM, IQ
 };
+
+struct demodtab {
+  enum demod_type demod_type;
+  char name[16];
+  void *(*demod)(void *); // Address of demodulator routine
+};
+extern struct demodtab Demodtab[];
+extern int Ndemod;
+
 
 
 // Internal format of entries in /usr/local/share/ka9q-radio/modes.txt
 struct modetab {
   char name[16];
-  char demod_name[16];
-  void * (*demod)(void *); // Address of demodulator routine
+  int demod_index;
   int flags;        // Special purpose flags, e.g., ISB
   float shift;      // Audio frequency shift (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
@@ -166,17 +174,17 @@ struct demod {
   // Transition region is approx sqrt(1+Beta^2)
   // 0 => rectangular window; increasing values widens main lobe and decreases ripple
   float kaiser_beta;
+  float noise_bandwidth; // noise bandwidth relative to sample rate
 
   // Mode-specific demodulator thread
   // Run output half of pre-detection filter and pass through AM, FM or linear demodulator
   // The AM and linear demodulators send baseband audio directly to the network;
   // the FM demodulator performs further audio filtering
   pthread_t demod_thread;
-  void * (*demod)(void *);        // Entry point to demodulator
-  char mode[16];                  // printable mode name
-  char demod_name[16];
-  int terminate;                  // set to 1 by set_mode() to request graceful termination
-  int flags;                      // Special flags to demodulator
+  int demod_index;            // Index into demodulator table (AM, FM, Linear)
+  char mode[16];              // printable mode name (USB, LSB, etc)
+  int terminate;              // set to 1 by set_mode() to request graceful termination
+  int flags;                  // Special flags to demodulator
 // Modetab flags
 #define ISB 1      // Cross-conjugation of positive and negative frequencies, for ISB
 #define FLAT 2      // No baseband filtering for FM
@@ -192,7 +200,6 @@ struct demod {
   float loop_bw;    // Loop bw (coherent modes)
 
   // Demodulator status variables
-  float if_power;   // Average power of signal before filter
   float bb_power;   // Average power of signal after filter
   float n0;         // Noise spectral density esimate (experimemtal)
   float snr;        // Estimated signal-to-noise ratio (only some demodulators)

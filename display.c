@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.137 2018/10/13 23:39:15 karn Exp karn $
+// $Id: display.c,v 1.138 2018/11/25 02:59:34 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -142,13 +142,13 @@ void adjust_item(struct demod *demod,int direction){
       break;
 
     // Keep frequency but move LO2, which will move LO1 (if it can move)
-    double new_lo2 = demod->second_LO + tunestep;
+    double new_lo2 = get_second_LO(demod) + tunestep;
     if(LO2_in_range(demod,new_lo2,0))
       set_freq(demod,get_freq(demod),new_lo2);
     break;
   case 3: // IF
     {
-      double new_lo2 = demod->second_LO - tunestep;
+      double new_lo2 = get_second_LO(demod) - tunestep;
       if(LO2_in_range(demod,new_lo2,0)){ // Ignore if out of range
 	// Vary RF and LO2 (IF) together to keep LO1 the same
 	set_freq(demod,get_freq(demod) + tunestep,new_lo2);
@@ -157,11 +157,11 @@ void adjust_item(struct demod *demod,int direction){
     break;
   case 4: // Filter low edge
     demod->low += tunestep;
-    set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+    set_filter(demod->filter_out,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
     break;
   case 5: // Filter high edge
     demod->high += tunestep;
-    set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+    set_filter(demod->filter_out,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
     break;
   case 6: // Post-detection audio frequency shift
     set_shift(demod,demod->shift + tunestep);
@@ -170,7 +170,7 @@ void adjust_item(struct demod *demod,int direction){
     demod->kaiser_beta += tunestep;
     if(demod->kaiser_beta < 0)
       demod->kaiser_beta = 0;
-    set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+    set_filter(demod->filter_out,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
     break;
   }
 }
@@ -409,20 +409,7 @@ void *display(void *arg){
     mvwaddstr(tuning,row++,col,"First LO");
     wattroff(tuning,A_UNDERLINE);
 
-#if 0
-    // This indication needs to be redone
-    if(!LO2_in_range(demod,demod->second_LO,1)){
-      // LO2 is near its edges where signals from the opposite edge
-      // get aliased; warn about this
-      double alias;
-      if(demod->second_LO > 0)
-	alias = get_first_LO(demod) - demod->second_LO + demod->samprate;
-      else
-	alias = get_first_LO(demod) - demod->second_LO - demod->samprate;	
-      wprintw(tuning," alias %'.3f Hz",alias);
-    }
-#endif
-    mvwprintw(tuning,row,col,"%'28.3f Hz",-demod->second_LO);
+    mvwprintw(tuning,row,col,"%'28.3f Hz",-get_second_LO(demod));
     mvwaddstr(tuning,row++,col,"IF");
 
     // Doppler info displayed only if active
@@ -450,8 +437,8 @@ void *display(void *arg){
       mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
 
     struct bandplan const *bp_low,*bp_high;
-    bp_low = lookup_frequency(get_freq(demod)+demod->low);
-    bp_high = lookup_frequency(get_freq(demod)+demod->high);
+    bp_low = lookup_frequency(get_freq(demod) + demod->low);
+    bp_high = lookup_frequency(get_freq(demod)+ demod->high);
     // Make sure entire receiver passband is in the band
     if(bp_low != NULL && bp_high != NULL){
       struct bandplan r;
@@ -530,7 +517,8 @@ void *display(void *arg){
 
     row = 1;
     col = 1;
-    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->if_power));
+    mvwprintw(sig,row,col,"%15.1f dB",
+	      power2dB(demod->level) - (demod->status.lna_gain + demod->status.mixer_gain + demod->status.if_gain));
     mvwaddstr(sig,row++,col,"IF");
     mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->bb_power));
     mvwaddstr(sig,row++,col,"Baseband");
@@ -582,7 +570,7 @@ void *display(void *arg){
       mvwaddstr(demodulator,row++,lcol,"Spare");
     }
     box(demodulator,0,0);
-    mvwprintw(demodulator,0,5,"%s demodulator",demod->demod_name);
+    mvwprintw(demodulator,0,5,"%s demodulator",Demodtab[demod->demod_index].name);
 
 
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
@@ -982,7 +970,7 @@ void *display(void *arg){
 	}
 	if(b != demod->kaiser_beta){
 	  demod->kaiser_beta = b;
-	  set_filter(demod->filter_out,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+	  set_filter(demod->filter_out,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
 	}
       }
       break;

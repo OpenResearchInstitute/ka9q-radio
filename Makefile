@@ -1,11 +1,11 @@
-# $Id: Makefile,v 1.121 2018/11/24 05:36:44 karn Exp karn $
+# $Id: Makefile,v 1.122 2018/11/25 03:01:58 karn Exp karn $
 #COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LDLIBS=-lpthread -lbsd -lm
-EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio pcmcat
+EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio pcmcat control
 AFILES=bandplan.txt help.txt modes.txt
 SYSTEMD_FILES=funcube0.service funcube1.service hackrf0.service radio34.service radio39.service packet.service aprsfeed.service opus-hf.service opus-vhf.service opus-hackrf.service opus-uhf.service
 UDEV_FILES=66-hackrf.rules 68-funcube-dongle-proplus.rules 68-funcube-dongle.rules 69-funcube-ka9q.rules
@@ -61,8 +61,12 @@ pcmcat: pcmcat.o libradio.a
 pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lbsd
 
-radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o knob.o touch.o status.o libradio.a
+radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o knob.o touch.o send_status.o status.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lbsd -lm -lpthread
+
+control: control.o modes.o misc.o multicast.o bandplan.o status.o
+	$(CC) -g -o $@ $^ -lncurses -lbsd -lm -lpthread -lm
+
 
 # Binary libraries
 libfcd.a: fcd.o hid-libusb.o
@@ -87,6 +91,7 @@ opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h
 pcmcat.o: pcmcat.c multicast.h
 pcmsend.o: pcmsend.c misc.h multicast.h
+control.o: control.c radio.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h
 
 # Components of libfcd.a
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
@@ -101,6 +106,7 @@ filter.o: filter.c misc.h filter.h
 misc.o: misc.c radio.h sdr.h
 multicast.o: multicast.c multicast.h
 rtcp.o: rtcp.c multicast.h
+status.o: status.c radio.h sdr.h  misc.h filter.h multicast.h status.h
 
 # Components of main program 'radio'
 am.o: am.c misc.h filter.h radio.h  sdr.h
@@ -114,7 +120,9 @@ linear.o: linear.c misc.h filter.h radio.h sdr.h
 main.o: main.c radio.h sdr.h filter.h misc.h  multicast.h dsp.h
 modes.o: modes.c radio.h sdr.h misc.h
 radio.o: radio.c radio.h sdr.h filter.h misc.h 
-status.o: status.c radio.h sdr.h  misc.h filter.h multicast.h
+
 touch.o: touch.c misc.h
+send_status.o: send_status.c status.h
+
 
 
