@@ -177,7 +177,7 @@ void *status(void *arg){
     encode_int32(&bp,FILTER_BLOCKSIZE,demod->L);
     encode_int32(&bp,FILTER_FIR_LENGTH,demod->M);
     if(demod->filter_out)
-      encode_float(&bp,NOISE_BANDWIDTH,demod->filter_out->noise_gain);
+      encode_float(&bp,NOISE_BANDWIDTH,demod->samprate * demod->filter_out->noise_gain);
 
     // Signals - these ALWAYS change
     encode_float(&bp,BASEBAND_POWER,demod->bb_power);

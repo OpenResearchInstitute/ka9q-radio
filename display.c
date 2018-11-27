@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.138 2018/11/25 02:59:34 karn Exp karn $
+// $Id: display.c,v 1.139 2018/11/27 07:34:19 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -125,6 +125,7 @@ static int Frequency_lock;
 // Adjust the selected item up or down one step
 void adjust_item(struct demod *demod,int direction){
   double tunestep;
+  double samptime = demod->decimate / demod->samprate;
   
   tunestep = pow(10., (double)demod->tunestep);
 
@@ -157,11 +158,11 @@ void adjust_item(struct demod *demod,int direction){
     break;
   case 4: // Filter low edge
     demod->low += tunestep;
-    set_filter(demod->filter_out,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
+    set_filter(demod->filter_out,samptime*demod->low,samptime*demod->high,demod->kaiser_beta);
     break;
   case 5: // Filter high edge
     demod->high += tunestep;
-    set_filter(demod->filter_out,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
+    set_filter(demod->filter_out,samptime*demod->low,samptime*demod->high,demod->kaiser_beta);
     break;
   case 6: // Post-detection audio frequency shift
     set_shift(demod,demod->shift + tunestep);
@@ -170,7 +171,7 @@ void adjust_item(struct demod *demod,int direction){
     demod->kaiser_beta += tunestep;
     if(demod->kaiser_beta < 0)
       demod->kaiser_beta = 0;
-    set_filter(demod->filter_out,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
+    set_filter(demod->filter_out,samptime*demod->low,samptime*demod->high,demod->kaiser_beta);
     break;
   }
 }
