@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.24 2018/07/11 06:56:48 karn Exp karn $
+// $Id: linear.c,v 1.25 2018/08/09 03:55:46 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -80,7 +80,7 @@ void *demod_linear(void *arg){
   struct filter_out * const filter = create_filter_output(demod->filter_in,NULL,demod->decimate,
 					       (demod->flags & ISB) ? CROSS_CONJ : COMPLEX);
   demod->filter_out = filter;
-  set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+  set_filter(filter,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
 
   // Carrier search FFT
   complex float * fftinbuf = NULL;

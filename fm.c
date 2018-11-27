@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.54 2018/07/08 10:05:51 karn Exp karn $
+// $Id: fm.c,v 1.55 2018/10/12 00:20:25 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -34,7 +34,7 @@ void *demod_fm(void *arg){
   // Create predetection filter, leaving response momentarily empty
   struct filter_out * const filter = create_filter_output(demod->filter_in,NULL,demod->decimate,COMPLEX);
   demod->filter_out = filter;
-  set_filter(filter,dsamprate,demod->low,demod->high,demod->kaiser_beta);
+  set_filter(filter,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
 
   // Set up audio baseband filter master
   // Can have two slave filters: one for the de-emphasized audio output, another for the PL tone measurement

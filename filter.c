@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.28 2018/02/06 11:45:57 karn Exp karn $
+// $Id: filter.c,v 1.29 2018/07/06 06:11:25 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -497,10 +497,16 @@ float const noise_gain(struct filter_out const * const filter){
 }
 
 
-int set_filter(struct filter_out * const slave,float const dsamprate,float const low,float const high,float const kaiser_beta){
+int set_filter(struct filter_out * const slave,float const low,float const high,float const kaiser_beta){
   assert(slave != NULL);
   if(slave == NULL)
     return -1;
+  if(isnan(low) || isnan(high))
+    return -1; // In case sample rate was zero
+
+  assert(fabs(low) <= 0.5);
+  assert(fabs(high) <= 0.5);
+
   struct filter_in *master = slave->master;
 
 
@@ -519,9 +525,9 @@ int set_filter(struct filter_out * const slave,float const dsamprate,float const
   for(int n=0;n<N_dec;n++){
     float f;
     if(n <= N_dec/2)
-      f = (float)n * dsamprate / N_dec;
+      f = (float)n / N_dec;
     else
-      f = (float)(n-N_dec) * dsamprate / N_dec;
+      f = (float)(n-N_dec) / N_dec;
     if(f >= low && f <= high)
       response[n] = gain;
     else

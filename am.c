@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.33 2018/07/06 06:06:12 karn Exp karn $
+// $Id: am.c,v 1.34 2018/07/08 10:05:51 karn Exp karn $
 // AM envelope demodulator thread for 'radio'
 // Copyright Oct 9 2017, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -42,7 +42,7 @@ void *demod_am(void *arg){
   // Detection filter
   struct filter_out * const filter = create_filter_output(demod->filter_in,NULL,demod->decimate,COMPLEX);
   demod->filter_out = filter;
-  set_filter(filter,demod->samprate/demod->decimate,demod->low,demod->high,demod->kaiser_beta);
+  set_filter(filter,demod->low/demod->samprate,demod->high/demod->samprate,demod->kaiser_beta);
 
   while(!demod->terminate){
     // New samples
