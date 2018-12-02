@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.140 2018/11/27 09:52:52 karn Exp karn $
+// $Id: display.c,v 1.141 2018/12/02 09:16:45 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -590,7 +590,7 @@ void *display(void *arg){
     col = 1;
     wclrtobot(options);    
     if(demod->demod_type == LINEAR_DEMOD){
-      if(demod->isb)
+      if(demod->filter.isb)
 	wattron(options,A_UNDERLINE);
       mvwprintw(options,row++,col,"ISB");
       wattroff(options,A_UNDERLINE);
@@ -604,12 +604,12 @@ void *display(void *arg){
       mvwprintw(options,row++,col,"Square");
       wattroff(options,A_UNDERLINE);
 
-      if(demod->channels == 1)
+      if(demod->output.channels == 1)
 	wattron(options,A_UNDERLINE);
       mvwprintw(options,row++,col,"Mono");    
       wattroff(options,A_UNDERLINE);
       
-      if(demod->channels == 2)
+      if(demod->output.channels == 2)
 	wattron(options,A_UNDERLINE);
       mvwprintw(options,row++,col,"Stereo");    
       wattroff(options,A_UNDERLINE);
@@ -758,15 +758,15 @@ void *display(void *arg){
 	demod->pll = 1;
       break;
     case KEY_F(9):
-      demod->isb = 1;
+      demod->filter.isb = 1;
       break;
     case KEY_F(10):
       break;
     case KEY_F(11):
-      demod->channels = 2;
+      demod->output.channels = 2;
       break;
     case KEY_F(12):
-      demod->channels = 1;
+      demod->output.channels = 1;
       break;
 #endif
     case KEY_MOUSE: // Mouse event
@@ -944,15 +944,15 @@ void *display(void *arg){
 	char str[160];
 	getentry("Enter option [isb pll cal flat square stereo mono], '!' prefix disables: ",str,sizeof(str));
 	if(strcasecmp(str,"mono") == 0){
-	  demod->channels = 1;
+	  demod->output.channels = 1;
 	} else if(strcasecmp(str,"!mono") == 0){
-	  demod->channels = 2;
+	  demod->output.channels = 2;
 	} else if(strcasecmp(str,"stereo") == 0){
-	  demod->channels = 2;
+	  demod->output.channels = 2;
 	} else if(strcasecmp(str,"isb") == 0){
-	  demod->isb = 1;
+	  demod->filter.isb = 1;
 	} else if(strcasecmp(str,"!isb") == 0){
-	  demod->isb = 0;
+	  demod->filter.isb = 0;
 	} else if(strcasecmp(str,"pll") == 0){
 	  demod->pll = 1;
 	} else if(strcasecmp(str,"!pll") == 0){
@@ -1027,7 +1027,7 @@ void *display(void *arg){
 	// In the options window
 	switch(my){
 	case 1:
-	  demod->isb = !demod->isb;
+	  demod->filter.isb = !demod->filter.isb;
 	  break;
 	case 2:
 	  demod->pll = !demod->pll;
@@ -1038,10 +1038,10 @@ void *display(void *arg){
 	    demod->pll = 1;
 	  break;
 	case 4:
-	  demod->channels = 1;
+	  demod->output.channels = 1;
 	  break;
 	case 5:
-	  demod->channels = 2;
+	  demod->output.channels = 2;
 	  break;
 	}
       }

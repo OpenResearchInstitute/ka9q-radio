@@ -192,7 +192,7 @@ void *status(void *arg){
       break;
     case LINEAR_DEMOD:
       encode_float(&bp,DEMOD_GAIN,demod->agc.gain);
-      encode_int32(&bp,INDEPENDENT_SIDEBAND,demod->isb);
+      encode_int32(&bp,INDEPENDENT_SIDEBAND,demod->filter.isb);
       if(demod->pll){
 	encode_float(&bp,FREQ_OFFSET,demod->foffset);
 	encode_float(&bp,PLL_PHASE,demod->cphase);
@@ -202,7 +202,7 @@ void *status(void *arg){
       }
       break;
     }
-    encode_int32(&bp,OUTPUT_CHANNELS,demod->channels);
+    encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
     encode_eol(&bp);
 
     int len = compact_packet(&State[0],packet,(count % 10) == 0);

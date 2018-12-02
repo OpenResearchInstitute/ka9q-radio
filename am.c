@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.36 2018/11/27 09:46:37 karn Exp karn $
+// $Id: am.c,v 1.37 2018/12/02 09:16:45 karn Exp karn $
 // AM envelope demodulator thread for 'radio'
 // Copyright Oct 9 2017, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -34,7 +34,7 @@ void *demod_am(void *arg){
   float DC_filter = 0;
   float const DC_filter_coeff = .0001;
 
-  demod->channels = 1; // Mono
+  demod->output.channels = 1; // Mono
 
   demod->snr = -INFINITY; // Not used
 

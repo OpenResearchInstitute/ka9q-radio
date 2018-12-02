@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.27 2018/11/27 09:46:44 karn Exp karn $
+// $Id: linear.c,v 1.28 2018/12/02 09:16:45 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -78,7 +78,7 @@ void *demod_linear(void *arg){
 
   // Detection filter
   struct filter_out * const filter = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,
-					       (demod->isb) ? CROSS_CONJ : COMPLEX);
+					       (demod->filter.isb) ? CROSS_CONJ : COMPLEX);
   demod->filter.out = filter;
   set_filter(filter,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);
 
@@ -112,7 +112,7 @@ void *demod_linear(void *arg){
   while(!demod->terminate){
     // New samples
     // Copy ISB flag to filter, since it might change
-    if(demod->isb)
+    if(demod->filter.isb)
       filter->out_type = CROSS_CONJ;
     else
       filter->out_type = COMPLEX;
@@ -279,7 +279,7 @@ void *demod_linear(void *arg){
       pthread_mutex_unlock(&demod->shift.mutex);
     }
     
-    if(demod->channels == 1) {
+    if(demod->output.channels == 1) {
       // Send only I channel as mono
       float samples[filter->olen];
       for(int n=0; n<filter->olen; n++)

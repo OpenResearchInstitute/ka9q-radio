@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.75 2018/11/27 07:35:03 karn Exp karn $
+// $Id: radio.h,v 1.77 2018/12/02 09:34:57 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -111,7 +111,6 @@ struct demod {
   pthread_t proc_samples;
 
   float if_power;        // Input level, unity == 0dBFS
-
   double freq;           // Desired carrier frequency
 
   // Doppler shift correction (optional)
@@ -161,8 +160,6 @@ struct demod {
   int pll;     // Linear mode PLL tracking of carrier
   int square;  // Squarer on PLL input
 
-  int channels;// 1 = mono, 2 = stereo
-
   // AGC (AM and linear modes)
   struct {
     float headroom;   // Audio level headroom
@@ -200,6 +197,7 @@ struct demod {
     int rtcp_fd;  // File descriptor for RTP control protocol
     int status_fd; // File descriptor for receiver status
     struct rtp_state rtp;
+    int channels;// 1 = mono, 2 = stereo
   } output;
 };
 extern char Libdir[];
