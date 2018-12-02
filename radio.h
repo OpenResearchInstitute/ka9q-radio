@@ -144,6 +144,7 @@ struct demod {
     // 0 => rectangular window; increasing values widens main lobe and decreases ripple
     float kaiser_beta;
     float noise_bandwidth; // noise bandwidth relative to sample rate
+    int isb;     // Independent sideband mode
   } filter;
 
   // Mode-specific demodulator thread
@@ -159,7 +160,7 @@ struct demod {
   int flat;    // Flat FM frequency response
   int pll;     // Linear mode PLL tracking of carrier
   int square;  // Squarer on PLL input
-  int isb;     // Independent sideband mode
+
   int channels;// 1 = mono, 2 = stereo
 
   // AGC (AM and linear modes)
