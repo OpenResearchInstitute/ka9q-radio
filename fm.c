@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.56 2018/11/27 07:31:36 karn Exp karn $
+// $Id: fm.c,v 1.57 2018/11/27 09:46:29 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -22,24 +22,22 @@ void *demod_fm(void *arg){
   pthread_setname("fm");
   assert(arg != NULL);
   struct demod * const demod = arg;  
-  struct audio * const audio = &Audio; // Eventually pass as argument
 
   complex float state = 1; // Arbitrary choice; zero would cause first audio sample to be NAN
-  float const dsamprate = demod->samprate / demod->decimate; // Decimated (output) sample rate
+  float const dsamprate = (float)demod->input.samprate / demod->filter.decimate; // Decimated (output) sample rate
   demod->pdeviation = 0;
   demod->foffset = 0;
-  demod->flags |= MONO; // Only mono for now
-  demod->gain = NAN; // We don't use this, turn it off on the display
+  demod->channels = 1; // Only mono for now
 
   // Create predetection filter, leaving response momentarily empty
-  struct filter_out * const filter = create_filter_output(demod->filter_in,NULL,demod->decimate,COMPLEX);
-  demod->filter_out = filter;
-  set_filter(filter,demod->low/dsamprate,demod->high/dsamprate,demod->kaiser_beta);
+  struct filter_out * const filter = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,COMPLEX);
+  demod->filter.out = filter;
+  set_filter(filter,demod->filter.low/dsamprate,demod->filter.high/dsamprate,demod->filter.kaiser_beta);
 
   // Set up audio baseband filter master
   // Can have two slave filters: one for the de-emphasized audio output, another for the PL tone measurement
-  int const AL = demod->L / demod->decimate;
-  int const AM = (demod->M - 1) / demod->decimate + 1;
+  int const AL = demod->filter.L / demod->filter.decimate;
+  int const AM = (demod->filter.M - 1) / demod->filter.decimate + 1;
   int const AN = AL + AM - 1;
   float const filter_gain = 10./AN;  // Add some gain to bring up subjective volume level
   struct filter_in *audio_master = create_filter_input(AL,AM,REAL);
@@ -54,7 +52,7 @@ void *demod_fm(void *arg){
   // Audio response is high pass with 300 Hz corner to remove PL tone
   // then -6 dB/octave post-emphasis since demod is FM and modulation is actually PM (indirect FM)
   struct filter_out *audio_filter = NULL;
-  if(!(demod->flags & FLAT)){
+  if(!demod->flat){
     complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
     assert(aresponse != NULL);
     memset(aresponse,0,(AN/2+1) * sizeof(*aresponse));
@@ -64,7 +62,7 @@ void *demod_fm(void *arg){
 	aresponse[j] = filter_gain * 300./f; // -6 dB/octave de-emphasis to handle PM (indirect FM) transmission
     }
     // Window scaling for REAL input, REAL output
-    window_rfilter(AL,AM,aresponse,demod->kaiser_beta);
+    window_rfilter(AL,AM,aresponse,demod->filter.kaiser_beta);
     audio_filter = create_filter_output(audio_master,aresponse,1,REAL); // Real input, real output, same sample rate
   }
   
@@ -85,7 +83,7 @@ void *demod_fm(void *arg){
 
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
-    float const gain = (demod->headroom *  M_1_PI * dsamprate) / fabsf(demod->low - demod->high);
+    float const gain = (demod->agc.headroom *  M_1_PI * dsamprate) / fabsf(demod->filter.low - demod->filter.high);
 
     // Find average amplitude and estimate SNR for squelch
     // We also need average magnitude^2, but we have that from demod->bb_power
@@ -172,7 +170,7 @@ void *demod_fm(void *arg){
 	samples[n] = audio_filter->output.r[n] * gain;
 
     }
-    send_mono_audio(audio,samples,audio_master->ilen);
+    send_mono_output(demod,samples,audio_master->ilen);
   }
   // Clean up subthreads
   pthread_join(pl_thread,NULL);
@@ -182,13 +180,7 @@ void *demod_fm(void *arg){
     delete_filter_output(audio_filter); // Must delete first
   delete_filter_input(audio_master);
   delete_filter_output(filter);
-  demod->filter_out = NULL;
-
-  // Clear these to keep them from showing up with other demods
-  demod->foffset = NAN;
-  demod->pdeviation = NAN;
-  demod->plfreq = NAN;
-  demod->flags = 0;
+  demod->filter.out = NULL;
 
   pthread_exit(NULL);
 }
@@ -201,9 +193,9 @@ void *pltask(void *arg){
   assert(demod != NULL);
 
   // N, L and sample rate for audio master filter (usually 48 kHz)
-  int const AN = (demod->L + demod->M - 1) / demod->decimate;
-  int const AL = demod->L / demod->decimate;
-  float const dsamprate = demod->samprate / demod->decimate; // sample rate from FM demodulator
+  int const AN = (demod->filter.L + demod->filter.M - 1) / demod->filter.decimate;
+  int const AL = demod->filter.L / demod->filter.decimate;
+  float const dsamprate = (float)demod->input.samprate / demod->filter.decimate; // sample rate from FM demodulator
 
   // Pl slave filter parameters
   int const PL_decimate = 32; // 48 kHz in, 1500 Hz out

@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.5 2018/11/26 05:27:22 karn Exp karn $
+// $Id: status.c,v 1.6 2018/11/27 07:36:16 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -77,6 +77,11 @@ int encode_int32(unsigned char **buf,enum status_type type,uint32_t x){
   return encode_int64(buf,type,(uint64_t)x);
 }
 
+int encode_int(unsigned char **buf,enum status_type type,int x){
+  return encode_int64(buf,type,(int)x);
+}
+
+
 int encode_float(unsigned char **buf,enum status_type type,float x){
   uint32_t data;
 
@@ -113,7 +118,7 @@ void *decode_string(unsigned char **bp,void *buf,int buflen){
 }
 
 
-// Decode encoded variable-length integers
+// Decode encoded variable-length UNSIGNED integers
 // At entry, *bp -> length field (not type!)
 // Works for byte, short, long, long long
 uint64_t decode_int(unsigned char *cp,int len){

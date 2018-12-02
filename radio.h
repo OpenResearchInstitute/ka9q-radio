@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.74 2018/11/25 02:59:20 karn Exp karn $
+// $Id: radio.h,v 1.75 2018/11/27 07:35:03 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -15,23 +15,12 @@
 
 #include "sdr.h"
 #include "multicast.h"
-
-struct audio {
-  int samprate;       // Audio D/A sample rate (usually decimated from SDR A/D)
-
-  // RTP network streaming
-  int silent; // last packet was suppressed (used to generate RTP mark bit)
-  char audio_mcast_address_text[256];
-  int audio_mcast_fd; // File descriptor for multicast output
-  int rtcp_mcast_fd;  // File descriptor for RTP control protocol
-  int status_mcast_fd; // File descriptor for receiver status
-  struct rtp_state rtp;
-};
+#include "osc.h"
 
 enum demod_type {
-  AM_DEMOD = 1,     // AM envelope demodulation
-  FM_DEMOD,         // Frequency demodulation
-  LINEAR_DEMOD,     // Linear demodulation, i.e., everything else: SSB, CW, DSB, CAM, IQ
+  LINEAR_DEMOD = 0,     // Linear demodulation, i.e., everything else: SSB, CW, DSB, CAM, IQ
+  AM_DEMOD,             // AM envelope demodulation
+  FM_DEMOD,             // Frequency demodulation
 };
 
 struct demodtab {
@@ -42,13 +31,15 @@ struct demodtab {
 extern struct demodtab Demodtab[];
 extern int Ndemod;
 
-
-
 // Internal format of entries in /usr/local/share/ka9q-radio/modes.txt
 struct modetab {
   char name[16];
-  int demod_index;
-  int flags;        // Special purpose flags, e.g., ISB
+  enum demod_type demod_type;
+  int pll;
+  int square;
+  int channels;     // 1 or 2
+  int isb;
+  int flat;
   float shift;      // Audio frequency shift (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
   float low;        // Lower edge of IF passband
@@ -69,91 +60,68 @@ struct packet {
   unsigned char content[PKTSIZE];
 };
 
-
 // Demodulator state block
 struct demod {
-  // Global parameters
-
   // Input thread state
   pthread_t rtp_recv_thread;
-  int input_fd;      // Raw incoming I/Q data from multicast socket
-  char iq_mcast_address_text[256];
-  struct sockaddr_storage input_source_address;
-  struct sockaddr_storage ctl_address;
-  long long samples;    // Count of raw I/Q samples received
+
+  struct {
+    int fd;      // Raw incoming I/Q data from multicast socket
+    char dest_address_text[256];
+    struct sockaddr_storage source_address;
+    struct sockaddr_storage dest_address;
+    struct sockaddr_storage ctl_address;
+    struct rtp_state rtp; // State of the I/Q RTP receiver
+    long long samples;    // Count of raw I/Q samples received
+    int samprate;
+  } input;
+
+  // Front end hardware information
 
   struct status requested_status; // The status we want the FCD to be in
   struct status status;           // Last status from FCD
-  int tuner_lock;                 // When set, don't try to command tuner
-  // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
-  pthread_mutex_t status_mutex;
-  pthread_cond_t status_cond;     // Signalled whenever status changes
-
-  // True A/D sample rate, assuming same TCXO as tuner
-  // Set from I/Q packet header and calibrate parameter
-  volatile double samprate;
-
-  // queue of RTP packets between rtp-recv and procsamp
-  pthread_cond_t qcond;
-  pthread_mutex_t qmutex;
-  struct packet *queue;
-
-  struct rtp_state rtp_state; // State of the I/Q RTP receiver
-
-  float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
-
-  // Processes sequenced RTP packets from the RTP receiver thread
-  // Apply I/Q corrections, spin down with 2nd (software) local oscillator,
-  // apply Doppler corrections (if used), and pass to input half of pre-detection filter
-  pthread_t proc_samples;
-
-  float level;           // Input level, unity == 0dBFS
-
   // I/Q correction parameters
   float DC_i,DC_q;       // Average DC offsets
   float sinphi;          // smoothed estimate of I/Q phase error
   float imbalance;       // Ratio of I power to Q power
-
-  double freq;              // Desired carrier frequency
-
-  // Tuning parameters
-  int ctl_fd;                     // File descriptor for controlling SDR frequency and gaim
-
-  // The tuner and A/D converter are clocked from the same TCXO
-  // Ratio is (1+calibrate)
-  //     calibrate < 0 --> TCXO frequency low; calibrate > 0 --> TCXO frequency high
-  // True first LO = (1 + calibrate) * demod.status.frequency
-  // True A/D sample rate = (1 + calibrate) * demod.status.samprate
-  double calibrate;
 
   // Limits on usable IF due to aliasing, filtering, etc
   // Less than or equal to +/- samprate/2
   float min_IF;
   float max_IF;
 
+  float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
+
+  // Tuning parameters
+  int ctl_fd;                     // File descriptor for controlling SDR frequency and gaim
+
+  int tuner_lock;                 // When set, don't try to command tuner
+  // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
+  pthread_mutex_t status_mutex;
+  pthread_cond_t status_cond;     // Signalled whenever status changes
+
+  // queue of RTP packets between rtp-recv and procsamp
+  pthread_cond_t qcond;
+  pthread_mutex_t qmutex;
+  struct packet *queue;
+
+  // Processes sequenced RTP packets from the RTP receiver thread
+  // Spin down with 2nd (software) local oscillator,
+  // apply Doppler corrections (if used), and pass to input half of pre-detection filter
+  pthread_t proc_samples;
+
+  float if_power;        // Input level, unity == 0dBFS
+
+  double freq;           // Desired carrier frequency
 
   // Doppler shift correction (optional)
   pthread_t doppler_thread;          // Thread that reads file and sets doppler
   char *doppler_command;             // Command to execute for tracking
-
-  pthread_mutex_t doppler_mutex;     // Protects doppler
-  double doppler;       // Open-loop doppler correction from satellite tracking program
-  double doppler_rate;
-  complex double doppler_phasor;
-  complex double doppler_phasor_step;
-  complex double doppler_phasor_step_step;  
+  struct osc doppler;
 
   // Second LO parameters
-  pthread_mutex_t second_LO_mutex;
-  complex double second_LO_phasor; // Second LO phasor
-  double second_LO;     // True second LO frequency, including calibration
-                        // Provided because round trip through csincos/carg is less accurate
-  complex double second_LO_phasor_step;  // LO step phasor = csincos(2*pi*second_LO/samprate)
-
-  pthread_mutex_t shift_mutex; // protects passband shift
-  double shift;         // frequency shift after demodulation (for CW,DSB)
-  complex double shift_phasor;
-  complex double shift_phasor_step;
+  struct osc second_LO;
+  struct osc shift;
 
   int tunestep;       // Tuning column, log10(); e.g., 3 -> thousands
   int tuneitem;       // Tuning entry index
@@ -162,61 +130,81 @@ struct demod {
   struct notchfilter *nf;
 
   // Zero IF pre-demod filter params
-  struct filter_in *filter_in;
-  struct filter_out *filter_out;
-  int L;            // Signal samples in FFT buffer
-  int M;            // Samples in filter impulse response
-  int interpolate;  // Input sample ratio multiplier, should be power of 2
-  int decimate;     // output sample rate divisor, should be power of 2
-  float low;        // Edges of filter band
-  float high;
-  // Window shape factor for Kaiser window
-  // Transition region is approx sqrt(1+Beta^2)
-  // 0 => rectangular window; increasing values widens main lobe and decreases ripple
-  float kaiser_beta;
-  float noise_bandwidth; // noise bandwidth relative to sample rate
+  struct {
+    struct filter_in *in;
+    struct filter_out *out;
+    int L;            // Signal samples in FFT buffer
+    int M;            // Samples in filter impulse response
+    int interpolate;  // Input sample ratio multiplier, should be power of 2
+    int decimate;     // output sample rate divisor, should be power of 2
+    float low;        // Edges of filter band
+    float high;
+    // Window shape factor for Kaiser window
+    // Transition region is approx sqrt(1+Beta^2)
+    // 0 => rectangular window; increasing values widens main lobe and decreases ripple
+    float kaiser_beta;
+    float noise_bandwidth; // noise bandwidth relative to sample rate
+  } filter;
 
   // Mode-specific demodulator thread
   // Run output half of pre-detection filter and pass through AM, FM or linear demodulator
   // The AM and linear demodulators send baseband audio directly to the network;
   // the FM demodulator performs further audio filtering
   pthread_t demod_thread;
-  int demod_index;            // Index into demodulator table (AM, FM, Linear)
-  char mode[16];              // printable mode name (USB, LSB, etc)
   int terminate;              // set to 1 by set_mode() to request graceful termination
-  int flags;                  // Special flags to demodulator
-// Modetab flags
-#define ISB 1      // Cross-conjugation of positive and negative frequencies, for ISB
-#define FLAT 2      // No baseband filtering for FM
-#define PLL 4  // Coherent carrier tracking
-#define SQUARE   8 // Square carrier in coherent loop (BPSK/suppressed carrier AM)
-#define MONO     16 // Only output I channel of linear mode
 
-  // Demodulator configuration settngs
-  float headroom;   // Audio level headroom
-  float hangtime;   // Linear AGC hang time, seconds
-  float recovery_rate; // Linear AGC recovery rate, dB/sec (must be positive)
-  float attack_rate;   // Linear AGC attack rate, dB/sec (must be negative)
+  enum demod_type demod_type;            // Index into demodulator table (AM, FM, Linear)
+  char mode[16];              // printable mode name (USB, LSB, etc)
+
+  int flat;    // Flat FM frequency response
+  int pll;     // Linear mode PLL tracking of carrier
+  int square;  // Squarer on PLL input
+  int isb;     // Independent sideband mode
+  int channels;// 1 = mono, 2 = stereo
+
+  // AGC (AM and linear modes)
+  struct {
+    float headroom;   // Audio level headroom
+    float hangtime;   // Linear AGC hang time, seconds
+    float recovery_rate; // Linear AGC recovery rate, dB/sec (must be positive)
+    float attack_rate;   // Linear AGC attack rate, dB/sec (must be negative)
+    float gain;       // Audio gain
+  } agc;
+
   float loop_bw;    // Loop bw (coherent modes)
 
   // Demodulator status variables
   float bb_power;   // Average power of signal after filter
   float n0;         // Noise spectral density esimate (experimemtal)
   float snr;        // Estimated signal-to-noise ratio (only some demodulators)
-  float gain;       // Audio gain
   float foffset;    // Frequency offset (FM, coherent AM, cal, dsb)
   float pdeviation; // Peak frequency deviation (FM)
   float cphase;     // Carrier phase change (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
-  float spare;      // Currently used for PLL lock hysteresis
+  float lock_timer; // PLL lock timer
+  int pll_lock;
 
   struct filter_in *audio_master; // FM only
+
+  // Output
+  struct {
+    int samprate;       // Audio D/A sample rate (usually decimated from SDR A/D)
+
+    // RTP network streaming
+    int silent; // last packet was suppressed (used to generate RTP mark bit)
+    char dest_address_text[256];
+    struct sockaddr_storage source_address;
+    struct sockaddr_storage dest_address;
+    int fd; // File descriptor for multicast output
+    int rtcp_fd;  // File descriptor for RTP control protocol
+    int status_fd; // File descriptor for receiver status
+    struct rtp_state rtp;
+  } output;
 };
 extern char Libdir[];
 extern int Tunestep;
 extern struct modetab Modes[];
 extern int Nmodes;
-extern struct audio Audio;
 extern int Verbose;
 extern int SDR_correct;
 
@@ -263,10 +251,10 @@ void *demod_fm(void *);
 void *demod_am(void *);
 void *demod_linear(void *);
 
-int send_mono_audio(struct audio *,const float *,int);
-int send_stereo_audio(struct audio *,const float *,int);
-int setup_audio(struct audio *,int);
-void audio_cleanup(void *);
+int send_mono_output(struct demod *,const float *,int);
+int send_stereo_output(struct demod *,const float *,int);
+int setup_output(struct demod *,int);
+void output_cleanup(void *);
 
 extern int Mcast_ttl;
 

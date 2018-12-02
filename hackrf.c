@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.13 2018/09/08 06:06:21 karn Exp karn $
+// $Id: hackrf.c,v 1.14 2018/11/14 23:12:47 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -464,7 +464,7 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,Locale);
   
   // Set up RTP output socket
-  Rtp_sock = setup_mcast(dest,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(dest,NULL,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s",strerror(errno));
     exit(1);

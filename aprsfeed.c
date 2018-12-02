@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.20 2018/09/08 08:59:13 karn Exp karn $
+// $Id: aprsfeed.c,v 1.21 2018/09/17 19:01:01 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -74,7 +74,7 @@ int main(int argc,char *argv[]){
     }
   }
   // Set up multicast input
-  if((Input_fd = setup_mcast(Mcast_address_text,0,Mcast_ttl,0)) == -1){
+  if((Input_fd = setup_mcast(Mcast_address_text,NULL,0,Mcast_ttl,0)) == -1){
     fprintf(stderr,"Can't set up multicast input from %s\n",Mcast_address_text);
     exit(1);
   }

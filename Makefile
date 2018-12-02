@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.122 2018/11/25 03:01:58 karn Exp karn $
+# $Id: Makefile,v 1.123 2018/11/27 07:37:46 karn Exp karn $
 #COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -73,25 +73,25 @@ libfcd.a: fcd.o hid-libusb.o
 	ar rv $@ $^
 	ranlib $@
 
-libradio.a: attr.o ax25.o decimate.o dsp.o filter.o misc.o multicast.o rtcp.o
+libradio.a: attr.o ax25.o decimate.o dsp.o filter.o misc.o multicast.o rtcp.o osc.o
 	ar rv $@ $^
 	ranlib $@
 
 # Main program objects
 aprs.o: aprs.c ax25.h multicast.h misc.h dsp.h
 aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
-funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h misc.h multicast.h
-hackrf.o: hackrf.c sdr.h radio.h misc.h multicast.h decimate.h
-iqplay.o: iqplay.c misc.h radio.h sdr.h multicast.h attr.h
-iqrecord.o: iqrecord.c radio.h sdr.h multicast.h attr.h
-modulate.o: modulate.c misc.h filter.h radio.h sdr.h
+funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h radio.h osc.h misc.h multicast.h
+hackrf.o: hackrf.c sdr.h radio.h osc.h misc.h multicast.h decimate.h
+iqplay.o: iqplay.c misc.h radio.h osc.h sdr.h multicast.h attr.h
+iqrecord.o: iqrecord.c radio.h osc.h sdr.h multicast.h attr.h
+modulate.o: modulate.c misc.h filter.h radio.h osc.h sdr.h
 monitor.o: monitor.c misc.h multicast.h
 opus.o: opus.c misc.h multicast.h
 opussend.o: opussend.c misc.h multicast.h
-packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h
+packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h osc.h
 pcmcat.o: pcmcat.c multicast.h
 pcmsend.o: pcmsend.c misc.h multicast.h
-control.o: control.c radio.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h
+control.o: control.c radio.h osc.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h
 
 # Components of libfcd.a
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
@@ -103,23 +103,24 @@ ax25.o: ax25.c ax25.h
 decimate.o: decimate.c decimate.h
 dsp.o: dsp.c dsp.h
 filter.o: filter.c misc.h filter.h
-misc.o: misc.c radio.h sdr.h
+misc.o: misc.c radio.h osc.h sdr.h
 multicast.o: multicast.c multicast.h
 rtcp.o: rtcp.c multicast.h
-status.o: status.c radio.h sdr.h  misc.h filter.h multicast.h status.h
+status.o: status.c radio.h osc.h sdr.h  misc.h filter.h multicast.h status.h
+osc.o: osc.c osc.h
 
 # Components of main program 'radio'
-am.o: am.c misc.h filter.h radio.h  sdr.h
+am.o: am.c misc.h filter.h radio.h osc.h  sdr.h
 audio.o: audio.c misc.h  multicast.h
 bandplan.o: bandplan.c bandplan.h
-display.o: display.c radio.h sdr.h  misc.h filter.h bandplan.h multicast.h
-doppler.o: doppler.c radio.h sdr.h misc.h
-fm.o: fm.c misc.h filter.h radio.h sdr.h 
+display.o: display.c radio.h osc.h sdr.h  misc.h filter.h bandplan.h multicast.h
+doppler.o: doppler.c radio.h osc.h sdr.h misc.h
+fm.o: fm.c misc.h filter.h radio.h osc.h sdr.h 
 knob.o: knob.c misc.h
-linear.o: linear.c misc.h filter.h radio.h sdr.h 
-main.o: main.c radio.h sdr.h filter.h misc.h  multicast.h dsp.h
-modes.o: modes.c radio.h sdr.h misc.h
-radio.o: radio.c radio.h sdr.h filter.h misc.h 
+linear.o: linear.c misc.h filter.h radio.h osc.h sdr.h 
+main.o: main.c radio.h osc.h sdr.h filter.h misc.h  multicast.h dsp.h
+modes.o: modes.c radio.h osc.h sdr.h misc.h
+radio.o: radio.c radio.h osc.h sdr.h filter.h misc.h 
 
 touch.o: touch.c misc.h
 send_status.o: send_status.c status.h

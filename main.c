@@ -1,6 +1,6 @@
-// $Id: main.c,v 1.121 2018/09/08 08:21:16 karn Exp karn $
+// $Id: main.c,v 1.122 2018/11/22 09:57:59 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
-// downconvert, filter, demodulate, optionally compress and multicast audio
+// downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
 #define _GNU_SOURCE 1
 #include <assert.h>
@@ -42,16 +42,14 @@ char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
 int Update_interval = 100;  // 100 ms between screen updates
 int Mcast_ttl = 1;
-int SDR_correct = 0;
 
-// Primary control blocks for downconvert/filter/demodulate and audio output
+// Primary control blocks for downconvert/filter/demodulate and output
 // Note: initialized to all zeroes, like all global variables
 struct demod Demod;
-struct audio Audio;
 
 struct timeval Starttime;      // System clock at timestamp 0, for RTCP
 
-void audio_cleanup(void *);
+void output_cleanup(void *);
 void closedown(int);
 void *rtp_recv(void *);
 void *rtcp_send(void *);
@@ -91,8 +89,6 @@ int main(int argc,char *argv[]){
   snprintf(Statepath,sizeof(Statepath),"%s/%s",getenv("HOME"),".radiostate");
   Statepath[sizeof(Statepath)-1] = '\0';
 
-  atexit(cleanup);
-
   if(readmodes("modes.txt") != 0){
     fprintf(stderr,"Can't read mode table\n");
     exit(1);
@@ -103,31 +99,30 @@ int main(int argc,char *argv[]){
   fftwf_make_planner_thread_safe();
 
   struct demod * const demod = &Demod; // Only one demodulator per program for now
-  struct audio * const audio = &Audio;
 
   // Set program defaults, can be overridden by state file and command line args, in that order
   memset(demod,0,sizeof(*demod)); // Just in case it's ever dynamic
-  audio->samprate = DAC_samprate; // currently 48 kHz, hard to change
+  demod->output.samprate = DAC_samprate; // currently 48 kHz, hard to change
   strcpy(demod->mode,"FM");
   demod->freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
 
-  demod->L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
-  demod->M = 4352+1;    // Length of filter impulse response
-  demod->kaiser_beta = 3.0; // Reasonable compromise
-  strlcpy(demod->iq_mcast_address_text,"iq.hf.mcast.local",sizeof(demod->iq_mcast_address_text));
-  demod->headroom = pow(10.,-15./20); // -15 dB
-  strlcpy(audio->audio_mcast_address_text,"pcm.hf.mcast.local",sizeof(audio->audio_mcast_address_text));
+  demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
+  demod->filter.M = 4352+1;    // Length of filter impulse response
+  demod->filter.kaiser_beta = 3.0; // Reasonable compromise
+  strlcpy(demod->input.dest_address_text,"iq.hf.mcast.local",sizeof(demod->input.dest_address_text));
+  demod->agc.headroom = pow(10.,-15./20); // -15 dB
+  strlcpy(demod->output.dest_address_text,"pcm.hf.mcast.local",sizeof(demod->output.dest_address_text));
   demod->tunestep = 0;  // single digit hertz position
   demod->imbalance = 1; // 0 dB
 
   // set invalid to start
-  demod->input_source_address.ss_family = -1; // Set invalid
-  demod->low = NAN;
-  demod->high = NAN;
+  demod->input.source_address.ss_family = -1; // Set invalid
+  demod->filter.low = NAN;
+  demod->filter.high = NAN;
   set_shift(demod,0);
 
   // Find any file argument and load it
-  char optstring[] = "cd:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:";
+  char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:";
   while(getopt(argc,argv,optstring) != -1)
     ;
   if(argc > optind)
@@ -140,9 +135,6 @@ int main(int argc,char *argv[]){
   int c;
   while((c = getopt(argc,argv,optstring)) != EOF){
     switch(c){
-    case 'c':
-      SDR_correct = 1;
-      break;
     case 'd':
       demod->doppler_command = optarg;
       break;
@@ -150,29 +142,29 @@ int main(int argc,char *argv[]){
       demod->freq = parse_frequency(optarg);
       break;
     case 'I':   // Multicast address to listen to for I/Q data
-      strlcpy(demod->iq_mcast_address_text,optarg,sizeof(demod->iq_mcast_address_text));
+      strlcpy(demod->input.dest_address_text,optarg,sizeof(demod->input.dest_address_text));
       break;
     case 'k':   // Kaiser window shape parameter; 0 = rectangular
-      demod->kaiser_beta = strtod(optarg,NULL);
+      demod->filter.kaiser_beta = strtod(optarg,NULL);
       break;
     case 'l':   // Locale, mainly for numerical output format
       strlcpy(Locale,optarg,sizeof(Locale));
       setlocale(LC_ALL,Locale);
       break;
     case 'L':   // Pre-detection filter block size
-      demod->L = strtol(optarg,NULL,0);
+      demod->filter.L = strtol(optarg,NULL,0);
       break;
     case 'm':   // receiver mode (AM/FM, etc)
       strlcpy(demod->mode,optarg,sizeof(demod->mode));
       break;
     case 'M':   // Pre-detection filter impulse length
-      demod->M = strtol(optarg,NULL,0);
+      demod->filter.M = strtol(optarg,NULL,0);
       break;
     case 'q':
       Quiet++;  // Suppress display
       break;
-    case 'R':   // Set audio target IP multicast address
-      strlcpy(Audio.audio_mcast_address_text,optarg,sizeof(Audio.audio_mcast_address_text));
+    case 'R':   // Set output target IP multicast address
+      strlcpy(demod->output.dest_address_text,optarg,sizeof(demod->output.dest_address_text));
       break;
     case 's':
       {
@@ -196,10 +188,10 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     case 'S':   // Set SSRC on output stream
-      Audio.rtp.ssrc = strtol(optarg,NULL,0);
+      demod->output.rtp.ssrc = strtol(optarg,NULL,0);
       break;
     default:
-      fprintf(stderr,"Usage: %s [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-q] [-R Audio multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v]\n",argv[0]);
+      fprintf(stderr,"Usage: %s [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-q] [-R Output multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v]\n",argv[0]);
       exit(1);
       break;
     }
@@ -209,25 +201,19 @@ int main(int argc,char *argv[]){
   
   // Set up actual demod state
   demod->ctl_fd = -1;   // Invalid
-  demod->input_fd = -1; // Invalid
-
-#if !defined(NDEBUG)
-  // Detect early starts
-  demod->second_LO_phasor = NAN;
-  demod->second_LO_phasor_step = NAN;
-#endif
+  demod->input.fd = -1; // Invalid
 
   pthread_mutex_init(&demod->status_mutex,NULL);
   pthread_cond_init(&demod->status_cond,NULL);
-  pthread_mutex_init(&demod->doppler_mutex,NULL);
-  pthread_mutex_init(&demod->shift_mutex,NULL);
-  pthread_mutex_init(&demod->second_LO_mutex,NULL);
+  pthread_mutex_init(&demod->doppler.mutex,NULL);
+  pthread_mutex_init(&demod->shift.mutex,NULL);
+  pthread_mutex_init(&demod->second_LO.mutex,NULL);
   pthread_mutex_init(&demod->qmutex,NULL);
   pthread_cond_init(&demod->qcond,NULL);
 
   // Input socket for I/Q data from SDR
-  demod->input_fd = setup_mcast(demod->iq_mcast_address_text,0,0,0);
-  if(demod->input_fd == -1){
+  demod->input.fd = setup_mcast(demod->input.dest_address_text,(struct sockaddr *)&demod->input.dest_address,0,0,0);
+  if(demod->input.fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
   }
@@ -237,15 +223,15 @@ int main(int argc,char *argv[]){
 
   gettimeofday(&Starttime,NULL);
 
-  // Blocksize really should be computed from demod->L and decimate
-  if(setup_audio(audio,Mcast_ttl) != 0){
-    fprintf(stderr,"Audio setup failed\n");
+  // Blocksize really should be computed from demod->filter.L and decimate
+  if(setup_output(demod,Mcast_ttl) != 0){
+    fprintf(stderr,"Output setup failed\n");
     exit(1);
   }
   // Create master half of filter
   // Must be done before the demodulator starts or it will fail an assert
   // If done in proc_samples(), will be a race condition
-  demod->filter_in = create_filter_input(demod->L,demod->M,COMPLEX);
+  demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
 
   pthread_create(&demod->rtp_recv_thread,NULL,rtp_recv,demod);
   pthread_create(&demod->proc_samples,NULL,proc_samples,demod);
@@ -254,11 +240,22 @@ int main(int argc,char *argv[]){
   if(demod->doppler_command)
     pthread_create(&demod->doppler_thread,NULL,doppler,demod);
 
+  pthread_t status_thread;
+  pthread_create(&status_thread,NULL,status,demod);
+
+  pthread_t rtcp_thread;
+  pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
+
+  // Block until we get a packet from the SDR and we know the sample rate
+  fprintf(stderr,"Waiting for first SDR packet to learn sample rate...\n");
+  pthread_mutex_lock(&demod->status_mutex);
+  while(demod->status.samprate == 0)
+    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
+  pthread_mutex_unlock(&demod->status_mutex);
+
   // Actually set the mode and frequency already specified
-  // These wait until the SDR sample rate is known, so they'll block if the SDR isn't running
-  fprintf(stderr,"Waiting for SDR response...\n");
   set_freq(demod,demod->freq,NAN); 
-  demod->gain = dB2voltage(100.0); // Empirical starting value
+  demod->agc.gain = dB2voltage(100.0); // Empirical starting value
   set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
 
   // Graceful signal catch
@@ -269,16 +266,10 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
 
-  // Become the display thread unless quiet; then just twiddle our thumbs
+  // Start the display thread unless quiet; then just twiddle our thumbs
   pthread_t display_thread;
   if(!Quiet)
     pthread_create(&display_thread,NULL,display,demod);
-
-  pthread_t status_thread;
-  pthread_create(&status_thread,NULL,status,demod);
-
-  pthread_t rtcp_thread;
-  pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
 
   while(1)
     usleep(1000000); // probably get rid of this
@@ -312,8 +303,8 @@ void *rtp_recv(void *arg){
     if(!pkt)
       pkt = malloc(sizeof(*pkt));
 
-    socklen_t socksize = sizeof(demod->input_source_address);
-    int size = recvfrom(demod->input_fd,pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&demod->input_source_address,&socksize);
+    socklen_t socksize = sizeof(demod->input.source_address);
+    int size = recvfrom(demod->input.fd,pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&demod->input.source_address,&socksize);
     if(size <= 0){    // ??
       perror("recvfrom");
       usleep(50000);
@@ -381,9 +372,6 @@ void *rtp_recv(void *arg){
 // Save receiver state to file
 // Path is Statepath[] = $HOME/.radiostate
 int savestate(struct demod *dp,char const *filename){
-  // Dump receiver state to file
-  struct audio *audio = &Audio; // Eventually make parameter
-
   FILE *fp;
   char pathname[PATH_MAX];
   if(filename[0] == '/')
@@ -397,18 +385,16 @@ int savestate(struct demod *dp,char const *filename){
   }
   fprintf(fp,"#KA9Q DSP Receiver State dump\n");
   fprintf(fp,"Locale %s\n",Locale);
-  fprintf(fp,"Source %s\n",dp->iq_mcast_address_text);
-  if(audio){
-    fprintf(fp,"Audio output %s\n",audio->audio_mcast_address_text);
-    fprintf(fp,"TTL %d\n",Mcast_ttl);
-  }
-  fprintf(fp,"Blocksize %d\n",dp->L);
-  fprintf(fp,"Impulse len %d\n",dp->M);
+  fprintf(fp,"Source %s\n",dp->input.dest_address_text);
+  fprintf(fp,"Output %s\n",dp->output.dest_address_text);
+  fprintf(fp,"TTL %d\n",Mcast_ttl);
+  fprintf(fp,"Blocksize %d\n",dp->filter.L);
+  fprintf(fp,"Impulse len %d\n",dp->filter.M);
   fprintf(fp,"Frequency %.3f Hz\n",get_freq(dp));
   fprintf(fp,"Mode %s\n",dp->mode);
-  fprintf(fp,"Shift %.3f Hz\n",dp->shift);
-  fprintf(fp,"Filter low %.3f Hz\n",dp->low);
-  fprintf(fp,"Filter high %.3f Hz\n",dp->high);
+  fprintf(fp,"Shift %.3f Hz\n",dp->shift.freq);
+  fprintf(fp,"Filter low %.3f Hz\n",dp->filter.low);
+  fprintf(fp,"Filter high %.3f Hz\n",dp->filter.high);
   fprintf(fp,"Tunestep %d\n",dp->tunestep);
   fclose(fp);
   return 0;
@@ -420,7 +406,6 @@ int savestate(struct demod *dp,char const *filename){
 // 
 int loadstate(struct demod *dp,char const *filename){
   FILE *fp;
-  struct audio *audio = &Audio; // Eventually make parameter
 
   char pathname[PATH_MAX];
   if(filename[0] == '/')
@@ -438,16 +423,16 @@ int loadstate(struct demod *dp,char const *filename){
     if(sscanf(line,"Frequency %lf",&dp->freq) > 0){
     } else if(strncmp(line,"Mode ",5) == 0){
       strlcpy(dp->mode,&line[5],sizeof(dp->mode));
-    } else if(sscanf(line,"Shift %lf",&dp->shift) > 0){
-    } else if(sscanf(line,"Filter low %f",&dp->low) > 0){
-    } else if(sscanf(line,"Filter high %f",&dp->high) > 0){
-    } else if(sscanf(line,"Kaiser Beta %f",&dp->kaiser_beta) > 0){
-    } else if(sscanf(line,"Blocksize %d",&dp->L) > 0){
-    } else if(sscanf(line,"Impulse len %d",&dp->M) > 0){
+    } else if(sscanf(line,"Shift %lf",&dp->shift.freq) > 0){
+    } else if(sscanf(line,"Filter low %f",&dp->filter.low) > 0){
+    } else if(sscanf(line,"Filter high %f",&dp->filter.high) > 0){
+    } else if(sscanf(line,"Kaiser Beta %f",&dp->filter.kaiser_beta) > 0){
+    } else if(sscanf(line,"Blocksize %d",&dp->filter.L) > 0){
+    } else if(sscanf(line,"Impulse len %d",&dp->filter.M) > 0){
     } else if(sscanf(line,"Tunestep %d",&dp->tunestep) > 0){
-    } else if(sscanf(line,"Source %256s",dp->iq_mcast_address_text) > 0){
+    } else if(sscanf(line,"Source %256s",dp->input.dest_address_text) > 0){
       // Array sizes defined elsewhere!
-    } else if(audio && sscanf(line,"Audio output %256s",audio->audio_mcast_address_text) > 0){
+    } else if(sscanf(line,"Output %256s",dp->output.dest_address_text) > 0){
     } else if(sscanf(line,"TTL %d",&Mcast_ttl) > 0){
     } else if(sscanf(line,"Locale %256s",Locale)){
       setlocale(LC_ALL,Locale);
@@ -467,7 +452,7 @@ void *rtcp_send(void *arg){
   //  fprintf(stderr,"hello from rtcp_send\n");
   while(1){
 
-    if(Audio.rtp.ssrc == 0) // Wait until it's set by audio RTP subsystem
+    if(demod->output.rtp.ssrc == 0) // Wait until it's set by output RTP subsystem
       goto done;
     unsigned char buffer[4096]; // much larger than necessary
     memset(buffer,0,sizeof(buffer));
@@ -475,7 +460,7 @@ void *rtcp_send(void *arg){
     // Construct sender report
     struct rtcp_sr sr;
     memset(&sr,0,sizeof(sr));
-    sr.ssrc = Audio.rtp.ssrc;
+    sr.ssrc = demod->output.rtp.ssrc;
 
     // Construct NTP timestamp
     struct timeval tv;
@@ -488,8 +473,8 @@ void *rtcp_send(void *arg){
     sr.ntp_timestamp = now_time;
     // The zero is to remind me that I start timestamps at zero, but they could start anywhere
     sr.rtp_timestamp = 0 + runtime * 48000;
-    sr.packet_count = Audio.rtp.seq;
-    sr.byte_count = Audio.rtp.bytes;
+    sr.packet_count = demod->output.rtp.seq;
+    sr.byte_count = demod->output.rtp.bytes;
     
     unsigned char *dp = gen_sr(buffer,sizeof(buffer),&sr,NULL,0);
 
@@ -522,18 +507,14 @@ void *rtcp_send(void *arg){
     strcpy(sdes[3].message,"KA9Q Radio Program");
     sdes[3].mlen = strlen(sdes[3].message);
     
-    dp = gen_sdes(dp,sizeof(buffer) - (dp-buffer),Audio.rtp.ssrc,sdes,4);
+    dp = gen_sdes(dp,sizeof(buffer) - (dp-buffer),demod->output.rtp.ssrc,sdes,4);
 
 
-    send(Audio.rtcp_mcast_fd,buffer,dp-buffer,0);
+    send(demod->output.rtcp_fd,buffer,dp-buffer,0);
   done:;
     usleep(1000000);
   }
 }
-void cleanup(void){
-  audio_cleanup(&Audio);  // Not really necessary
-}
-
 void closedown(int a){
   if(!Quiet)
     fprintf(stderr,"Signal %d\n",a);

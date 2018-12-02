@@ -9,7 +9,7 @@ enum status_type {
   INPUT_SOURCE_SOCKET,
   INPUT_DEST_SOCKET,
   INPUT_SSRC,
-  INPUT_SAMPRATE,
+  INPUT_SAMPRATE, // Nominal sample rate (integer)
   INPUT_PACKETS,
   INPUT_SAMPLES,
   INPUT_DROPS,
@@ -23,14 +23,13 @@ enum status_type {
 
   // Tuning
   RADIO_FREQUENCY,
-  FIRST_LO_FREQUENCY,
+  FIRST_LO_FREQUENCY, // 16 = 0x10
   SECOND_LO_FREQUENCY,
   SHIFT_FREQUENCY,
   DOPPLER_FREQUENCY,
-  DOPPLER_FREQUENCY_RATE,
+  DOPPLER_FREQUENCY_RATE, // 20
 
   // Hardware gains
-  AD_LEVEL,
   LNA_GAIN,
   MIXER_GAIN,
   IF_GAIN,
@@ -40,21 +39,22 @@ enum status_type {
   IQ_PHASE,
 
   // Filtering
-  LOW_EDGE,
+  LOW_EDGE, // 29
   HIGH_EDGE,
-  KAISER_BETA,
-  FILTER_BLOCKSIZE,
+  KAISER_BETA, // 31
+  FILTER_BLOCKSIZE, // 32 = 0x20
   FILTER_FIR_LENGTH,
   NOISE_BANDWIDTH,
 
   // Signals
+  IF_POWER,
   BASEBAND_POWER,
   NOISE_DENSITY,
 
   // Demodulation
   RADIO_MODE, // printable string "usb", "lsb", etc
   DEMOD_MODE, // 1 = AM envelope, 2 = FM, 3 = linear
-  INDEPENDENT_SIDEBAND, // Linear
+  INDEPENDENT_SIDEBAND, // Linear // 39
   DEMOD_SNR,       // FM, PLL linear
   DEMOD_GAIN,      // AM, Linear
   FREQ_OFFSET,     // FM, PLL linear
@@ -64,9 +64,9 @@ enum status_type {
   
   PLL_LOCK,       // Linear PLL
   PLL_SQUARE,     // Linear PLL
-  PLL_PHASE,      // Linear PLL
+  PLL_PHASE,      // Linear PLL // 47
 
-  OUTPUT_CHANNELS, // 1/2 in Linear, otherwise 1
+  OUTPUT_CHANNELS, // 1/2 in Linear, otherwise 1 // 48 = 0x30
 
 };
 

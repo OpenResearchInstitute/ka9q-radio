@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.54 2018/10/12 00:21:45 karn Exp karn $
+// $Id: funcube.c,v 1.55 2018/11/14 23:10:33 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -272,7 +272,7 @@ int main(int argc,char *argv[]){
   }
   // Set up RTP output socket
   sleep(2);
-  Rtp_sock = setup_mcast(dest,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(dest,NULL,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s\n",strerror(errno));
     exit(1);
