@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.13 2018/12/02 09:16:45 karn Exp karn $
+// $Id: control.c,v 1.14 2018/12/02 09:41:57 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -510,6 +510,7 @@ int main(int argc,char *argv[]){
 
   for(;;){
     unsigned char buffer[8192];
+    int cr;
 
     memset(buffer,0,sizeof(buffer));
     int n = recv(Netsock,buffer,sizeof(buffer),0);
@@ -518,7 +519,11 @@ int main(int argc,char *argv[]){
       continue;
     }
     // Parse entries
-    decode_status(demod,buffer,sizeof(buffer));
+    cr = buffer[0]; // Command/response byte
+    if(cr == 1)
+      continue;     // Ignore commands
+
+    decode_status(demod,buffer+1,sizeof(buffer)-1);
 
     // update display indefinitely, handle user commands
 

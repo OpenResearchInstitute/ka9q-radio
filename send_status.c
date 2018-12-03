@@ -47,8 +47,7 @@ void *status(void *arg){
     memset(packet,0,sizeof(packet));
     bp = packet;
 
-
-    encode_int16(&bp,TYPE,0); // Status response
+    *bp++ = 0; // Response (not a command);
 
     struct timeval tp;
     gettimeofday(&tp,NULL);

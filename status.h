@@ -5,7 +5,6 @@
 
 enum status_type {
   EOL = 0,	  
-  TYPE, // 1
   GPS_TIME,       // Nanoseconds since GPS epoch (remember to update the leap second tables!)
   COMMANDS,       // Count of input commands
   INPUT_SOURCE_SOCKET,

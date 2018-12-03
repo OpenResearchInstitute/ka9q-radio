@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.15 2018/12/02 09:16:45 karn Exp karn $
+// $Id: hackrf.c,v 1.16 2018/12/03 11:43:00 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -905,7 +905,7 @@ void *status(void *arg){
     memset(packet,0,sizeof(packet));
     bp = packet;
 
-    encode_int16(&bp,TYPE,0); // Status response
+    *bp++ = 0;   // Command/response = response
 
     struct timeval tp;
     gettimeofday(&tp,NULL);

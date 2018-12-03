@@ -81,6 +81,7 @@ int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by def
 struct rtp_state Rtp;
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 int Ctl_sock;
+int Nctl_sock;
 int Status_sock;
 struct sdrstate FCD;
 pthread_t FCD_control_thread;
@@ -876,6 +877,96 @@ int oldagc(struct sdrstate *sdr){
 #endif
 
 
+void *ncmd(void *arg){
+  pthread_setname("new-cmd");
+  assert(arg != NULL);
+  struct sdrstate * const sdr = arg;
+  
+  // Set up new control socket on port 5006
+  Nctl_sock = setup_mcast(Dest,(struct sockaddr *)&Output_dest_address,0,Mcast_ttl,2); // For input
+
+  while(1){
+    if(Nctl_sock <= 0)
+      return NULL; // Nothing to do
+
+    unsigned char buffer[8192];
+    memset(buffer,0,sizeof(buffer));
+    int length = recv(Nctl_sock,buffer,sizeof(buffer),0);
+    if(length <= 0){
+      sleep(1);
+      continue;
+    }
+    // Parse entries
+    unsigned char *cp = buffer;
+
+    int cr = *cp++; // Command/response
+    if(cr == 0)
+      continue; // Ignore our own status messages
+
+    if(sdr->phd == NULL && (sdr->phd = fcdOpen(sdr->sdr_name,sizeof(sdr->sdr_name),Device)) == NULL){
+      errmsg("can't re-open control port: %s\n",strerror(errno));
+      sleep(5);
+      continue;
+    }
+
+    while(cp - buffer < length){
+      enum status_type type = *cp++; // increment cp to length field
+    
+      if(type == EOL)
+	break; // End of list
+
+      unsigned int len = *cp++;
+      if(cp - buffer + len >= length)
+	break; // Invalid length
+
+      unsigned char val;
+      switch(type){
+      case EOL: // Shouldn't get here
+	break;
+      case RADIO_FREQUENCY:
+	sdr->status.frequency = decode_double(cp,len);
+	sdr->intfreq = round(sdr->status.frequency/ (1 + Calibration));
+	// LNA gain is frequency-dependent
+	if(sdr->status.lna_gain){
+	  if(sdr->intfreq >= 420e6)
+	    sdr->status.lna_gain = 7;
+	  else
+	    sdr->status.lna_gain = 24;
+	}
+	fcdAppSetFreq(sdr->phd,sdr->intfreq);
+	sdr->status.frequency = fcd_actual(sdr->intfreq) * (1 + Calibration);
+	break;
+      case LNA_GAIN:
+	sdr->status.lna_gain = decode_int(cp,len);
+	val = sdr->status.lna_gain ? 1 : 0;
+	fcdAppSetParam(sdr->phd,FCD_CMD_APP_SET_LNA_GAIN,&val,sizeof(val));
+	break;
+      case MIXER_GAIN:
+	sdr->status.mixer_gain = decode_int(cp,len);
+	val = sdr->status.mixer_gain ? 1 : 0;
+	fcdAppSetParam(sdr->phd,FCD_CMD_APP_SET_MIXER_GAIN,&val,sizeof(val));
+	break;
+      case IF_GAIN:
+	sdr->status.if_gain = decode_int(cp,len);
+	fcdAppSetParam(sdr->phd,FCD_CMD_APP_SET_IF_GAIN1,&sdr->status.if_gain,sizeof(sdr->status.if_gain));
+	break;
+      default: // Ignore all others
+	break;
+      }
+
+    }
+    // Need to do agc in separate thread, with interlocking on funcube control port
+    if(!No_hold_open)
+      doagc(sdr);
+
+    if(No_hold_open && sdr->phd != NULL){
+      fcdClose(sdr->phd);
+      sdr->phd = NULL;
+    }
+  }
+}
+
+
 struct state State[256];
 
 // Thread to periodically transmit receiver state
@@ -898,7 +989,7 @@ void *status(void *arg){
     memset(packet,0,sizeof(packet));
     bp = packet;
 
-    encode_int16(&bp,TYPE,0); // Status response
+    *bp++ = 0; // command/response = response
 
     struct timeval tp;
     gettimeofday(&tp,NULL);
