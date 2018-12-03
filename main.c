@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.122 2018/11/22 09:57:59 karn Exp karn $
+// $Id: main.c,v 1.123 2018/12/02 09:16:45 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -200,7 +200,7 @@ int main(int argc,char *argv[]){
   fprintf(stderr,"Copyright 2017 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
   
   // Set up actual demod state
-  demod->ctl_fd = -1;   // Invalid
+  demod->input.ctl_fd = -1;   // Invalid
   demod->input.fd = -1; // Invalid
 
   pthread_mutex_init(&demod->status_mutex,NULL);
@@ -218,7 +218,7 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   // For sending commands to front end
-  if((demod->ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
+  if((demod->input.ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
     perror("can't open control socket");
 
   gettimeofday(&Starttime,NULL);

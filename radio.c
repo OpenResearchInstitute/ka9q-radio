@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.102 2018/12/02 09:16:45 karn Exp karn $
+// $Id: radio.c,v 1.103 2018/12/02 09:41:57 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -267,7 +267,7 @@ double set_first_LO(struct demod * const demod,double first_LO){
   struct sockaddr_in sdraddr;
   memcpy(&sdraddr,&demod->input.source_address,sizeof(sdraddr));
   sdraddr.sin_port = htons(ntohs(sdraddr.sin_port)+1);
-  if(sendto(demod->ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&sdraddr,sizeof(sdraddr)) == -1)
+  if(sendto(demod->input.ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&sdraddr,sizeof(sdraddr)) == -1)
     perror("sendto control socket");
 
   // Return the tuner's current frequency, which will change

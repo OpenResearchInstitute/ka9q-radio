@@ -24,16 +24,8 @@
 #include "multicast.h"
 #include "status.h"
 
-// Previous transmitted state, used to detect changes
-struct state {
-  int length;
-  unsigned char value[256];
-};
-
-
 
 struct state State[256];
-int compact_packet(struct state *s,unsigned char *pkt,int force);
 
 // Thread to periodically transmit receiver state
 void *status(void *arg){
@@ -214,33 +206,6 @@ void *status(void *arg){
 
 
 
-int compact_packet(struct state *s,unsigned char *pkt,int force){
-  
-  unsigned char *input = pkt;
-  unsigned char *output = pkt;
-
-  // Read new packet into table, copying elements that have changed to output
-  while(1){
-    int type = *input++;
-    if(type == EOL)
-      break;
-    int len = *input++;
-    assert(type >= 0 && type < 256);
-    assert(len >= 0 && len < 256);    
-    if(force || s[type].length != len || memcmp(s[type].value,input,len) != 0){
-      s[type].length = len;
-      memcpy(s[type].value,input,len);
-      *output++ = type;
-      *output++ = len;
-      assert(output <= input);
-      memmove(output,input,len);
-      output += len;
-    }
-    input += len;
-  }
-  *output++ = EOL;
-  return output - pkt;
-}
 
 
   

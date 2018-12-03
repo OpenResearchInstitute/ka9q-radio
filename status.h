@@ -70,6 +70,13 @@ enum status_type {
 
 };
 
+// Previous transmitted state, used to detect changes
+struct state {
+  int length;
+  unsigned char value[256];
+};
+
+
 int encode_string(unsigned char **bp,enum status_type type,void *buf,int buflen);
 int encode_eol(unsigned char **buf);
 int encode_byte(unsigned char **buf,enum status_type type,unsigned char x);
@@ -78,6 +85,8 @@ int encode_int32(unsigned char **buf,enum status_type type,uint32_t x);
 int encode_int64(unsigned char **buf,enum status_type type,uint64_t x);
 int encode_float(unsigned char **buf,enum status_type type,float x);
 int encode_double(unsigned char **buf,enum status_type type,double x);
+
+int compact_packet(struct state *s,unsigned char *pkt,int force);
 
 uint64_t decode_int(unsigned char *,int);
 float decode_float(unsigned char *,int);

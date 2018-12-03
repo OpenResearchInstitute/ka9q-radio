@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.6 2018/11/27 07:36:16 karn Exp karn $
+// $Id: status.c,v 1.7 2018/12/02 09:16:45 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -141,3 +141,29 @@ double decode_double(unsigned char *cp,int len){
   return *(double *)&result;
 }
 
+int compact_packet(struct state *s,unsigned char *pkt,int force){
+  unsigned char *input = pkt;
+  unsigned char *output = pkt;
+
+  // Read new packet into table, copying elements that have changed to output
+  while(1){
+    int type = *input++;
+    if(type == EOL)
+      break;
+    int len = *input++;
+    assert(type >= 0 && type < 256);
+    assert(len >= 0 && len < 256);    
+    if(force || s[type].length != len || memcmp(s[type].value,input,len) != 0){
+      s[type].length = len;
+      memcpy(s[type].value,input,len);
+      *output++ = type;
+      *output++ = len;
+      assert(output <= input);
+      memmove(output,input,len);
+      output += len;
+    }
+    input += len;
+  }
+  *output++ = EOL;
+  return output - pkt;
+}

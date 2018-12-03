@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.77 2018/12/02 09:34:57 karn Exp karn $
+// $Id: radio.h,v 1.78 2018/12/02 09:41:57 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -67,6 +67,7 @@ struct demod {
 
   struct {
     int fd;      // Raw incoming I/Q data from multicast socket
+    int ctl_fd;                     // File descriptor for controlling SDR frequency and gain
     char dest_address_text[256];
     struct sockaddr_storage source_address;
     struct sockaddr_storage dest_address;
@@ -93,8 +94,6 @@ struct demod {
   float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
 
   // Tuning parameters
-  int ctl_fd;                     // File descriptor for controlling SDR frequency and gaim
-
   int tuner_lock;                 // When set, don't try to command tuner
   // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
   pthread_mutex_t status_mutex;
@@ -175,7 +174,7 @@ struct demod {
   float bb_power;   // Average power of signal after filter
   float n0;         // Noise spectral density esimate (experimemtal)
   float snr;        // Estimated signal-to-noise ratio (only some demodulators)
-  float foffset;    // Frequency offset (FM, coherent AM, cal, dsb)
+  float foffset;    // Frequency offset (FM, coherent AM, dsb)
   float pdeviation; // Peak frequency deviation (FM)
   float cphase;     // Carrier phase change (DSB/PSK)
   float plfreq;     // PL tone frequency (FM);
