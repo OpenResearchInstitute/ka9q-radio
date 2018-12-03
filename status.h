@@ -6,6 +6,8 @@
 enum status_type {
   EOL = 0,	  
   TYPE, // 1
+  GPS_TIME,       // Nanoseconds since GPS epoch (remember to update the leap second tables!)
+  COMMANDS,       // Count of input commands
   INPUT_SOURCE_SOCKET,
   INPUT_DEST_SOCKET,
   INPUT_SSRC,
@@ -15,7 +17,7 @@ enum status_type {
   INPUT_DROPS,
   INPUT_DUPES,
 
-  OUTPUT_DEST_SOCKET,  // 10
+  OUTPUT_DEST_SOCKET,
   OUTPUT_SSRC,
   OUTPUT_TTL,
   OUTPUT_SAMPRATE,
@@ -23,11 +25,11 @@ enum status_type {
 
   // Tuning
   RADIO_FREQUENCY,
-  FIRST_LO_FREQUENCY, // 16 = 0x10
+  FIRST_LO_FREQUENCY,
   SECOND_LO_FREQUENCY,
   SHIFT_FREQUENCY,
   DOPPLER_FREQUENCY,
-  DOPPLER_FREQUENCY_RATE, // 20
+  DOPPLER_FREQUENCY_RATE,
 
   // Hardware gains
   LNA_GAIN,
@@ -39,10 +41,10 @@ enum status_type {
   IQ_PHASE,
 
   // Filtering
-  LOW_EDGE, // 29
+  LOW_EDGE,
   HIGH_EDGE,
-  KAISER_BETA, // 31
-  FILTER_BLOCKSIZE, // 32 = 0x20
+  KAISER_BETA,
+  FILTER_BLOCKSIZE,
   FILTER_FIR_LENGTH,
   NOISE_BANDWIDTH,
 
@@ -54,7 +56,7 @@ enum status_type {
   // Demodulation
   RADIO_MODE, // printable string "usb", "lsb", etc
   DEMOD_MODE, // 1 = AM envelope, 2 = FM, 3 = linear
-  INDEPENDENT_SIDEBAND, // Linear // 39
+  INDEPENDENT_SIDEBAND, // Linear
   DEMOD_SNR,       // FM, PLL linear
   DEMOD_GAIN,      // AM, Linear
   FREQ_OFFSET,     // FM, PLL linear
@@ -64,10 +66,9 @@ enum status_type {
   
   PLL_LOCK,       // Linear PLL
   PLL_SQUARE,     // Linear PLL
-  PLL_PHASE,      // Linear PLL // 47
+  PLL_PHASE,      // Linear PLL
 
-  OUTPUT_CHANNELS, // 1/2 in Linear, otherwise 1 // 48 = 0x30
-
+  OUTPUT_CHANNELS, // 1/2 in Linear, otherwise 1
 };
 
 // Previous transmitted state, used to detect changes

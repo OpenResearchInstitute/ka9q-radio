@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.55 2018/11/14 23:10:33 karn Exp karn $
+// $Id: funcube.c,v 1.56 2018/12/02 09:16:45 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -32,6 +32,7 @@
 #include "sdr.h"
 #include "radio.h"
 #include "misc.h"
+#include "status.h"
 #include "multicast.h"
 
 struct sdrstate {
@@ -80,14 +81,21 @@ int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by def
 struct rtp_state Rtp;
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 int Ctl_sock;
+int Status_sock;
 struct sdrstate FCD;
 pthread_t FCD_control_thread;
 pthread_t Display_thread;
 pthread_t AGC_thread;
+pthread_t Status_thread;
 int Overflows;
 FILE *Status;
 char *Status_filename;
 char *Pid_filename;
+char *Dest;
+struct sockaddr_storage Rtp_dest_address;
+struct sockaddr_storage Output_dest_address;
+uint64_t Commands;
+
 
 void errmsg(const char *fmt,...);
 int process_fc_command(char *,int);
@@ -113,7 +121,7 @@ int main(int argc,char *argv[]){
 #endif
 
   struct sdrstate * const sdr = &FCD;
-  char *dest = NULL;
+
 
   Locale = getenv("LANG");
   if(Locale == NULL || strlen(Locale) == 0)
@@ -135,7 +143,7 @@ int main(int argc,char *argv[]){
       Calibration = strtod(optarg,NULL) * 1e-6; // Calibration offset in ppm
       break;
     case 'R':
-      dest = optarg;
+      Dest = optarg;
       break;
     case 'o':
       No_hold_open++; // Close USB control port between commands so fcdpp can be used
@@ -180,7 +188,7 @@ int main(int argc,char *argv[]){
     Pa_Terminate();
     exit(0);
   }
-  if(dest == NULL){
+  if(Dest == NULL){
     errmsg("Must specify -R output_address\n");
     exit(1);
   }
@@ -272,7 +280,7 @@ int main(int argc,char *argv[]){
   }
   // Set up RTP output socket
   sleep(2);
-  Rtp_sock = setup_mcast(dest,NULL,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Rtp_dest_address,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s\n",strerror(errno));
     exit(1);
@@ -302,6 +310,7 @@ int main(int argc,char *argv[]){
   }
 
   pthread_create(&FCD_control_thread,NULL,fcd_command,sdr);
+  pthread_create(&Status_thread,NULL,status,sdr);
 
   if(Status)
     pthread_create(&Display_thread,NULL,display,sdr);
@@ -311,7 +320,7 @@ int main(int argc,char *argv[]){
     time(&tt);
     Rtp.ssrc = tt & 0xffffffff; // low 32 bits of clock time
   }
-  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,dest,Blocksize,Rtp.ssrc,Status_filename);
+  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,Dest,Blocksize,Rtp.ssrc,Status_filename);
   // Gain and phase corrections. These will be updated every block
   float gain_q = 1;
   float gain_i = 1;
@@ -534,6 +543,8 @@ void *fcd_command(void *arg){
       if(r < sizeof(requested_status))
 	continue; // Too short; ignore
     
+      Commands++;
+
       // See what has changed, and set it in the hardware
       // The 'radio' program currently doesn't set the gains, but it reads them
       if(requested_status.lna_gain != 0xff && sdr->status.lna_gain != requested_status.lna_gain){
@@ -863,3 +874,96 @@ int oldagc(struct sdrstate *sdr){
   done:;
 }
 #endif
+
+
+struct state State[256];
+
+// Thread to periodically transmit receiver state
+void *status(void *arg){
+  pthread_setname("status");
+  assert(arg != NULL);
+  struct sdrstate * const sdr = arg;
+
+  memset(State,0,sizeof(State));
+  
+  // Set up status socket on port 5006
+  Status_sock = setup_mcast(Dest,(struct sockaddr *)&Output_dest_address,1,Mcast_ttl,2);
+
+  for(int count=0;;count++){
+    if(Status_sock <= 0)
+      return NULL; // Nothing we can do, so quit
+
+    // emit status packets indefinitely
+    unsigned char packet[2048],*bp;
+    memset(packet,0,sizeof(packet));
+    bp = packet;
+
+    encode_int16(&bp,TYPE,0); // Status response
+
+    struct timeval tp;
+    gettimeofday(&tp,NULL);
+    // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
+    long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
+    encode_int64(&bp,GPS_TIME,timestamp);
+    encode_int64(&bp,COMMANDS,Commands);
+    // Where we're sending output
+    {
+      struct sockaddr_in *sin;
+      struct sockaddr_in6 *sin6;
+      *bp++ = OUTPUT_DEST_SOCKET;
+      switch(Output_dest_address.ss_family){
+      case AF_INET:
+	sin = (struct sockaddr_in *)&Output_dest_address;
+	*bp++ = 6;
+	memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+	bp += 4;
+	memcpy(bp,&sin->sin_port,2);
+	bp += 2;
+	break;
+      case AF_INET6:
+	sin6 = (struct sockaddr_in6 *)&Output_dest_address;
+	*bp++ = 10;
+	memcpy(bp,&sin6->sin6_addr,8);
+	bp += 8;
+	memcpy(bp,&sin6->sin6_port,2);
+	bp += 2;
+	break;
+      default:
+	break;
+      }
+    }
+    encode_int32(&bp,OUTPUT_SSRC,Rtp.ssrc);
+    encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
+    encode_int32(&bp,OUTPUT_SAMPRATE,ADC_samprate);
+    encode_int64(&bp,OUTPUT_PACKETS,Rtp.packets);
+
+    // Tuning
+    encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
+
+    // Front end
+    encode_byte(&bp,LNA_GAIN,sdr->status.lna_gain);
+    encode_byte(&bp,MIXER_GAIN,sdr->status.mixer_gain);
+    encode_byte(&bp,IF_GAIN,sdr->status.if_gain);
+
+
+    // Filtering
+    encode_float(&bp,LOW_EDGE,-90e3);
+    encode_float(&bp,HIGH_EDGE,+90e3);
+
+    // Signals - these ALWAYS change
+    encode_float(&bp,BASEBAND_POWER,sdr->in_power);
+
+    // Demodulation mode
+    enum demod_type demod_type = LINEAR_DEMOD; // actually LINEAR_MODE
+    encode_byte(&bp,DEMOD_MODE,demod_type);
+    encode_int32(&bp,OUTPUT_CHANNELS,2);
+
+    
+    encode_eol(&bp);
+
+    int len = compact_packet(&State[0],packet,(count % 10) == 0);
+    //int len = bp - packet;
+    send(Status_sock,packet,len,0);
+    usleep(100000);
+  }
+}

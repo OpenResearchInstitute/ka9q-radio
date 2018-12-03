@@ -25,6 +25,8 @@
 #include "status.h"
 
 
+extern uint64_t Commands;
+
 struct state State[256];
 
 // Thread to periodically transmit receiver state
@@ -48,6 +50,12 @@ void *status(void *arg){
 
     encode_int16(&bp,TYPE,0); // Status response
 
+    struct timeval tp;
+    gettimeofday(&tp,NULL);
+    // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
+    long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
+    encode_int64(&bp,GPS_TIME,timestamp);
+    encode_int64(&bp,COMMANDS,Commands);
     // Source information
     // Who's sending us information
     {
@@ -195,7 +203,10 @@ void *status(void *arg){
       break;
     }
     encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
+
+
     encode_eol(&bp);
+
 
     int len = compact_packet(&State[0],packet,(count % 10) == 0);
     //int len = bp - packet;

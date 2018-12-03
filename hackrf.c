@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.14 2018/11/14 23:12:47 karn Exp karn $
+// $Id: hackrf.c,v 1.15 2018/12/02 09:16:45 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -30,6 +30,7 @@
 #include "misc.h"
 #include "multicast.h"
 #include "decimate.h"
+#include "status.h"
 
 
 struct sdrstate {
@@ -64,6 +65,7 @@ int Offset=1;     // Default to offset high by +Fs/4 downconvert in software to 
 int Daemonize = 0;
 int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by default
 char *Rundir = "/run/hackrf"; // Where 'status' and 'pid' get written
+char *Dest = "239.1.6.1"; // Default for testing
 
 float const DC_alpha = 1.0e-7;  // high pass filter coefficient for DC offset estimates, per sample
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
@@ -77,18 +79,19 @@ char *Locale;
 pthread_t Display_thread;
 pthread_t Process_thread;
 pthread_t AGC_thread;
+pthread_t Status_thread;
 int Rtp_sock; // Socket handle for sending real time stream *and* receiving commands
 int Ctl_sock;
-
+int Status_sock;
+struct sockaddr_storage Output_dest_address;
 struct rtp_state Rtp;
-
 complex float Sampbuffer[BUFFERSIZE];
 int Samp_wp;
 int Samp_rp;
 FILE *Status;
 char *Status_filename;
 char *Pid_filename;
-
+uint64_t Commands;
 pthread_mutex_t Buf_mutex;
 pthread_cond_t Buf_cond;
 
@@ -352,7 +355,7 @@ int main(int argc,char *argv[]){
     errmsg("seteuid: %s",strerror(errno));
 #endif
 
-  char *dest = "239.1.6.1"; // Default for testing
+
 
   Locale = getenv("LANG");
   if(Locale == NULL || strlen(Locale) == 0)
@@ -372,7 +375,7 @@ int main(int argc,char *argv[]){
       Out_samprate = strtol(optarg,NULL,0);
       break;
     case 'R':
-      dest = optarg;
+      Dest = optarg;
       break;
     case 'D':
       Decimate = strtol(optarg,NULL,0);
@@ -464,7 +467,7 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,Locale);
   
   // Set up RTP output socket
-  Rtp_sock = setup_mcast(dest,NULL,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(Dest,NULL,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s",strerror(errno));
     exit(1);
@@ -541,7 +544,7 @@ int main(int argc,char *argv[]){
 
   if(Rtp.ssrc == 0)
     Rtp.ssrc = tt & 0xffffffff; // low 32 bits of clock time
-  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,dest,Blocksize,Rtp.ssrc,Status_filename);
+  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,Dest,Blocksize,Rtp.ssrc,Status_filename);
   errmsg("A/D sample rate %'d Hz; decimation ratio %d; output sample rate %'d Hz; Offset %'+d\n",
 	 ADC_samprate,Decimate,Out_samprate,Offset * ADC_samprate/4);
 
@@ -552,6 +555,7 @@ int main(int argc,char *argv[]){
 
   pthread_create(&AGC_thread,NULL,agc,NULL);
 
+  pthread_create(&Status_thread,NULL,status,&HackCD);
   signal(SIGPIPE,SIG_IGN);
   signal(SIGINT,closedown);
   signal(SIGKILL,closedown);
@@ -602,6 +606,7 @@ int main(int argc,char *argv[]){
     if(ret < sizeof(requested_status))
       continue; // Too short; ignore
     
+    Commands++;
     uint64_t intfreq = HackCD.status.frequency = requested_status.frequency;
     intfreq += Offset * ADC_samprate/4; // Offset tune by +Fs/4
 
@@ -656,6 +661,7 @@ void *display(void *arg){
 }
 
 void *agc(void *arg){
+  pthread_setname("hackrf-agc");
   while(1){
     usleep(100000);
     float powerdB = 10*log10f(HackCD.in_power);
@@ -875,3 +881,95 @@ bool set_freq(const uint64_t freq)
 }
 
 #endif
+
+
+struct state State[256];
+
+// Thread to periodically transmit receiver state
+void *status(void *arg){
+  pthread_setname("hackrf-status");
+  assert(arg != NULL);
+  struct sdrstate * const sdr = arg;
+
+  memset(State,0,sizeof(State));
+  
+  // Set up status socket on port 5006
+  Status_sock = setup_mcast(Dest,(struct sockaddr *)&Output_dest_address,1,Mcast_ttl,2);
+
+  for(int count=0;;count++){
+    if(Status_sock <= 0)
+      return NULL; // Nothing we can do, so quit
+
+    // emit status packets indefinitely
+    unsigned char packet[2048],*bp;
+    memset(packet,0,sizeof(packet));
+    bp = packet;
+
+    encode_int16(&bp,TYPE,0); // Status response
+
+    struct timeval tp;
+    gettimeofday(&tp,NULL);
+    // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
+    long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
+    encode_int64(&bp,GPS_TIME,timestamp);
+    encode_int64(&bp,COMMANDS,Commands);
+    // Where we're sending output
+    {
+      struct sockaddr_in *sin;
+      struct sockaddr_in6 *sin6;
+      *bp++ = OUTPUT_DEST_SOCKET;
+      switch(Output_dest_address.ss_family){
+      case AF_INET:
+	sin = (struct sockaddr_in *)&Output_dest_address;
+	*bp++ = 6;
+	memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+	bp += 4;
+	memcpy(bp,&sin->sin_port,2);
+	bp += 2;
+	break;
+      case AF_INET6:
+	sin6 = (struct sockaddr_in6 *)&Output_dest_address;
+	*bp++ = 10;
+	memcpy(bp,&sin6->sin6_addr,8);
+	bp += 8;
+	memcpy(bp,&sin6->sin6_port,2);
+	bp += 2;
+	break;
+      default:
+	break;
+      }
+    }
+    encode_int32(&bp,OUTPUT_SSRC,Rtp.ssrc);
+    encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
+    encode_int32(&bp,OUTPUT_SAMPRATE,ADC_samprate);
+    encode_int64(&bp,OUTPUT_PACKETS,Rtp.packets);
+
+    // Tuning
+    encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
+
+    // Front end
+    encode_byte(&bp,LNA_GAIN,sdr->status.lna_gain);
+    encode_byte(&bp,MIXER_GAIN,sdr->status.mixer_gain);
+    encode_byte(&bp,IF_GAIN,sdr->status.if_gain);
+
+
+    // Filtering
+    encode_float(&bp,LOW_EDGE,-90e3);
+    encode_float(&bp,HIGH_EDGE,+90e3);
+
+    // Signals - these ALWAYS change
+    encode_float(&bp,BASEBAND_POWER,sdr->in_power);
+
+    // Demodulation mode
+    enum demod_type demod_type = LINEAR_DEMOD; // actually LINEAR_MODE
+    encode_byte(&bp,DEMOD_MODE,demod_type);
+    encode_int32(&bp,OUTPUT_CHANNELS,2);
+
+    encode_eol(&bp);
+
+    int len = compact_packet(&State[0],packet,(count % 10) == 0);
+    //int len = bp - packet;
+    send(Status_sock,packet,len,0);
+    usleep(100000);
+  }
+}

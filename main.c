@@ -49,6 +49,8 @@ struct demod Demod;
 
 struct timeval Starttime;      // System clock at timestamp 0, for RTCP
 
+uint64_t Commands;
+
 void output_cleanup(void *);
 void closedown(int);
 void *rtp_recv(void *);
