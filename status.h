@@ -54,20 +54,20 @@ enum status_type {
 
   // Demodulation
   RADIO_MODE, // printable string "usb", "lsb", etc
-  DEMOD_MODE, // 1 = AM envelope, 2 = FM, 3 = linear
-  INDEPENDENT_SIDEBAND, // Linear
+  DEMOD_MODE, // 0 = linear (default), 1 = AM envelope, 2 = FM
+  INDEPENDENT_SIDEBAND, // Linear only
   DEMOD_SNR,       // FM, PLL linear
   DEMOD_GAIN,      // AM, Linear
   FREQ_OFFSET,     // FM, PLL linear
 
-  PEAK_DEVIATION, // FM
-  PL_TONE,        // FM
+  PEAK_DEVIATION, // FM only
+  PL_TONE,        // FM only
   
   PLL_LOCK,       // Linear PLL
   PLL_SQUARE,     // Linear PLL
   PLL_PHASE,      // Linear PLL
 
-  OUTPUT_CHANNELS, // 1/2 in Linear, otherwise 1
+  OUTPUT_CHANNELS, // 1 or 2 in Linear, otherwise 1
 };
 
 // Previous transmitted state, used to detect changes

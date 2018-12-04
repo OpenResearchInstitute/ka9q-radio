@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.14 2018/12/02 09:41:57 karn Exp karn $
+// $Id: control.c,v 1.15 2018/12/03 13:15:14 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -224,8 +224,6 @@ void decode_status(struct demod *demod,unsigned char *buffer,int length){
     switch(type){
     case EOL: // Shouldn't get here
       goto done;
-    case TYPE:
-      break;
     case INPUT_SOURCE_SOCKET:
       if(len == 6){
 	struct sockaddr_in *sin;
@@ -510,7 +508,6 @@ int main(int argc,char *argv[]){
 
   for(;;){
     unsigned char buffer[8192];
-    int cr;
 
     memset(buffer,0,sizeof(buffer));
     int n = recv(Netsock,buffer,sizeof(buffer),0);
@@ -519,7 +516,7 @@ int main(int argc,char *argv[]){
       continue;
     }
     // Parse entries
-    cr = buffer[0]; // Command/response byte
+    int cr = buffer[0]; // Command/response byte
     if(cr == 1)
       continue;     // Ignore commands
 

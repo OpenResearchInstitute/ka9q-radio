@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.78 2018/12/02 09:41:57 karn Exp karn $
+// $Id: radio.h,v 1.79 2018/12/03 05:20:31 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -75,6 +75,8 @@ struct demod {
     struct rtp_state rtp; // State of the I/Q RTP receiver
     long long samples;    // Count of raw I/Q samples received
     int samprate;
+    int nctlrx_fd;
+    int nctltx_fd;
   } input;
 
   // Front end hardware information

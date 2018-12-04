@@ -88,6 +88,7 @@ pthread_t FCD_control_thread;
 pthread_t Display_thread;
 pthread_t AGC_thread;
 pthread_t Status_thread;
+pthread_t Ncmd_thread;
 int Overflows;
 FILE *Status;
 char *Status_filename;
@@ -107,6 +108,7 @@ int get_adc(short *buffer,const int L);
 void *fcd_command(void *arg);
 void *display(void *arg);
 void *doagc(void *arg);
+void *ncmd(void *arg);
 
 
 int main(int argc,char *argv[]){
@@ -310,8 +312,11 @@ int main(int argc,char *argv[]){
     exit(1);
   }
 
+#if 0
   pthread_create(&FCD_control_thread,NULL,fcd_command,sdr);
+#endif
   pthread_create(&Status_thread,NULL,status,sdr);
+  pthread_create(&Ncmd_thread,NULL,ncmd,sdr);
 
   if(Status)
     pthread_create(&Display_thread,NULL,display,sdr);
@@ -496,6 +501,8 @@ int front_end_init(struct sdrstate *sdr,int device, int samprate,int L){
   return r;
 }
 
+#if 0
+
 // Process commands to change FCD state
 // We listen on the same IP address and port we use as a multicasting source
 void *fcd_command(void *arg){
@@ -619,6 +626,8 @@ void *fcd_command(void *arg){
     }
   }
 }
+#endif
+
 
 // Status display thread
 void *display(void *arg){
@@ -886,6 +895,41 @@ void *ncmd(void *arg){
   Nctl_sock = setup_mcast(Dest,(struct sockaddr *)&Output_dest_address,0,Mcast_ttl,2); // For input
 
   while(1){
+    if(sdr->phd == NULL && (sdr->phd = fcdOpen(sdr->sdr_name,sizeof(sdr->sdr_name),Device)) == NULL){
+      errmsg("can't re-open control port: %s\n",strerror(errno));
+      sleep(5);
+      continue;
+    }
+
+    // Read back FCD state every iteration, whether or not we processed a command, just in case it was set by another program
+    unsigned char val;
+    fcdAppGetParam(sdr->phd,FCD_CMD_APP_GET_LNA_GAIN,&val,sizeof(val));
+    if(val){
+      if(sdr->intfreq >= 420000000)
+	sdr->status.lna_gain = 7;
+      else
+	sdr->status.lna_gain = 24;
+    } else
+      sdr->status.lna_gain = 0;
+    
+    fcdAppGetParam(sdr->phd,FCD_CMD_APP_GET_MIXER_GAIN,&val,sizeof(val));
+    sdr->status.mixer_gain = val ? 19 : 0;
+    
+    fcdAppGetParam(sdr->phd,FCD_CMD_APP_GET_IF_GAIN1,&val,sizeof(val));
+    sdr->status.if_gain = val;
+
+    fcdAppGetParam(sdr->phd,FCD_CMD_APP_GET_FREQ_HZ,(unsigned char *)&sdr->intfreq,sizeof(sdr->intfreq));
+    sdr->status.frequency = fcd_actual(sdr->intfreq) * (1 + Calibration);
+
+    // Need to do agc in separate thread, with interlocking on funcube control port
+    if(!No_hold_open)
+      doagc(sdr);
+
+    if(No_hold_open && sdr->phd != NULL){
+      fcdClose(sdr->phd);
+      sdr->phd = NULL;
+    }
+
     if(Nctl_sock <= 0)
       return NULL; // Nothing to do
 
@@ -903,12 +947,7 @@ void *ncmd(void *arg){
     if(cr == 0)
       continue; // Ignore our own status messages
 
-    if(sdr->phd == NULL && (sdr->phd = fcdOpen(sdr->sdr_name,sizeof(sdr->sdr_name),Device)) == NULL){
-      errmsg("can't re-open control port: %s\n",strerror(errno));
-      sleep(5);
-      continue;
-    }
-
+    Commands++;
     while(cp - buffer < length){
       enum status_type type = *cp++; // increment cp to length field
     
@@ -955,14 +994,6 @@ void *ncmd(void *arg){
       }
 
     }
-    // Need to do agc in separate thread, with interlocking on funcube control port
-    if(!No_hold_open)
-      doagc(sdr);
-
-    if(No_hold_open && sdr->phd != NULL){
-      fcdClose(sdr->phd);
-      sdr->phd = NULL;
-    }
   }
 }
 
@@ -998,6 +1029,9 @@ void *status(void *arg){
     encode_int64(&bp,GPS_TIME,timestamp);
     encode_int64(&bp,COMMANDS,Commands);
     // Where we're sending output
+    // Right now the metadata and data are both sent to Output_dest_address, but I may add
+    // the option to make them different. Then Output_dest_address will refer to the data stream
+    // ie., the users seeing this metadata stream will know where to look for the data stream
     {
       struct sockaddr_in *sin;
       struct sockaddr_in6 *sin6;
@@ -1035,11 +1069,14 @@ void *status(void *arg){
     encode_byte(&bp,LNA_GAIN,sdr->status.lna_gain);
     encode_byte(&bp,MIXER_GAIN,sdr->status.mixer_gain);
     encode_byte(&bp,IF_GAIN,sdr->status.if_gain);
-
+    encode_float(&bp,DC_I_OFFSET,crealf(sdr->DC));
+    encode_float(&bp,DC_Q_OFFSET,cimagf(sdr->DC));
+    encode_float(&bp,IQ_IMBALANCE,sdr->imbalance);
+    encode_float(&bp,IQ_PHASE,sdr->sinphi);
 
     // Filtering
-    encode_float(&bp,LOW_EDGE,-90e3);
-    encode_float(&bp,HIGH_EDGE,+90e3);
+    encode_float(&bp,LOW_EDGE,-90.0e3);
+    encode_float(&bp,HIGH_EDGE,+90.0e3);
 
     // Signals - these ALWAYS change
     encode_float(&bp,BASEBAND_POWER,sdr->in_power);

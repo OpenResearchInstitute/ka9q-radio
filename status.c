@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.7 2018/12/02 09:16:45 karn Exp karn $
+// $Id: status.c,v 1.8 2018/12/03 05:20:19 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -132,11 +132,17 @@ uint64_t decode_int(unsigned char *cp,int len){
 }
 
 float decode_float(unsigned char *cp,int len){
+  if(len == 8)
+    return (float)decode_double(cp,len);
+
   uint32_t result = decode_int(cp,len);
   return *(float *)&result;
 }
 
 double decode_double(unsigned char *cp,int len){
+  if(len == 4)
+    return (double)decode_float(cp,len);
+
   uint64_t result = decode_int(cp,len);
   return *(double *)&result;
 }
@@ -144,6 +150,8 @@ double decode_double(unsigned char *cp,int len){
 int compact_packet(struct state *s,unsigned char *pkt,int force){
   unsigned char *input = pkt;
   unsigned char *output = pkt;
+
+  *output++ = *input++; // command/response byte (don't really have to copy)
 
   // Read new packet into table, copying elements that have changed to output
   while(1){

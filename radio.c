@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.103 2018/12/02 09:41:57 karn Exp karn $
+// $Id: radio.c,v 1.104 2018/12/03 05:21:05 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -21,6 +21,7 @@
 #include "osc.h"
 #include "radio.h"
 #include "filter.h"
+#include "status.h"
 
 
 // SDR alias keep-out region, i.e., stay between -(samprate/2 - IF_EXCLUDE) and (samprate/2 - IF_EXCLUDE)
@@ -205,6 +206,9 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
   if(demod == NULL)
     return NAN;
 
+  assert(!isnan(f));
+  assert(f != 0);
+
   demod->freq = f;
 
   // No alias checking on explicitly provided lo2
@@ -252,28 +256,16 @@ double set_first_LO(struct demod * const demod,double first_LO){
   if(first_LO == current_lo1 || first_LO <= 0 || demod->tuner_lock || demod->input.source_address.ss_family != AF_INET)
     return first_LO;
 
-  demod->requested_status.frequency = first_LO;
-
-  // These need a way to set
-  // The Funcube dongle has a very wide dynamic range, so it is rarely necessary
-  // to change its analog gain settings and the 'radio' program never does
-  // Right now, gain is only changed inside the 'funcube' program in response to actual A/D overload, which is rare
-  demod->requested_status.samprate = ADC_samprate; // Preferred samprate; ignored by funcube
-  demod->requested_status.lna_gain = 0xff;    // 0xff means "don't change"
-  demod->requested_status.mixer_gain = 0xff;
-  demod->requested_status.if_gain = 0xff;
-  
-  // If we know the sender, send it a tuning request
-  struct sockaddr_in sdraddr;
-  memcpy(&sdraddr,&demod->input.source_address,sizeof(sdraddr));
-  sdraddr.sin_port = htons(ntohs(sdraddr.sin_port)+1);
-  if(sendto(demod->input.ctl_fd,&demod->requested_status,sizeof(demod->requested_status),0,(struct sockaddr *)&sdraddr,sizeof(sdraddr)) == -1)
-    perror("sendto control socket");
-
-  // Return the tuner's current frequency, which will change
-  return demod->status.frequency;
-}
-
+  unsigned char packet[8192],*bp;
+  memset(packet,0,sizeof(packet));
+  bp = packet;
+  *bp++ = 1; // Command
+  encode_double(&bp,RADIO_FREQUENCY,first_LO);
+  encode_eol(&bp);
+  int len = bp - packet;
+  send(demod->input.nctltx_fd,packet,len,0);
+  return first_LO;
+}  
 // If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
 // sampling rate, filter setting and alias region
 //
@@ -380,6 +372,10 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
 }      
 
 
+#if 1
+void update_status(struct demod *demod,struct status *new_status){}
+#else
+
 // Called from RTP receiver to process incoming metadata from SDR front end
 void update_status(struct demod *demod,struct status *new_status){
   assert(demod != NULL);
@@ -414,8 +410,8 @@ void update_status(struct demod *demod,struct status *new_status){
     // re-call these two to recalculate their phasor steps
     pthread_mutex_unlock(&demod->status_mutex);
     set_second_LO(demod,get_second_LO(demod));
-	set_shift(demod,demod->shift.freq);
-	sig++;
+    set_shift(demod,demod->shift.freq);
+    sig++;
   }
   // Gain settings changed? Store and signal but take no other action for now
   if(new_status->lna_gain != demod->status.lna_gain){
@@ -451,6 +447,8 @@ void update_status(struct demod *demod,struct status *new_status){
     pthread_mutex_unlock(&demod->status_mutex);
   }
 }
+#endif
+
 
 // Compute noise spectral density - experimental, my algorithm
 // The problem is telling signal from noise
