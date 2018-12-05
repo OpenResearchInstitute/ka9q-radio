@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.37 2018/12/02 09:16:45 karn Exp karn $
+// $Id: am.c,v 1.38 2018/12/02 09:41:57 karn Exp karn $
 // AM envelope demodulator thread for 'radio'
 // Copyright Oct 9 2017, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -27,16 +27,13 @@ void *demod_am(void *arg){
   float const recovery_factor = dB2voltage(demod->agc.recovery_rate * samptime); // AGC ramp-up rate/sample
   //  float const attack_factor = dB2voltage(demod->agc.attack_rate * samptime);      // AGC ramp-down rate/sample
   int const hangmax = demod->agc.hangtime / samptime; // samples before AGC increase
-  if(isnan(demod->agc.gain))
-    demod->agc.gain = dB2voltage(20.);
+  demod->agc.gain = dB2voltage(80.); // Empirical
 
   // DC removal from envelope-detected AM and coherent AM
   float DC_filter = 0;
   float const DC_filter_coeff = .0001;
 
   demod->output.channels = 1; // Mono
-
-  demod->snr = -INFINITY; // Not used
 
   // Detection filter
   struct filter_out * const filter = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,COMPLEX);
@@ -46,10 +43,10 @@ void *demod_am(void *arg){
   while(!demod->terminate){
     // New samples
     execute_filter_output(filter);    
-    if(!isnan(demod->n0))
-      demod->n0 += .001 * (compute_n0(demod) - demod->n0); // Update noise estimate
+    if(!isnan(demod->sig.n0))
+      demod->sig.n0 += .001 * (compute_n0(demod) - demod->sig.n0); // Update noise estimate
     else
-      demod->n0 = compute_n0(demod); // Happens at startup
+      demod->sig.n0 = compute_n0(demod); // Happens at startup
 
     // AM envelope detector
     float signal = 0;
@@ -78,7 +75,7 @@ void *demod_am(void *arg){
     }
     send_mono_output(demod,samples,filter->olen);
     // Scale to each sample so baseband power will display correctly
-    demod->bb_power = (signal + noise) / (2*filter->olen);
+    demod->sig.bb_power = (signal + noise) / (2*filter->olen);
   } // terminate
   delete_filter_output(filter);
   demod->filter.out = NULL;

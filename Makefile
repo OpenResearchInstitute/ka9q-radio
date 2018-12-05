@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.125 2018/12/03 11:45:48 karn Exp karn $
+# $Id: Makefile,v 1.126 2018/12/04 04:33:29 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -61,7 +61,7 @@ pcmcat: pcmcat.o libradio.a
 pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lbsd
 
-radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o knob.o touch.o send_status.o status.o libradio.a
+radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o knob.o touch.o radio_status.o status.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lbsd -lm -lpthread
 
 control: control.o modes.o misc.o multicast.o bandplan.o status.o
@@ -121,9 +121,9 @@ linear.o: linear.c misc.h filter.h radio.h osc.h sdr.h
 main.o: main.c radio.h osc.h sdr.h filter.h misc.h  multicast.h dsp.h
 modes.o: modes.c radio.h osc.h sdr.h misc.h
 radio.o: radio.c radio.h osc.h sdr.h filter.h misc.h 
-
+radio_status.o: radio_status.c status.h radio.h misc.h dsp.h filter.h multicast.h
 touch.o: touch.c misc.h
-send_status.o: send_status.c status.h
+
 
 
 

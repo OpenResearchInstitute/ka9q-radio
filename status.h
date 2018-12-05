@@ -30,7 +30,8 @@ enum status_type {
   DOPPLER_FREQUENCY,
   DOPPLER_FREQUENCY_RATE,
 
-  // Hardware gains
+  // Hardware
+  CALIBRATE,
   LNA_GAIN,
   MIXER_GAIN,
   IF_GAIN,

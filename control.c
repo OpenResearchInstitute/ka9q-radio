@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.15 2018/12/03 13:15:14 karn Exp karn $
+// $Id: control.c,v 1.16 2018/12/04 04:33:18 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -141,24 +141,24 @@ static int Frequency_lock;
 void adjust_item(struct demod *demod,int direction){
   double tunestep;
   
-  tunestep = pow(10., (double)demod->tunestep);
+  tunestep = pow(10., (double)demod->tune.step);
 
   if(!direction)
     tunestep = - tunestep;
 
-  switch(demod->tuneitem){
+  switch(demod->tune.item){
   case 0: // Carrier frequency
   case 1: // Center frequency - treat the same
     if(!Frequency_lock) // Ignore if locked
-      demod->freq += tunestep;
+      demod->tune.freq += tunestep;
     break;
   case 2: // First LO
-    if(demod->tuner_lock) // Tuner is locked, don't change it
+    if(demod->tune.lock) // Tuner is locked, don't change it
       break;
 
     // Keep frequency but move LO2, which will move LO1 (if it can move)
     double new_lo2 = demod->second_LO.freq + tunestep;
-    demod->freq += new_lo2;
+    demod->tune.freq += new_lo2;
     break;
   case 3: // IF
     demod->second_LO.freq -= tunestep;
@@ -191,13 +191,13 @@ void adjust_down(void *arg){
 }
 void toggle_lock(void *arg){
   struct demod *demod = arg;
-  switch(demod->tuneitem){
+  switch(demod->tune.item){
   case 0:
   case 1:
     Frequency_lock = !Frequency_lock; // Toggle frequency tuning lock
     break;
   case 2:
-    demod->tuner_lock = !demod->tuner_lock;
+    demod->tune.lock = !demod->tune.lock;
   }
 }
 
@@ -260,7 +260,7 @@ void decode_status(struct demod *demod,unsigned char *buffer,int length){
       demod->input.rtp.ssrc = decode_int(cp,len);
       break;
     case INPUT_SAMPRATE:
-      demod->input.samprate = demod->status.samprate = decode_int(cp,len);
+      demod->input.samprate = demod->sdr.status.samprate = decode_int(cp,len);
       break;
     case INPUT_PACKETS:
       demod->input.rtp.packets = decode_int(cp,len);
@@ -304,10 +304,10 @@ void decode_status(struct demod *demod,unsigned char *buffer,int length){
       demod->output.rtp.packets = decode_int(cp,len);
       break;
     case RADIO_FREQUENCY:
-      demod->freq = decode_double(cp,len);
+      demod->tune.freq = decode_double(cp,len);
       break;
     case FIRST_LO_FREQUENCY:
-      demod->status.frequency = decode_double(cp,len);
+      demod->sdr.status.frequency = decode_double(cp,len);
       break;
     case SECOND_LO_FREQUENCY:
       demod->second_LO.freq = decode_double(cp,len);
@@ -322,13 +322,13 @@ void decode_status(struct demod *demod,unsigned char *buffer,int length){
       demod->doppler.rate = decode_double(cp,len);
       break;
     case LNA_GAIN:
-      demod->status.lna_gain = decode_int(cp,len);
+      demod->sdr.status.lna_gain = decode_int(cp,len);
       break;
     case MIXER_GAIN:
-      demod->status.mixer_gain = decode_int(cp,len);
+      demod->sdr.status.mixer_gain = decode_int(cp,len);
       break;
     case IF_GAIN:
-      demod->status.if_gain = decode_int(cp,len);
+      demod->sdr.status.if_gain = decode_int(cp,len);
       break;
     case DC_I_OFFSET:
       break;
@@ -357,13 +357,13 @@ void decode_status(struct demod *demod,unsigned char *buffer,int length){
       Noise_bandwidth = decode_float(cp,len);
       break;
     case IF_POWER:
-      demod->if_power = decode_float(cp,len);
+      demod->sig.if_power = decode_float(cp,len);
       break;
     case BASEBAND_POWER:
-      demod->bb_power = decode_float(cp,len);
+      demod->sig.bb_power = decode_float(cp,len);
       break;
     case NOISE_DENSITY:
-      demod->n0 = decode_float(cp,len);
+      demod->sig.n0 = decode_float(cp,len);
       break;
     case RADIO_MODE:
       strncpy(demod->mode,(char *)cp,sizeof(demod->mode));
@@ -376,28 +376,28 @@ void decode_status(struct demod *demod,unsigned char *buffer,int length){
       demod->filter.isb = decode_int(cp,len);
       break;
     case DEMOD_SNR:
-      demod->snr = decode_float(cp,len);
+      demod->sig.snr = decode_float(cp,len);
       break;
     case DEMOD_GAIN:
       demod->agc.gain = decode_float(cp,len);
       break;
     case FREQ_OFFSET:
-      demod->foffset = decode_float(cp,len);
+      demod->sig.foffset = decode_float(cp,len);
       break;
     case PEAK_DEVIATION:
-      demod->pdeviation = decode_float(cp,len);
+      demod->sig.pdeviation = decode_float(cp,len);
       break;
     case PL_TONE:
-      demod->plfreq = decode_float(cp,len);
+      demod->sig.plfreq = decode_float(cp,len);
       break;
     case PLL_LOCK:
-      demod->pll_lock = decode_int(cp,len);
+      demod->sig.pll_lock = decode_int(cp,len);
       break;
     case PLL_SQUARE:
-      demod->square = decode_int(cp,len);
+      demod->opt.square = decode_int(cp,len);
       break;
     case PLL_PHASE:
-      demod->cphase = decode_float(cp,len);
+      demod->sig.cphase = decode_float(cp,len);
       break;
     case OUTPUT_CHANNELS:
       demod->output.channels = decode_int(cp,len);
@@ -531,21 +531,21 @@ int main(int argc,char *argv[]){
     int col = 1;
     if(Frequency_lock)
       wattron(tuning,A_UNDERLINE); // Underscore means the frequency is locked
-    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->freq); // RF carrier frequency
+    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->tune.freq); // RF carrier frequency
     mvwaddstr(tuning,row,col,"Carrier");
     row++;
 
     // Center of passband
-    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->freq + (demod->filter.high + demod->filter.low)/2);
+    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->tune.freq + (demod->filter.high + demod->filter.low)/2);
     mvwaddstr(tuning,row++,col,"Center");
 
     wattroff(tuning,A_UNDERLINE);
-    if(demod->tuner_lock)
+    if(demod->tune.lock)
       wattron(tuning,A_UNDERLINE);    
 
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
-    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->status.frequency);
+    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->sdr.status.frequency);
     mvwaddstr(tuning,row++,col,"First LO");
     wattroff(tuning,A_UNDERLINE);
 
@@ -577,8 +577,8 @@ int main(int argc,char *argv[]){
       mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
 
     struct bandplan const *bp_low,*bp_high;
-    bp_low = lookup_frequency(demod->freq + demod->filter.low);
-    bp_high = lookup_frequency(demod->freq + demod->filter.high);
+    bp_low = lookup_frequency(demod->tune.freq + demod->filter.low);
+    bp_high = lookup_frequency(demod->tune.freq + demod->filter.high);
     // Make sure entire receiver passband is in the band
     if(bp_low != NULL && bp_high != NULL){
       struct bandplan r;
@@ -650,16 +650,16 @@ int main(int argc,char *argv[]){
 
     // Signal data window
     float bw = Noise_bandwidth;
-    float sn0 = demod->bb_power / demod->n0 - bw;
+    float sn0 = demod->sig.bb_power / demod->sig.n0 - bw;
     sn0 = max(sn0,0.0f); // Can go negative due to inconsistent smoothed values; clip it at zero
 
     row = 1;
     col = 1;
-    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->if_power));
+    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->sig.if_power));
     mvwaddstr(sig,row++,col,"IF");
-    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->bb_power));
+    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->sig.bb_power));
     mvwaddstr(sig,row++,col,"Baseband");
-    mvwprintw(sig,row,col,"%15.1f dB/Hz",power2dB(demod->n0));
+    mvwprintw(sig,row,col,"%15.1f dB/Hz",power2dB(demod->sig.n0));
     mvwaddstr(sig,row++,col,"N0");
     mvwprintw(sig,row,col,"%15.1f dBHz",10*log10f(sn0));
     mvwaddstr(sig,row++,col,"S/N0");
@@ -678,32 +678,32 @@ int main(int argc,char *argv[]){
     int rcol = 9;
     int lcol = 1;
     // Display only if used by current mode
-    if(demod->snr >= 0){
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",power2dB(demod->snr));
+    if(demod->sig.snr >= 0){
+      mvwprintw(demodulator,row,rcol,"%11.1f dB",power2dB(demod->sig.snr));
       mvwaddstr(demodulator,row++,lcol,"Loop SNR");
     }
     if(demod->demod_type == AM_DEMOD || demod->demod_type == LINEAR_DEMOD){
       mvwprintw(demodulator,row,rcol,"%11.1f dB",voltage2dB(demod->agc.gain));
       mvwaddstr(demodulator,row++,lcol,"AF Gain");
     }    
-    if(demod->demod_type == FM_DEMOD || (demod->demod_type == LINEAR_DEMOD && demod->pll)){
-      mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->foffset);
+    if(demod->demod_type == FM_DEMOD || (demod->demod_type == LINEAR_DEMOD && demod->opt.pll)){
+      mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->sig.foffset);
       mvwaddstr(demodulator,row++,lcol,"Offset");
     }
     if(demod->demod_type == FM_DEMOD){
-      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->pdeviation);
+      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->sig.pdeviation);
       mvwaddstr(demodulator,row++,lcol,"Deviation");
     }
-    if(demod->demod_type == LINEAR_DEMOD && demod->pll){
-      mvwprintw(demodulator,row,rcol,"%+11.1f deg",demod->cphase*DEGPRA);
+    if(demod->demod_type == LINEAR_DEMOD && demod->opt.pll){
+      mvwprintw(demodulator,row,rcol,"%+11.1f deg",demod->sig.cphase*DEGPRA);
       mvwaddstr(demodulator,row++,lcol,"Phase");
     }
     if(demod->demod_type == FM_DEMOD){
-      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->plfreq);
+      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->sig.plfreq);
       mvwaddstr(demodulator,row++,lcol,"Tone");
     }
-    if(demod->demod_type == LINEAR_DEMOD && demod->pll){
-      mvwprintw(demodulator,row,rcol,"%11s",demod->pll_lock ? "Yes" : "No");
+    if(demod->demod_type == LINEAR_DEMOD && demod->opt.pll){
+      mvwprintw(demodulator,row,rcol,"%11s",demod->sig.pll_lock ? "Yes" : "No");
       mvwaddstr(demodulator,row++,lcol,"PLL Lock");
     }
     box(demodulator,0,0);
@@ -712,24 +712,24 @@ int main(int argc,char *argv[]){
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 1;
     col = 1;
-    mvwprintw(sdr,row,col,"%'18d Hz",demod->status.samprate); // Nominal
+    mvwprintw(sdr,row,col,"%'18d Hz",demod->sdr.status.samprate); // Nominal
     mvwaddstr(sdr,row++,col,"Samprate");
     mvwprintw(sdr,row,col,"%'18.1f dBFS",
-	      power2dB(demod->if_power) + demod->status.lna_gain + demod->status.mixer_gain + demod->status.if_gain);
+	      power2dB(demod->sig.if_power) + demod->sdr.status.lna_gain + demod->sdr.status.mixer_gain + demod->sdr.status.if_gain);
     mvwprintw(sdr,row++,col,"A/D Level");
-    mvwprintw(sdr,row,col,"%+18.6f",demod->DC_i);  // Scaled to +/-1
+    mvwprintw(sdr,row,col,"%+18.6f",demod->sdr.DC_i);  // Scaled to +/-1
     mvwaddstr(sdr,row++,col,"I offset");
-    mvwprintw(sdr,row,col,"%+18.6f",demod->DC_q);
+    mvwprintw(sdr,row,col,"%+18.6f",demod->sdr.DC_q);
     mvwaddstr(sdr,row++,col,"Q offset");
-    mvwprintw(sdr,row,col,"%+18.3f dB",power2dB(demod->imbalance));
+    mvwprintw(sdr,row,col,"%+18.3f dB",power2dB(demod->sdr.imbalance));
     mvwaddstr(sdr,row++,col,"I/Q imbal");
-    mvwprintw(sdr,row,col,"%+18.1f deg",demod->sinphi*DEGPRA);
+    mvwprintw(sdr,row,col,"%+18.1f deg",demod->sdr.sinphi*DEGPRA);
     mvwaddstr(sdr,row++,col,"I/Q phi");
-    mvwprintw(sdr,row,col,"%18u dB",demod->status.lna_gain);   // SDR dependent
+    mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.lna_gain);   // SDR dependent
     mvwaddstr(sdr,row++,col,"LNA gain");
-    mvwprintw(sdr,row,col,"%18u dB",demod->status.mixer_gain); // SDR dependent
+    mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.mixer_gain); // SDR dependent
     mvwaddstr(sdr,row++,col,"Mix gain");
-    mvwprintw(sdr,row,col,"%18u dB",demod->status.if_gain); // SDR dependent    
+    mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.if_gain); // SDR dependent    
     mvwaddstr(sdr,row++,col,"IF gain");
     box(sdr,0,0);
     mvwaddstr(sdr,0,6,"SDR Hardware");
@@ -743,12 +743,12 @@ int main(int argc,char *argv[]){
     mvwprintw(options,row++,col,"ISB");
     wattroff(options,A_UNDERLINE);
 
-    if(demod->pll)
+    if(demod->opt.pll)
       wattron(options,A_UNDERLINE);      
     mvwprintw(options,row++,col,"PLL");
     wattroff(options,A_UNDERLINE);
 
-    if(demod->square)
+    if(demod->opt.square)
       wattron(options,A_UNDERLINE);            
     mvwprintw(options,row++,col,"Square");
     wattroff(options,A_UNDERLINE);
@@ -803,7 +803,7 @@ int main(int argc,char *argv[]){
     if(demod->input.rtp.dupes)
       wprintw(network," dupes %'llu",demod->input.rtp.dupes);
 
-    mvwprintw(network,row++,col,"Time: %s",lltime(demod->status.timestamp));
+    mvwprintw(network,row++,col,"Time: %s",lltime(demod->sdr.status.timestamp));
     mvwprintw(network,row++,col,"Sink: %s; ssrc %8x; TTL %d%s",demod->output.dest_address_text,
 	      demod->output.rtp.ssrc,Mcast_ttl,Mcast_ttl == 0 ? " (Local host only)":"");
     mvwprintw(network,row++,col,"PCM %'d Hz; pkts %'llu",demod->output.samprate,demod->output.rtp.packets);
@@ -818,19 +818,19 @@ int main(int argc,char *argv[]){
     // They come from the ' option in the printf formats
     // tunestep is the log10 of the digit position (0 = units)
     int hcol;
-    if(demod->tunestep >= 0){
-      hcol = demod->tunestep + demod->tunestep/3;
+    if(demod->tune.step >= 0){
+      hcol = demod->tune.step + demod->tune.step/3;
       hcol = -hcol;
     } else {
-      hcol = -demod->tunestep;
+      hcol = -demod->tune.step;
       hcol = 1 + hcol + (hcol-1)/3; // 1 for the decimal point, and extras if there were commas in more than 3 places
     }
-    switch(demod->tuneitem){
+    switch(demod->tune.item){
     case 0:
     case 1:
     case 2:
     case 3:
-      mod_y = demod->tuneitem + 1;
+      mod_y = demod->tune.item + 1;
       mod_x = 24 + hcol; // units in column 24
       mvwchgat(tuning,mod_y,mod_x,1,A_STANDOUT,0,NULL);
       break;
@@ -838,7 +838,7 @@ int main(int argc,char *argv[]){
     case 5:
     case 6:
     case 7:
-      mod_y = demod->tuneitem - 3;
+      mod_y = demod->tune.item - 3;
       mod_x = 13 + hcol; // units in column 13
       mvwchgat(filtering,mod_y,mod_x,1,A_STANDOUT,0,NULL);
       break;
@@ -902,30 +902,30 @@ int main(int argc,char *argv[]){
       break;
     case KEY_NPAGE: // Page Down/tab key
     case '\t':      // go to next tuning item
-      demod->tuneitem = (demod->tuneitem + 1) % 8;
+      demod->tune.item = (demod->tune.item + 1) % 8;
       break;
     case KEY_BTAB:  // Page Up/Backtab, i.e., shifted tab:
     case KEY_PPAGE: // go to previous tuning item
-      demod->tuneitem = (8 + demod->tuneitem - 1) % 8;
+      demod->tune.item = (8 + demod->tune.item - 1) % 8;
       break;
     case KEY_HOME: // Go back to item 0
-      demod->tuneitem = 0;
-      demod->tunestep = 0;
+      demod->tune.item = 0;
+      demod->tune.step = 0;
       break;
     case KEY_BACKSPACE: // Cursor left: increase tuning step 10x
     case KEY_LEFT:
-      if(demod->tunestep >= 9){
+      if(demod->tune.step >= 9){
 	beep();
 	break;
       }
-      demod->tunestep++;
+      demod->tune.step++;
       break;
     case KEY_RIGHT:     // Cursor right: decrease tuning step /10
-      if(demod->tunestep <= -3){
+      if(demod->tune.step <= -3){
 	beep();
 	break;
       }
-      demod->tunestep--;
+      demod->tune.step--;
       break;
     case KEY_UP:        // Increase whatever digit we're tuning
       adjust_up(demod);
@@ -974,19 +974,19 @@ int main(int argc,char *argv[]){
 
 	// If frequency would be out of range, guess kHz or MHz
 	if(f >= 0.1 && f < 100)
-	  demod->freq = f*1e6; // 0.1 - 99.999 Only MHz can be valid
+	  demod->tune.freq = f*1e6; // 0.1 - 99.999 Only MHz can be valid
 	else if(f < 500)         // 100-499.999 could be kHz or MHz, assume MHz
-	  demod->freq = f*1e6;
+	  demod->tune.freq = f*1e6;
 	else if(f < 2000)        // 500-1999.999 could be kHz or MHz, assume kHz
-	  demod->freq = f*1e3;
+	  demod->tune.freq = f*1e3;
 	else if(f < 100000)      // 2000-99999.999 can only be kHz
-	  demod->freq = f*1e3;
+	  demod->tune.freq = f*1e3;
 	else                     // accept directly
-	  demod->freq = f;
+	  demod->tune.freq = f;
       }
       break;
     case 'i':    // Recenter IF to +/- samprate/4
-      demod->freq += demod->input.samprate/4.;
+      demod->tune.freq += demod->input.samprate/4.;
       break;
     case 'u':    // Set display update rate in milliseconds (minimum 50, i.e, 20 Hz)
       {
@@ -1037,17 +1037,17 @@ int main(int argc,char *argv[]){
 	} else if(strcasecmp(str,"!isb") == 0){
 	  demod->filter.isb = 0;
 	} else if(strcasecmp(str,"pll") == 0){
-	  demod->pll = 1;
+	  demod->opt.pll = 1;
 	} else if(strcasecmp(str,"!pll") == 0){
-	  demod->pll = demod->square = 0;
+	  demod->opt.pll = demod->opt.square = 0;
 	} else if(strcasecmp(str,"square") == 0){
-	  demod->pll = demod->square = 1;
+	  demod->opt.pll = demod->opt.square = 1;
 	} else if(strcasecmp(str,"!square") == 0){	  
-	  demod->square = 0;
+	  demod->opt.square = 0;
 	} else if(strcasecmp(str,"flat") == 0){
-	  demod->flat = 1;
+	  demod->opt.flat = 1;
 	} else if(strcasecmp(str,"!flat") == 0){
-	  demod->flat = 0;
+	  demod->opt.flat = 0;
 	}
       }
       break;
@@ -1067,39 +1067,39 @@ int main(int argc,char *argv[]){
 #endif
       if(wmouse_trafo(tuning,&my,&mx,false)){
 	// Tuning window
-	demod->tuneitem = my-1;
-	demod->tunestep = 24-mx;
-	if(demod->tunestep < 0)
-	  demod->tunestep++;
-	if(demod->tunestep > 3)
-	  demod->tunestep--;
-	if(demod->tunestep > 6)
-	  demod->tunestep--;
-	if(demod->tunestep > 9)	
-	  demod->tunestep--;
+	demod->tune.item = my-1;
+	demod->tune.step = 24-mx;
+	if(demod->tune.step < 0)
+	  demod->tune.step++;
+	if(demod->tune.step > 3)
+	  demod->tune.step--;
+	if(demod->tune.step > 6)
+	  demod->tune.step--;
+	if(demod->tune.step > 9)	
+	  demod->tune.step--;
 	// Clamp to range
-	if(demod->tunestep < -3)
-	  demod->tunestep = -3;
-	if(demod->tunestep > 9)
-	  demod->tunestep = 9;
+	if(demod->tune.step < -3)
+	  demod->tune.step = -3;
+	if(demod->tune.step > 9)
+	  demod->tune.step = 9;
 
       } else if(wmouse_trafo(filtering,&my,&mx,false)){
 	// Filter window
-	demod->tuneitem = my + 3;
-	demod->tunestep = 13-mx;
-	if(demod->tunestep < 0)
-	  demod->tunestep++;
-	if(demod->tunestep > 3)
-	  demod->tunestep--;
-	if(demod->tunestep > 6)
-	  demod->tunestep--;
-	if(demod->tunestep > 9)	
-	  demod->tunestep--;
+	demod->tune.item = my + 3;
+	demod->tune.step = 13-mx;
+	if(demod->tune.step < 0)
+	  demod->tune.step++;
+	if(demod->tune.step > 3)
+	  demod->tune.step--;
+	if(demod->tune.step > 6)
+	  demod->tune.step--;
+	if(demod->tune.step > 9)	
+	  demod->tune.step--;
 	// Clamp to range
-	if(demod->tunestep < -3)
-	  demod->tunestep = -3;
-	if(demod->tunestep > 5)
-	  demod->tunestep = 5;
+	if(demod->tune.step < -3)
+	  demod->tune.step = -3;
+	if(demod->tune.step > 5)
+	  demod->tune.step = 5;
       } else if(wmouse_trafo(modes,&my,&mx,false)){
 	// In the modes window?
 	my--;
@@ -1113,12 +1113,12 @@ int main(int argc,char *argv[]){
 	  demod->filter.isb = !demod->filter.isb;
 	  break;
 	case 2:
-	  demod->pll = !demod->pll;
+	  demod->opt.pll = !demod->opt.pll;
 	  break;
 	case 3:
-	  demod->square = !demod->square;
-	  if(demod->square)
-	    demod->pll = 1;
+	  demod->opt.square = !demod->opt.square;
+	  if(demod->opt.square)
+	    demod->opt.pll = 1;
 	  break;
 	case 4:
 	  demod->output.channels = 1;

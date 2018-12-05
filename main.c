@@ -50,7 +50,7 @@ struct demod Demod;
 
 struct timeval Starttime;      // System clock at timestamp 0, for RTCP
 
-uint64_t Commands;
+extern uint64_t Commands;
 
 void output_cleanup(void *);
 void closedown(int);
@@ -58,109 +58,8 @@ void *rtp_recv(void *);
 void *rtcp_send(void *);
 void cleanup(void);
 void closedown(int);
-void decode_status(struct demod *demod,unsigned char *buffer,int length){
-  unsigned char *cp = buffer;
-  double nfreq = NAN;
-  int gainchange = 0;
-
-  while(cp - buffer < length){
-    enum status_type type = *cp++; // increment cp to length field
-
-    if(type == EOL)
-      break; // End of list
-
-    unsigned int len = *cp++;
-    //    fprintf(stderr,"type %d len %d\n",type,len);
-    if(cp - buffer + len >= length)
-      break; // Invalid length
-    switch(type){
-    case EOL: // Shouldn't get here since it's checked above
-      goto done;
-    case RADIO_FREQUENCY:
-      nfreq = decode_double(cp,len);
-      break;
-    case OUTPUT_SAMPRATE:
-      demod->input.samprate = demod->status.samprate = decode_int(cp,len);
-      demod->filter.decimate = demod->status.samprate / demod->output.samprate;
-      break;
-    case GPS_TIME:
-      demod->status.timestamp = decode_int(cp,len);
-      fprintf(stderr,"GPS time %lld\n",demod->status.timestamp);
-      break;
-    case LOW_EDGE:
-      demod->min_IF = decode_float(cp,len);
-      break;
-    case HIGH_EDGE:
-      demod->max_IF = decode_float(cp,len);
-      break;
-    case LNA_GAIN:
-      demod->status.lna_gain = decode_int(cp,len);
-      gainchange++;
-      break;
-    case MIXER_GAIN:
-      demod->status.mixer_gain = decode_int(cp,len);
-      gainchange++;
-      break;
-    case IF_GAIN:
-      demod->status.if_gain = decode_int(cp,len);
-      gainchange++;
-      break;
-    case DC_I_OFFSET:
-      demod->DC_i = decode_float(cp,len);
-      break;
-    case DC_Q_OFFSET:
-      demod->DC_q = decode_float(cp,len);
-      break;
-    case IQ_IMBALANCE:
-      demod->imbalance = decode_float(cp,len);
-      break;
-    case IQ_PHASE:
-      demod->sinphi = decode_float(cp,len);
-      break;
-    default:
-      break;
-    }
-    cp += len;
-  }
-  if(gainchange)
-    demod->gain_factor = powf(10.,-0.05*(demod->status.lna_gain + demod->status.if_gain + demod->status.mixer_gain));
-  if(!isnan(nfreq) && demod->status.frequency != nfreq && demod->status.samprate != 0){
-    // Recalculate LO2
-    demod->status.frequency = nfreq;
-    double new_LO2 = -(demod->freq - get_first_LO(demod));
-    set_second_LO(demod,new_LO2);
-  }
-  done:;
-}
-
-
-
-void *new_fe_status(void *arg){
-  struct demod *demod = (struct demod *)arg;
-
-  while(1){
-    unsigned char buffer[8192];
-
-    memset(buffer,0,sizeof(buffer));
-    int n = recv(demod->input.nctlrx_fd,buffer,sizeof(buffer),0);
-    if(n <= 0){
-      sleep(1);
-      continue;
-    }
-    // Parse entries
-    int cr = buffer[0]; // command-response byte
-    //    fprintf(stderr,"new_fe_status len = %d, cr = %d\n",n,cr);
-
-    if(cr == 1)
-      continue; // Ignore commands
-    
-    decode_status(demod,buffer+1,n-1);
-    pthread_mutex_lock(&demod->status_mutex);
-    pthread_cond_broadcast(&demod->status_cond);
-    pthread_mutex_unlock(&demod->status_mutex);
-  }    
-}
-
+void *recv_sdr_status(void *);
+void *send_status(void *);
 
 // The main program sets up the demodulator parameter defaults,
 // overwrites them with command-line arguments and/or state file settings,
@@ -209,7 +108,7 @@ int main(int argc,char *argv[]){
   memset(demod,0,sizeof(*demod)); // Just in case it's ever dynamic
   demod->output.samprate = DAC_samprate; // currently 48 kHz, hard to change
   strcpy(demod->mode,"FM");
-  demod->freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
+  demod->tune.freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
 
   demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
   demod->filter.M = 4352+1;    // Length of filter impulse response
@@ -217,8 +116,9 @@ int main(int argc,char *argv[]){
   strlcpy(demod->input.dest_address_text,"iq.hf.mcast.local",sizeof(demod->input.dest_address_text));
   demod->agc.headroom = pow(10.,-15./20); // -15 dB
   strlcpy(demod->output.dest_address_text,"pcm.hf.mcast.local",sizeof(demod->output.dest_address_text));
-  demod->tunestep = 0;  // single digit hertz position
-  demod->imbalance = 1; // 0 dB
+  demod->tune.step = 0;  // single digit hertz position
+  demod->tune.shift = NAN;
+  demod->sdr.imbalance = 1; // 0 dB
   demod->filter.decimate = 1; // default to avoid division by zero
   demod->filter.interpolate = 1;
 
@@ -226,7 +126,6 @@ int main(int argc,char *argv[]){
   demod->input.source_address.ss_family = -1; // Set invalid
   demod->filter.low = NAN;
   demod->filter.high = NAN;
-  set_shift(demod,0);
 
   // Find any file argument and load it
   char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:";
@@ -246,7 +145,7 @@ int main(int argc,char *argv[]){
       demod->doppler_command = optarg;
       break;
     case 'f':   // Initial RF tuning frequency
-      demod->freq = parse_frequency(optarg);
+      demod->tune.freq = parse_frequency(optarg);
       break;
     case 'I':   // Multicast address to listen to for I/Q data
       strlcpy(demod->input.dest_address_text,optarg,sizeof(demod->input.dest_address_text));
@@ -274,10 +173,7 @@ int main(int argc,char *argv[]){
       strlcpy(demod->output.dest_address_text,optarg,sizeof(demod->output.dest_address_text));
       break;
     case 's':
-      {
-	double shift = strtod(optarg,NULL);
-	set_shift(demod,shift);
-      }
+      demod->tune.shift = strtod(optarg,NULL);
       break;
     case 'T': // TTL on output packets
       Mcast_ttl = strtol(optarg,NULL,0);
@@ -306,17 +202,13 @@ int main(int argc,char *argv[]){
   fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
   fprintf(stderr,"Copyright 2017 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
   
-  // Set up actual demod state
-  demod->input.ctl_fd = -1;   // Invalid
-  demod->input.fd = -1; // Invalid
-
-  pthread_mutex_init(&demod->status_mutex,NULL);
-  pthread_cond_init(&demod->status_cond,NULL);
+  pthread_mutex_init(&demod->sdr.status_mutex,NULL);
+  pthread_cond_init(&demod->sdr.status_cond,NULL);
   pthread_mutex_init(&demod->doppler.mutex,NULL);
   pthread_mutex_init(&demod->shift.mutex,NULL);
   pthread_mutex_init(&demod->second_LO.mutex,NULL);
-  pthread_mutex_init(&demod->qmutex,NULL);
-  pthread_cond_init(&demod->qcond,NULL);
+  pthread_mutex_init(&demod->input.qmutex,NULL);
+  pthread_cond_init(&demod->input.qcond,NULL);
 
   // Input socket for I/Q data from SDR
   demod->input.fd = setup_mcast(demod->input.dest_address_text,(struct sockaddr *)&demod->input.dest_address,0,0,0);
@@ -324,16 +216,11 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
   }
-  // For sending commands to front end
-  if((demod->input.ctl_fd = socket(PF_INET,SOCK_DGRAM, 0)) == -1)
-    perror("can't open control socket");
-
-  demod->input.nctlrx_fd = setup_mcast(demod->input.dest_address_text,NULL,0,0,2);
-  demod->input.nctltx_fd = setup_mcast(demod->input.dest_address_text,NULL,1,Mcast_ttl,2);
+  // Output socket for commands to SDR
+  demod->input.ctl_fd = setup_mcast(demod->input.dest_address_text,NULL,1,Mcast_ttl,2);
 
   gettimeofday(&Starttime,NULL);
 
-  // Blocksize really should be computed from demod->filter.L and decimate
   if(setup_output(demod,Mcast_ttl) != 0){
     fprintf(stderr,"Output setup failed\n");
     exit(1);
@@ -341,35 +228,37 @@ int main(int argc,char *argv[]){
   // Create master half of filter
   // Must be done before the demodulator starts or it will fail an assert
   // If done in proc_samples(), will be a race condition
+  // Blocksize really should be computed from demod->filter.L and decimate
   demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
 
-  pthread_create(&demod->rtp_recv_thread,NULL,rtp_recv,demod);
-  pthread_create(&demod->proc_samples,NULL,proc_samples,demod);
+  pthread_t rtp_recv_thread,proc_samples_thread;
+  pthread_create(&rtp_recv_thread,NULL,rtp_recv,demod);
+  pthread_create(&proc_samples_thread,NULL,proc_samples,demod);
 
   // Optional doppler correction
   if(demod->doppler_command)
     pthread_create(&demod->doppler_thread,NULL,doppler,demod);
 
   pthread_t status_thread;
-  pthread_create(&status_thread,NULL,status,demod);
+  pthread_create(&status_thread,NULL,send_status,demod);
 
   pthread_t rtcp_thread;
   pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
 
-  pthread_t fe_status_thread;
-  pthread_create(&fe_status_thread,NULL,new_fe_status,demod);
+  pthread_t recv_sdr_status_thread;
+  pthread_create(&recv_sdr_status_thread,NULL,recv_sdr_status,demod);
 
 
   // Block until we get a packet from the SDR and we know the sample rate
-  fprintf(stderr,"Waiting for first SDR packet to learn sample rate...\n");
-  pthread_mutex_lock(&demod->status_mutex);
-  while(demod->status.samprate == 0)
-    pthread_cond_wait(&demod->status_cond,&demod->status_mutex);
-  pthread_mutex_unlock(&demod->status_mutex);
+  fprintf(stderr,"Waiting for first SDR packet to learn sample rate..."); fflush(stderr);
+  pthread_mutex_lock(&demod->sdr.status_mutex);
+  while(demod->sdr.status.samprate == 0)
+    pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
+  pthread_mutex_unlock(&demod->sdr.status_mutex);
+  fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
 
+  //  sleep(2);
   // Actually set the mode and frequency already specified
-  set_freq(demod,demod->freq,NAN); 
-  demod->agc.gain = dB2voltage(100.0); // Empirical starting value
   set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
 
   // Graceful signal catch
@@ -446,17 +335,10 @@ void *rtp_recv(void *arg){
     // background daemon. In that case, a new SSRC in the digital IF stream could fork a new instance of 'radio' with the same parameters,
     // and it in turn would send demodulated PCM to a new SSRC.
 
+    // Old status information, now obsolete, replaced by TLV streams on port 5006. Ignore for now, eventually it'll go away entirely
     // These are in host byte order, i.e., *little* endian because we don't have to interoperate with anything else
-    struct status new_status;
-    new_status.timestamp = *(long long *)dp;
-    new_status.frequency = *(double *)&dp[8];
-    new_status.samprate = *(uint32_t *)&dp[16];
-    new_status.lna_gain = dp[20];
-    new_status.mixer_gain = dp[21];
-    new_status.if_gain = dp[22];
     dp += 24;
     size -= 24;
-    update_status(demod,&new_status);
 
     pkt->data = dp;
     pkt->len = size;
@@ -464,20 +346,20 @@ void *rtp_recv(void *arg){
     // Insert onto queue sorted by sequence number, wake up thread
     struct packet *q_prev = NULL;
     struct packet *qe = NULL;
-    pthread_mutex_lock(&demod->qmutex);
-    for(qe = demod->queue; qe && pkt->rtp.seq >= qe->rtp.seq; q_prev = qe,qe = qe->next)
+    pthread_mutex_lock(&demod->input.qmutex);
+    for(qe = demod->input.queue; qe && pkt->rtp.seq >= qe->rtp.seq; q_prev = qe,qe = qe->next)
       ;
 
     pkt->next = qe;
     if(q_prev)
       q_prev->next = pkt;
     else
-      demod->queue = pkt; // Front of list
+      demod->input.queue = pkt; // Front of list
 
     pkt = NULL;        // force new packet to be allocated
     // wake up decoder thread
-    pthread_cond_signal(&demod->qcond);
-    pthread_mutex_unlock(&demod->qmutex);
+    pthread_cond_signal(&demod->input.qcond);
+    pthread_mutex_unlock(&demod->input.qmutex);
   }      
   return NULL;
 }
@@ -504,12 +386,12 @@ int savestate(struct demod *dp,char const *filename){
   fprintf(fp,"TTL %d\n",Mcast_ttl);
   fprintf(fp,"Blocksize %d\n",dp->filter.L);
   fprintf(fp,"Impulse len %d\n",dp->filter.M);
-  fprintf(fp,"Frequency %.3f Hz\n",get_freq(dp));
+  fprintf(fp,"Frequency %.3f Hz\n",dp->tune.freq);
   fprintf(fp,"Mode %s\n",dp->mode);
-  fprintf(fp,"Shift %.3f Hz\n",dp->shift.freq);
+  fprintf(fp,"Shift %.3f Hz\n",dp->tune.shift);
   fprintf(fp,"Filter low %.3f Hz\n",dp->filter.low);
   fprintf(fp,"Filter high %.3f Hz\n",dp->filter.high);
-  fprintf(fp,"Tunestep %d\n",dp->tunestep);
+  fprintf(fp,"Tunestep %d\n",dp->tune.step);
   fclose(fp);
   return 0;
 }
@@ -534,16 +416,16 @@ int loadstate(struct demod *dp,char const *filename){
   char line[PATH_MAX];
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
-    if(sscanf(line,"Frequency %lf",&dp->freq) > 0){
+    if(sscanf(line,"Frequency %lf",&dp->tune.freq) > 0){
     } else if(strncmp(line,"Mode ",5) == 0){
       strlcpy(dp->mode,&line[5],sizeof(dp->mode));
-    } else if(sscanf(line,"Shift %lf",&dp->shift.freq) > 0){
+    } else if(sscanf(line,"Shift %lf",&dp->tune.shift) > 0){
     } else if(sscanf(line,"Filter low %f",&dp->filter.low) > 0){
     } else if(sscanf(line,"Filter high %f",&dp->filter.high) > 0){
     } else if(sscanf(line,"Kaiser Beta %f",&dp->filter.kaiser_beta) > 0){
     } else if(sscanf(line,"Blocksize %d",&dp->filter.L) > 0){
     } else if(sscanf(line,"Impulse len %d",&dp->filter.M) > 0){
-    } else if(sscanf(line,"Tunestep %d",&dp->tunestep) > 0){
+    } else if(sscanf(line,"Tunestep %d",&dp->tune.step) > 0){
     } else if(sscanf(line,"Source %256s",dp->input.dest_address_text) > 0){
       // Array sizes defined elsewhere!
     } else if(sscanf(line,"Output %256s",dp->output.dest_address_text) > 0){

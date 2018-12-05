@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.58 2018/12/02 09:16:45 karn Exp karn $
+// $Id: fm.c,v 1.59 2018/12/02 09:41:57 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -25,8 +25,8 @@ void *demod_fm(void *arg){
 
   complex float state = 1; // Arbitrary choice; zero would cause first audio sample to be NAN
   float const dsamprate = (float)demod->input.samprate / demod->filter.decimate; // Decimated (output) sample rate
-  demod->pdeviation = 0;
-  demod->foffset = 0;
+  demod->sig.pdeviation = 0;
+  demod->sig.foffset = 0;
   demod->output.channels = 1; // Only mono for now
 
   // Create predetection filter, leaving response momentarily empty
@@ -52,7 +52,7 @@ void *demod_fm(void *arg){
   // Audio response is high pass with 300 Hz corner to remove PL tone
   // then -6 dB/octave post-emphasis since demod is FM and modulation is actually PM (indirect FM)
   struct filter_out *audio_filter = NULL;
-  if(!demod->flat){
+  if(!demod->opt.flat){
     complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
     assert(aresponse != NULL);
     memset(aresponse,0,(AN/2+1) * sizeof(*aresponse));
@@ -74,39 +74,39 @@ void *demod_fm(void *arg){
     // Wait for next block of frequency domain data
     execute_filter_output(filter);
     // Compute bb_power below along with average amplitude to save time
-    //    demod->bb_power = cpower(filter->output.c,filter->olen);
+    //    demod->sig.bb_power = cpower(filter->output.c,filter->olen);
     float const n0 = compute_n0(demod);
-    if(isnan(demod->n0))
-      demod->n0 = n0; // handle startup transient
+    if(isnan(demod->sig.n0))
+      demod->sig.n0 = n0; // handle startup transient
     else
-      demod->n0 += .01 * (n0 - demod->n0);
+      demod->sig.n0 += .01 * (n0 - demod->sig.n0);
 
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
     float const gain = (demod->agc.headroom *  M_1_PI * dsamprate) / fabsf(demod->filter.low - demod->filter.high);
 
     // Find average amplitude and estimate SNR for squelch
-    // We also need average magnitude^2, but we have that from demod->bb_power
+    // We also need average magnitude^2, but we have that from demod->sig.bb_power
     // Approximate for SNR because magnitude has a chi-squared distribution with 2 degrees of freedom
     float avg_amp = 0;
-    demod->bb_power = 0;
+    demod->sig.bb_power = 0;
     for(int n=0;n<filter->olen;n++){
       float const t = cnrmf(filter->output.c[n]);
-      demod->bb_power += t;
+      demod->sig.bb_power += t;
       avg_amp += sqrtf(t);        // magnitude
     }
     // Scale to each component so baseband power display is correct
-    demod->bb_power /= 2 * filter->olen;
+    demod->sig.bb_power /= 2 * filter->olen;
     avg_amp /= M_SQRT2 * filter->olen;         // Average magnitude
-    float const fm_variance = demod->bb_power - avg_amp*avg_amp;
-    demod->snr = avg_amp*avg_amp/(2*fm_variance) - 1;
-    demod->snr = max(0.0f,demod->snr); // Smoothed values can be a little inconsistent
+    float const fm_variance = demod->sig.bb_power - avg_amp*avg_amp;
+    demod->sig.snr = avg_amp*avg_amp/(2*fm_variance) - 1;
+    demod->sig.snr = max(0.0f,demod->sig.snr); // Smoothed values can be a little inconsistent
 
     // Demodulated FM samples
     float samples[audio_master->ilen];
     // Start timer when SNR falls below threshold
     int const thresh = 2;
-    if(demod->snr > thresh) { // +3dB? +6dB?
+    if(demod->sig.snr > thresh) { // +3dB? +6dB?
       snr_below_threshold = 0;
     } else {
       if(++snr_below_threshold > 1000)
@@ -145,12 +145,12 @@ void *demod_fm(void *arg){
       avg_f /= filter->olen;  // Average FM output is freq offset
       if(snr_below_threshold < 1){
 	// Squelch open; update frequency offset and peak deviation
-	demod->foffset = dsamprate  * avg_f * M_1_2PI;
+	demod->sig.foffset = dsamprate  * avg_f * M_1_2PI;
 
 	// Remove frequency offset from deviation peaks and scale
 	pdev_pos -= avg_f;
 	pdev_neg -= avg_f;
-	demod->pdeviation = dsamprate * max(pdev_pos,-pdev_neg) * M_1_2PI;
+	demod->sig.pdeviation = dsamprate * max(pdev_pos,-pdev_neg) * M_1_2PI;
       }
     } else {
       state = 0;
@@ -271,9 +271,9 @@ void *pltask(void *arg){
       if(peakbin > 0 && peakenergy > 0.01 * totenergy){
 	float const f = (float)peakbin * PL_samprate / pl_fft_size;
 	if(f > 67 && f < 255)
-	  demod->plfreq = f;
+	  demod->sig.plfreq = f;
       } else
-	demod->plfreq = NAN;
+	demod->sig.plfreq = NAN;
     }
   }
   // Clean up

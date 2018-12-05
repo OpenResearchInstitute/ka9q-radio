@@ -50,12 +50,12 @@ void *proc_samples(void *arg){
 
   while(1){
     // Pull next I/Q data packet off queue
-    pthread_mutex_lock(&demod->qmutex);
-    while(demod->queue == NULL)
-      pthread_cond_wait(&demod->qcond,&demod->qmutex);
-    pkt = demod->queue;
-    demod->queue = pkt->next;
-    pthread_mutex_unlock(&demod->qmutex);
+    pthread_mutex_lock(&demod->input.qmutex);
+    while(demod->input.queue == NULL)
+      pthread_cond_wait(&demod->input.qcond,&demod->input.qmutex);
+    pkt = demod->input.queue;
+    demod->input.queue = pkt->next;
+    pthread_mutex_unlock(&demod->input.qmutex);
 
     int sampcount;
 
@@ -119,7 +119,7 @@ void *proc_samples(void *arg){
 	break;
       }
       // Scale down according to analog gain from SDR front end
-      complex float samp = CMPLXF(samp_i,samp_q) * demod->gain_factor;
+      complex float samp = CMPLXF(samp_i,samp_q) * demod->sdr.gain_factor;
       block_energy += cnrmf(samp);
 
 #if 0
@@ -141,7 +141,7 @@ void *proc_samples(void *arg){
 	// Filter buffer is full, execute it
 	execute_filter_input(demod->filter.in);
 	block_energy *= 0.5; // Scale for two components per complex sample
-	demod->if_power = block_energy / in_cnt; // Raw A/D level, without analog gain adjustment
+	demod->sig.if_power = block_energy / in_cnt; // Raw A/D level, without analog gain adjustment
 	in_cnt = 0;
       } // Every FFT block
     } // for each sample in I/Q packet
@@ -154,7 +154,7 @@ double const get_first_LO(const struct demod * const demod){
   if(demod == NULL)
     return NAN;
 	 
-  return demod->status.frequency;
+  return demod->sdr.status.frequency;
 }
 
 
@@ -173,7 +173,7 @@ double get_freq(struct demod * const demod){
   if(demod == NULL)
     return NAN;
 
-  return demod->freq;
+  return demod->tune.freq;
 }
 
 // Set a Doppler offset and sweep rate
@@ -209,7 +209,7 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
   assert(!isnan(f));
   assert(f != 0);
 
-  demod->freq = f;
+  demod->tune.freq = f;
 
   // No alias checking on explicitly provided lo2
   if(isnan(new_lo2) || !LO2_in_range(demod,new_lo2,0)){
@@ -218,7 +218,7 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
     // If the required new LO2 is out of range, retune LO1
     if(!LO2_in_range(demod,new_lo2,1)){
       // Pick new LO2 to minimize change in LO1 in case another receiver is using it
-      new_lo2 = demod->status.samprate/4.;
+      new_lo2 = demod->sdr.status.samprate/4.;
       // Experimentally disable this to keep IF from jumping around when using mspectrum
 #if 0
       double LO1 = get_first_LO(demod);
@@ -253,7 +253,7 @@ double set_first_LO(struct demod * const demod,double first_LO){
   double current_lo1 = get_first_LO(demod);
 
   // Just return actual frequency without changing anything
-  if(first_LO == current_lo1 || first_LO <= 0 || demod->tuner_lock || demod->input.source_address.ss_family != AF_INET)
+  if(first_LO == current_lo1 || first_LO <= 0 || demod->tune.lock || demod->input.source_address.ss_family != AF_INET)
     return first_LO;
 
   unsigned char packet[8192],*bp;
@@ -263,7 +263,7 @@ double set_first_LO(struct demod * const demod,double first_LO){
   encode_double(&bp,RADIO_FREQUENCY,first_LO);
   encode_eol(&bp);
   int len = bp - packet;
-  send(demod->input.nctltx_fd,packet,len,0);
+  send(demod->input.ctl_fd,packet,len,0);
   return first_LO;
 }  
 // If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
@@ -276,8 +276,8 @@ int LO2_in_range(struct demod * const demod,double const f,int const avoid_alias
     return -1;
 
   if(avoid_alias)
-    return f >= demod->min_IF + max(0.0f,demod->filter.high)
-	    && f <= demod->max_IF + min(0.0f,demod->filter.low);
+    return f >= demod->sdr.min_IF + max(0.0f,demod->filter.high)
+	    && f <= demod->sdr.max_IF + min(0.0f,demod->filter.low);
   else {
     return fabs(f) <=  0.5 * demod->input.samprate; // within Nyquist limit?
   }
@@ -309,6 +309,12 @@ double set_shift(struct demod * const demod,double const shift){
     set_osc(&demod->shift,shift * demod->filter.decimate / (double)demod->input.samprate, 0.0);
   return shift;
 }
+
+double get_shift(struct demod * const demod){
+  assert(demod != NULL);
+  return demod->shift.freq * (double)demod->input.samprate / demod->filter.decimate;
+}
+
 
 // Set major operating mode
 // This kills the current demodulator thread, sets up the predetection filter
@@ -346,23 +352,19 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
       demod->filter.high = mp->high;
     }
   }
+  if(defaults || isnan(demod->tune.shift))
+    demod->tune.shift = mp->shift;
 
-  demod->flat = mp->flat;
+  demod->opt.flat = mp->flat;
   demod->filter.isb = mp->isb;
   demod->output.channels = mp->channels;
-  demod->pll = mp->pll;
-  demod->square = mp->square;
+  demod->opt.pll = mp->pll;
+  demod->opt.square = mp->square;
   demod->agc.attack_rate = mp->attack_rate;
   demod->agc.recovery_rate = mp->recovery_rate;
   demod->agc.hangtime = mp->hangtime;
   
-  if(defaults || isnan(demod->shift.freq)){
-    if(demod->shift.freq != mp->shift){
-      // Adjust tuning for change in frequency shift
-      set_freq(demod,get_freq(demod) + mp->shift - demod->shift.freq,NAN);
-    }
-    set_shift(demod,mp->shift);
-  }
+  set_shift(demod,demod->tune.shift);
 
   // Might now be out of range because of change in filter passband
   set_freq(demod,get_freq(demod),NAN);
@@ -371,83 +373,6 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   return 0;
 }      
 
-
-#if 1
-void update_status(struct demod *demod,struct status *new_status){}
-#else
-
-// Called from RTP receiver to process incoming metadata from SDR front end
-void update_status(struct demod *demod,struct status *new_status){
-  assert(demod != NULL);
-  // Protect status with a mutex and signal a condition when it changes
-  // since demod threads will be waiting for this
-  int sig = 0;
-  demod->status.timestamp = new_status->timestamp; // This should always change
-  if(new_status->samprate != demod->status.samprate){
-    // A/D sample rate is now known or has changed
-    // This needs to be set before the demod thread starts!
-    // Signalled every time the status is updated
-    // status.samprate contains *nominal* A/D sample rate
-    // Use nominal rates here so result is clean integer
-    pthread_mutex_lock(&demod->status_mutex);
-    demod->status.samprate = new_status->samprate;
-    if(demod->status.samprate >= demod->output.samprate){
-      // Sample rate is higher than audio rate; decimate
-      demod->filter.interpolate = 1;
-      demod->filter.decimate = demod->status.samprate / demod->output.samprate;
-      demod->input.samprate = demod->status.samprate;
-      demod->max_IF = IF_EXCLUDE * demod->status.samprate/2;
-      demod->min_IF = -demod->max_IF;
-    } else {
-      // Sample rate is lower than audio rate
-      // Interpolate up to audio rate, pretend sample rate is audio rate
-      demod->filter.decimate = 1; 
-      demod->filter.interpolate = demod->output.samprate / demod->status.samprate;	  
-      demod->input.samprate = demod->output.samprate;
-      demod->max_IF = IF_EXCLUDE * demod->output.samprate/2;
-      demod->min_IF = -demod->max_IF;
-    }
-    // re-call these two to recalculate their phasor steps
-    pthread_mutex_unlock(&demod->status_mutex);
-    set_second_LO(demod,get_second_LO(demod));
-    set_shift(demod,demod->shift.freq);
-    sig++;
-  }
-  // Gain settings changed? Store and signal but take no other action for now
-  if(new_status->lna_gain != demod->status.lna_gain){
-    demod->status.lna_gain = new_status->lna_gain;
-    sig++;
-  }
-  if(new_status->mixer_gain != demod->status.mixer_gain){
-    demod->status.mixer_gain = new_status->mixer_gain;
-    sig++;
-  }
-  if(new_status->if_gain != demod->status.if_gain){
-    demod->status.if_gain = new_status->if_gain;
-    sig++;
-  }
-  if(new_status->frequency != demod->status.frequency){
-    pthread_mutex_lock(&demod->status_mutex);
-	// Tuner is now set or has been changed
-	// Adjust 2nd LO to compensate
-	// NB! This may take the 2nd LO out of its range. This is deliberate so we don't get
-	// into fights over the SDR tuner. If the tuner comes back, we'll recover
-    demod->status.frequency = new_status->frequency;
-    pthread_mutex_unlock(&demod->status_mutex);
-    double new_LO2 = -(demod->freq - get_first_LO(demod));
-    set_second_LO(demod,new_LO2);
-    sig++;
-  }
-  if(sig){
-    // Voltage gain to normalize signal power for analog gain settings
-    demod->gain_factor = powf(10.,-0.05*(demod->status.lna_gain + demod->status.if_gain + demod->status.mixer_gain));
-    // Something changed, store the new status and let everybody know
-    pthread_mutex_lock(&demod->status_mutex);
-    pthread_cond_broadcast(&demod->status_cond);
-    pthread_mutex_unlock(&demod->status_mutex);
-  }
-}
-#endif
 
 
 // Compute noise spectral density - experimental, my algorithm
