@@ -1,4 +1,4 @@
-// $Id$
+// $Id: osc.c,v 1.1 2018/12/02 09:16:45 karn Exp karn $
 // Complex oscillator object routines
 
 #define _GNU_SOURCE 1
@@ -27,9 +27,9 @@ void set_osc(struct osc *osc,double f,double r){
   }
   osc->freq = f;
   osc->rate = r;
-  osc->phasor_step = csincos(2 * M_PI * osc->freq);
+  osc->phasor_step = csincospi(2 * osc->freq);
   if(osc->rate != 0)
-    osc->phasor_step_step = csincos(2 * M_PI * osc->rate);
+    osc->phasor_step_step = csincospi(2 * osc->rate);
   else
     osc->phasor_step_step = 1;
   pthread_mutex_unlock(&osc->mutex);

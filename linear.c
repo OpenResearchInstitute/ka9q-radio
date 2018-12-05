@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.29 2018/12/02 09:41:57 karn Exp karn $
+// $Id: linear.c,v 1.30 2018/12/05 07:08:01 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -56,7 +56,6 @@ void *demod_linear(void *arg){
   int   const highlimit = round((demod->opt.square ? 2 : 1) * searchhigh / binsize);
 
   // Second-order PLL loop filter (see Gardner)
-  float const phase_scale = 2*M_PI*samptime;               // radians/sample
   float const vcogain = 2*M_PI;                            // 1 Hz = 2pi radians/sec per "volt"
   float const pdgain = 1;                                  // phase detector gain "volts" per radian (unity from atan2)
   float const natfreq = demod->opt.loop_bw * 2*M_PI;       // loop natural frequency in rad/sec
@@ -233,12 +232,6 @@ void *demod_linear(void *arg){
       float const feedback = integrator_gain * integrator + prop_gain * carrier_phase; // units of Hz
       assert(!isnan(feedback));
       set_osc(&fine,-feedback * samptime, 0.0);
-#if 0
-      if(fabsf(feedback * phase_scale) < .01)
-	fine.phasor_step = CMPLX(1,-phase_scale * feedback);  // Small angle approximation
-      else
-	fine.phasor_step = csincos(-phase_scale * feedback); 
-#endif
       
       // Acquisition frequency sweep
       if((feedback >= binsize) && (ramp > 0))

@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.29 2018/07/06 06:11:25 karn Exp karn $
+// $Id: filter.c,v 1.30 2018/11/27 07:31:24 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -554,7 +554,7 @@ struct notchfilter *notch_create(double const f,float const bw){
     return NULL;
 
   nf->osc_phase = 1;
-  nf->osc_step = csincos(2*M_PI*f);
+  nf->osc_step = csincospi(2*f);
   nf->dcstate = 0;
   nf->bw = bw;
   return nf;
