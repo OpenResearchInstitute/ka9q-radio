@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.104 2018/12/03 05:21:05 karn Exp karn $
+// $Id: radio.c,v 1.106 2018/12/05 07:08:16 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -140,8 +140,8 @@ void *proc_samples(void *arg){
       if(in_cnt == demod->filter.in->ilen){
 	// Filter buffer is full, execute it
 	execute_filter_input(demod->filter.in);
-	block_energy *= 0.5; // Scale for two components per complex sample
-	demod->sig.if_power = block_energy / in_cnt; // Raw A/D level, without analog gain adjustment
+	demod->sig.if_power = block_energy / in_cnt;
+	block_energy = 0;
 	in_cnt = 0;
       } // Every FFT block
     } // for each sample in I/Q packet
@@ -261,6 +261,9 @@ double set_first_LO(struct demod * const demod,double first_LO){
   bp = packet;
   *bp++ = 1; // Command
   encode_double(&bp,RADIO_FREQUENCY,first_LO);
+  demod->sdr.command_tag = random();
+  encode_int32(&bp,COMMAND_TAG,demod-<sdr.command_tag);
+
   encode_eol(&bp);
   int len = bp - packet;
   send(demod->input.ctl_fd,packet,len,0);
@@ -421,5 +424,5 @@ float const compute_n0(struct demod const * const demod){
     avg_n = new_avg_n;
   }
   // return noise power per Hz, normalized to 0dBFS
-  return avg_n / (2.0*N*demod->input.samprate);
+  return avg_n / (N*demod->input.samprate);
 }
