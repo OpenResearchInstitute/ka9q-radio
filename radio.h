@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.80 2018/12/04 04:33:18 karn Exp karn $
+// $Id: radio.h,v 1.81 2018/12/05 07:08:16 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -93,6 +93,8 @@ struct demod {
     float max_IF;
     
     float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
+    uint32_t command_tag;
+
     // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
     pthread_mutex_t status_mutex;
     pthread_cond_t status_cond;     // Signalled whenever status changes

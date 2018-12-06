@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.59 2018/12/02 09:41:57 karn Exp karn $
+// $Id: fm.c,v 1.60 2018/12/05 07:08:01 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -96,9 +96,9 @@ void *demod_fm(void *arg){
       avg_amp += sqrtf(t);        // magnitude
     }
     // Scale to each component so baseband power display is correct
-    demod->sig.bb_power /= 2 * filter->olen;
+    demod->sig.bb_power /= filter->olen;
     avg_amp /= M_SQRT2 * filter->olen;         // Average magnitude
-    float const fm_variance = demod->sig.bb_power - avg_amp*avg_amp;
+    float const fm_variance = demod->sig.bb_power - 2 * avg_amp*avg_amp;
     demod->sig.snr = avg_amp*avg_amp/(2*fm_variance) - 1;
     demod->sig.snr = max(0.0f,demod->sig.snr); // Smoothed values can be a little inconsistent
 

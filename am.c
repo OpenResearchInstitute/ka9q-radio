@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.38 2018/12/02 09:41:57 karn Exp karn $
+// $Id: am.c,v 1.39 2018/12/05 07:08:01 karn Exp karn $
 // AM envelope demodulator thread for 'radio'
 // Copyright Oct 9 2017, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -75,7 +75,7 @@ void *demod_am(void *arg){
     }
     send_mono_output(demod,samples,filter->olen);
     // Scale to each sample so baseband power will display correctly
-    demod->sig.bb_power = (signal + noise) / (2*filter->olen);
+    demod->sig.bb_power = (signal + noise) / filter->olen;
   } // terminate
   delete_filter_output(filter);
   demod->filter.out = NULL;

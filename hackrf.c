@@ -180,7 +180,7 @@ int rx_callback(hackrf_transfer *transfer){
   // Update every block
   // estimates of DC offset, signal powers and phase error
   HackCD.DC += DC_alpha * (samp_sum - samples*HackCD.DC);
-  float block_energy = 0.5 * (i_energy + q_energy); // Normalize for complex pairs
+  float block_energy = i_energy + q_energy; // Normalize for complex pairs
   if(block_energy > 0){ // Avoid divisions by 0, etc
     //HackCD.in_power += rate_factor * (block_energy - samples*HackCD.in_power); // Average A/D output power per channel  
     HackCD.in_power = block_energy/samples; // Average A/D output power per channel  
@@ -327,7 +327,7 @@ void *process(void *arg){
       *up++ = (short)round(32767 * s);
     }
 
-    HackCD.out_power = 0.5 * output_energy / Blocksize;
+    HackCD.out_power = output_energy / Blocksize;
     dp = (unsigned char *)up;
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
       errmsg("send: %s",strerror(errno));
@@ -972,6 +972,10 @@ void *status(void *arg){
     encode_byte(&bp,LNA_GAIN,sdr->status.lna_gain);
     encode_byte(&bp,MIXER_GAIN,sdr->status.mixer_gain);
     encode_byte(&bp,IF_GAIN,sdr->status.if_gain);
+    encode_float(&bp,DC_I_OFFSET,crealf(sdr->DC));
+    encode_float(&bp,DC_Q_OFFSET,cimagf(sdr->DC));
+    encode_float(&bp,IQ_PHASE,sdr->sinphi);
+    encode_float(&bp,IQ_IMBALANCE,sdr->imbalance);
 
 
     // Filtering

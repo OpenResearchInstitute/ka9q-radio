@@ -69,6 +69,7 @@ enum status_type {
   PLL_PHASE,      // Linear PLL
 
   OUTPUT_CHANNELS, // 1 or 2 in Linear, otherwise 1
+  COMMAND_TAG,    // Echoes tag from requester
 };
 
 // Previous transmitted state, used to detect changes
