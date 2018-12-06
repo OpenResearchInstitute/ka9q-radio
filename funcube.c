@@ -558,8 +558,8 @@ void decode_commands(struct sdrstate *sdr, unsigned char *buffer,int length){
     default: // Ignore all others
       break;
     }
+    cp += optlen;
   }
-  
 }
 
 // Thread to transmit our state
