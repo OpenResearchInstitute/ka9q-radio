@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.34 2018/11/14 23:13:14 karn Exp karn $
+// $Id: multicast.c,v 1.35 2018/12/02 09:16:45 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -349,9 +349,8 @@ void update_sockcache(struct sockcache *sc,struct sockaddr *sa){
   case AF_INET6:
     len = sizeof(struct sockaddr_in6);
     break;
-  default: // shouldn't happen
+  default: // shouldn't happen unless uninitialized
     len = 0;
-    assert(0);
     break;
   }
   if(memcmp(&sc->old_sockaddr,sa,len)){

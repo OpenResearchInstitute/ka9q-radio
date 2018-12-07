@@ -110,6 +110,33 @@ void *send_status(void *arg){
     }
     encode_int32(&bp,INPUT_SSRC,demod->input.rtp.ssrc);
     encode_int32(&bp,INPUT_SAMPRATE,demod->sdr.status.samprate);
+    {
+      struct sockaddr_in *sin;
+      struct sockaddr_in6 *sin6;
+      *bp++ = OUTPUT_SOURCE_SOCKET;
+      switch(demod->output.source_address.ss_family){
+      case AF_INET:
+	sin = (struct sockaddr_in *)&demod->output.source_address;
+	*bp++ = 6;
+	memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+	bp += 4;
+	memcpy(bp,&sin->sin_port,2);
+	bp += 2;
+	break;
+      case AF_INET6:
+	sin6 = (struct sockaddr_in6 *)&demod->output.source_address;
+	*bp++ = 10;
+	memcpy(bp,&sin6->sin6_addr,8);
+	bp += 8;
+	memcpy(bp,&sin6->sin6_port,2);
+	bp += 2;
+	break;
+      default:
+	break;
+      }
+    }
+
+
     // Where we're sending output
     {
       struct sockaddr_in *sin;
@@ -155,7 +182,11 @@ void *send_status(void *arg){
     encode_byte(&bp,LNA_GAIN,demod->sdr.status.lna_gain);
     encode_byte(&bp,MIXER_GAIN,demod->sdr.status.mixer_gain);
     encode_byte(&bp,IF_GAIN,demod->sdr.status.if_gain);
-
+    encode_float(&bp,DC_I_OFFSET,demod->sdr.DC_i);
+    encode_float(&bp,DC_Q_OFFSET,demod->sdr.DC_q);
+    encode_float(&bp,IQ_IMBALANCE,demod->sdr.imbalance);
+    encode_float(&bp,IQ_PHASE,demod->sdr.sinphi);
+    encode_double(&bp,CALIBRATE,demod->sdr.calibration);
 
     // Doppler info
     encode_double(&bp,DOPPLER_FREQUENCY,get_doppler(demod));
@@ -198,6 +229,7 @@ void *send_status(void *arg){
 	encode_float(&bp,DEMOD_SNR,demod->sig.snr);
 	encode_byte(&bp,PLL_LOCK,demod->sig.pll_lock);
 	encode_byte(&bp,PLL_SQUARE,demod->opt.square);
+	encode_byte(&bp,PLL_ENABLE,demod->opt.pll);
       }
       break;
     }

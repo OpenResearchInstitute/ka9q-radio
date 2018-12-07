@@ -70,7 +70,10 @@ enum status_type {
 
   OUTPUT_CHANNELS, // 1 or 2 in Linear, otherwise 1
   COMMAND_TAG,    // Echoes tag from requester
+  OUTPUT_SOURCE_SOCKET,
+  PLL_ENABLE,
 };
+
 
 // Previous transmitted state, used to detect changes
 struct state {

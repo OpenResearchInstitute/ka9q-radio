@@ -1,9 +1,9 @@
-// $Id: funcube.c,v 1.60 2018/12/05 07:08:01 karn Exp karn $
+// $Id: funcube.c,v 1.62 2018/12/06 10:07:13 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
 // rewritten to use portaudio July 2018
-#define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
+#define _GNU_SOURCE 1
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
@@ -30,7 +30,7 @@
 
 #include "fcd.h"
 #include "sdr.h"
-#include "radio.h"
+//#include "radio.h"
 #include "misc.h"
 #include "status.h"
 #include "multicast.h"
@@ -38,12 +38,10 @@
 struct sdrstate {
   // Stuff for sending commands
   void *phd;               // Opaque pointer to type hid_device
-
   struct status status;    // Frequency and gain settings, grouped for transmission in RTP packet
-
   unsigned int intfreq;    // Nominal (uncorrected) tuner frequency
-
   float in_power;          // Running estimate of signal power
+
   // Smoothed error estimates
   complex float DC;      // DC offset
   float sinphi;          // I/Q phase error
@@ -78,6 +76,7 @@ int Device = 0;
 char *Locale;
 int Daemonize;
 int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by default
+char *Dest;
 
 // Global variables
 struct rtp_state Rtp;
@@ -88,29 +87,26 @@ struct sockaddr_storage Output_dest_address; // Multicast output socket
 
 struct sdrstate FCD;
 pthread_t Display_thread;
-pthread_t AGC_thread;
-pthread_t Status_thread;
 pthread_t Ncmd_thread;
 FILE *Status;
 char *Status_filename;
 char *Pid_filename;
-char *Dest;
+
 uint64_t Commands;
 struct state State[256];
 
 
-void decode_commands(struct sdrstate *, unsigned char *,int);
-void send_status(struct sdrstate *,int);
+void decode_fcd_commands(struct sdrstate *, unsigned char *,int);
+void send_fcd_status(struct sdrstate *,int);
+void do_fcd_agc(struct sdrstate *);
 void readback(struct sdrstate *);
-void errmsg(const char *fmt,...);
 int process_fc_command(char *,int);
 double fcd_actual(unsigned int);
 int front_end_init(struct sdrstate *,int,int,int);
 int get_adc(short *,int);
 void *display(void *);
-void doagc(struct sdrstate *);
 void *ncmd(void *);
-
+void errmsg(const char *fmt,...);
 
 int main(int argc,char *argv[]){
   struct sdrstate * const sdr = &FCD;
@@ -186,7 +182,6 @@ int main(int argc,char *argv[]){
   }
 
   if(Daemonize){
-
     openlog("funcube",LOG_PID,LOG_DAEMON);
     // see if one is already running
     int r = asprintf(&Pid_filename,"%s%d/pid",Rundir,Device);
@@ -262,7 +257,7 @@ int main(int argc,char *argv[]){
     }
   }
   // Set up RTP output socket
-  sleep(2);
+  sleep(1);
   Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Output_dest_address,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s\n",strerror(errno));
@@ -387,8 +382,7 @@ int main(int argc,char *argv[]){
       gain_q = sqrtf(0.5 * (1 + sdr->imbalance));
       gain_i = sqrtf(0.5 * (1 + 1./sdr->imbalance));
       secphi = 1/sqrtf(1 - sdr->sinphi * sdr->sinphi); // sec(phi) = 1/cos(phi)
-      // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
-      tanphi = sdr->sinphi * secphi;
+      tanphi = sdr->sinphi * secphi;      // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
     }
   }
   // Can't really get here
@@ -396,7 +390,63 @@ int main(int argc,char *argv[]){
   exit(0);
 }
 
+// Thread to send metadata and process commands
+void *ncmd(void *arg){
+  pthread_setname("funcube-cmd");
+  assert(arg != NULL);
+  struct sdrstate * const sdr = arg;
+  
+  memset(State,0,sizeof(State));
 
+  // Set up status socket on port 5006
+  Status_sock = setup_mcast(Dest,NULL,1,Mcast_ttl,2); // For output
+  if(Status_sock <= 0)
+    return NULL;
+
+  // Set up new control socket on port 5006
+  Nctl_sock = setup_mcast(Dest,NULL,0,Mcast_ttl,2); // For input
+  if(Nctl_sock <= 0){
+    close(Status_sock);
+    return NULL; // Nothing to do
+  }
+  struct timeval tv;
+  tv.tv_sec = 0;
+  tv.tv_usec = 100000; // 100 ms
+
+  if(setsockopt(Nctl_sock,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))){
+    perror("ncmd setsockopt");
+    return NULL;
+  }
+  int counter = 0;
+  while(1){
+    unsigned char buffer[8192];
+    memset(buffer,0,sizeof(buffer));
+    int length = recv(Nctl_sock,buffer,sizeof(buffer),0); // Waits up to 100 ms for command
+    if(sdr->phd == NULL && (sdr->phd = fcdOpen(sdr->sdr_name,sizeof(sdr->sdr_name),Device)) == NULL){
+      errmsg("can't re-open control port: %s\n",strerror(errno));
+      return NULL;
+    }
+    if(length > 0){
+      // Parse entries
+      unsigned char *cp = buffer;
+
+      int cr = *cp++; // Command/response
+      if(cr == 0)
+	continue; // Ignore our own status messages
+      Commands++;
+      decode_fcd_commands(sdr,cp,length-1);
+    }
+    readback(sdr);
+    send_fcd_status(sdr,(counter++ % 10) == 0);
+    sdr->command_tag = 0; // Send only once
+    if(!No_hold_open){
+      do_fcd_agc(sdr);
+    } else if(sdr->phd != NULL){
+      fcdClose(sdr->phd);
+      sdr->phd = NULL;
+    }
+  }
+}
 
 // Status display thread
 void *display(void *arg){
@@ -448,64 +498,7 @@ void *display(void *arg){
 }
 
 
-void *ncmd(void *arg){
-  pthread_setname("new-cmd");
-  assert(arg != NULL);
-  struct sdrstate * const sdr = arg;
-  
-  memset(State,0,sizeof(State));
-
-  // Set up status socket on port 5006
-  Status_sock = setup_mcast(Dest,NULL,1,Mcast_ttl,2);
-  if(Status_sock <= 0)
-    return NULL;
-
-  // Set up new control socket on port 5006
-  Nctl_sock = setup_mcast(Dest,NULL,0,Mcast_ttl,2); // For input
-  if(Nctl_sock <= 0){
-    close(Status_sock);
-    return NULL; // Nothing to do
-  }
-  struct timeval tv;
-  tv.tv_sec = 0;
-  tv.tv_usec = 100000; // 100 ms
-
-  if(setsockopt(Nctl_sock,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))){
-    perror("ncmd setsockopt");
-    return NULL;
-  }
-  for(int counter = 0; ;){
-    unsigned char buffer[8192];
-    memset(buffer,0,sizeof(buffer));
-    int length = recv(Nctl_sock,buffer,sizeof(buffer),0); // Waits up to 100 ms for command
-    if(sdr->phd == NULL && (sdr->phd = fcdOpen(sdr->sdr_name,sizeof(sdr->sdr_name),Device)) == NULL){
-      errmsg("can't re-open control port: %s\n",strerror(errno));
-      return NULL;
-    }
-    if(length > 0){
-      // Parse entries
-      unsigned char *cp = buffer;
-
-      int cr = *cp++; // Command/response
-      if(cr == 0)
-	continue; // Ignore our own status messages
-      Commands++;
-      decode_commands(sdr,cp,length-1);
-    }
-    readback(sdr);
-    if(!No_hold_open)
-      doagc(sdr);
-  
-    if(No_hold_open && sdr->phd != NULL){
-      fcdClose(sdr->phd);
-      sdr->phd = NULL;
-    }
-    send_status(sdr,(counter++ % 10) == 0);
-    sdr->command_tag = 0; // Send only once
-  }
-}
-
-void decode_commands(struct sdrstate *sdr, unsigned char *buffer,int length){
+void decode_fcd_commands(struct sdrstate *sdr, unsigned char *buffer,int length){
   unsigned char *cp = buffer;
 
   while(cp - buffer < length){
@@ -562,10 +555,7 @@ void decode_commands(struct sdrstate *sdr, unsigned char *buffer,int length){
   }
 }
 
-// Thread to transmit our state
-void send_status(struct sdrstate *sdr,int full){
-
-  // emit status packets indefinitely
+void send_fcd_status(struct sdrstate *sdr,int full){
   unsigned char packet[2048],*bp;
   memset(packet,0,sizeof(packet));
   bp = packet;
@@ -632,13 +622,9 @@ void send_status(struct sdrstate *sdr,int full){
   // Signals - these ALWAYS change
   encode_float(&bp,BASEBAND_POWER,sdr->in_power);
   
-  // Demodulation mode
-  enum demod_type demod_type = LINEAR_DEMOD;
-  encode_byte(&bp,DEMOD_MODE,demod_type);
+  encode_byte(&bp,DEMOD_MODE,0); // Actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
-
   encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
-  
   encode_eol(&bp);
   
   int len = compact_packet(&State[0],packet,full);
@@ -731,7 +717,7 @@ int front_end_init(struct sdrstate *sdr,int device, int samprate,int L){
 }
 // Crude analog AGC just to keep signal roughly within A/D range
 // Executed only if -o option isn't specified; this allows manual control with, e.g., the fcdpp command
-void doagc(struct sdrstate *sdr){
+void do_fcd_agc(struct sdrstate *sdr){
 
   float powerdB = 10*log10f(sdr->in_power);
   
