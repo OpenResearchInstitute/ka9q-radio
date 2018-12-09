@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.17 2018/12/05 07:08:01 karn Exp karn $
+// $Id: control.c,v 1.18 2018/12/07 10:15:49 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -143,33 +143,6 @@ void display_cleanup(void){
 
 static int Frequency_lock;
 
-void sendflag(struct demod *demod,int cmd,int val){
-  unsigned char packet[8192],*bp;
-  memset(packet,0,sizeof(packet));
-  bp = packet;
-  *bp++ = 1; // Command
-  encode_byte(&bp,cmd,val);
-  demod->sdr.command_tag = random();
-  encode_int32(&bp,COMMAND_TAG,demod->sdr.command_tag);
-
-  encode_eol(&bp);
-  int len = bp - packet;
-  send(Nctl_sock,packet,len,0);
-}
-void senddouble(struct demod *demod,int cmd,double val){
-  unsigned char packet[8192],*bp;
-  memset(packet,0,sizeof(packet));
-  bp = packet;
-  *bp++ = 1; // Command
-  encode_double(&bp,cmd,val);
-  demod->sdr.command_tag = random();
-  encode_int32(&bp,COMMAND_TAG,demod->sdr.command_tag);
-
-  encode_eol(&bp);
-  int len = bp - packet;
-  send(Nctl_sock,packet,len,0);
-}
-
 
 // Adjust the selected item up or down one step
 void adjust_item(struct demod *demod,int direction){
@@ -183,10 +156,8 @@ void adjust_item(struct demod *demod,int direction){
   switch(demod->tune.item){
   case 0: // Carrier frequency
   case 1: // Center frequency - treat the same
-    if(!Frequency_lock){ // Ignore if locked
+    if(!Frequency_lock) // Ignore if locked
       demod->tune.freq += tunestep;
-      senddouble(demod,RADIO_FREQUENCY,demod->tune.freq);
-    }
     break;
   case 2: // First LO
     if(demod->tune.lock) // Tuner is locked, don't change it
@@ -196,25 +167,20 @@ void adjust_item(struct demod *demod,int direction){
     break;
   case 3: // IF
     demod->second_LO.freq -= tunestep;
-    senddouble(demod,SECOND_LO_FREQUENCY,demod->second_LO.freq);
     break;
   case 4: // Filter low edge
     demod->filter.low += tunestep;
-    senddouble(demod,LOW_EDGE,demod->filter.low);
     break;
   case 5: // Filter high edge
     demod->filter.high += tunestep;
-    senddouble(demod,HIGH_EDGE,demod->filter.high);
     break;
   case 6: // Post-detection audio frequency shift
     demod->tune.shift += tunestep;
-    senddouble(demod,SHIFT_FREQUENCY,demod->tune.shift);
     break;
   case 7: // Kaiser window beta parameter for filter
     demod->filter.kaiser_beta += tunestep;
     if(demod->filter.kaiser_beta < 0)
       demod->filter.kaiser_beta = 0;
-    senddouble(demod,KAISER_BETA,demod->filter.kaiser_beta);
     break;
   }
 }
@@ -245,13 +211,6 @@ struct demod Demod;
 
 float Noise_bandwidth;
 
-
-int Netsock;
-
-
-
-
-
 // Thread to display receiver state, updated at 10Hz by default
 // Uses the ancient ncurses text windowing library
 // Also services keyboard, mouse and tuning knob, if present
@@ -276,9 +235,7 @@ int main(int argc,char *argv[]){
 
   struct demod * const demod = &Demod;
   Status_sock = setup_mcast(argv[optind],NULL,0,Mcast_ttl,2);
-
   Nctl_sock = setup_mcast(argv[optind],NULL,1,Mcast_ttl,2);
-
 
   atexit(display_cleanup);
 
@@ -400,8 +357,6 @@ int main(int argc,char *argv[]){
     // Lines are variable length, so clear window before starting
     wclrtobot(info);  // Output 
     row = 1;
-    mvwprintw(info,row++,1,"Receiver profile: %s",demod->mode);
-
     if(demod->doppler_command)
       mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
 
@@ -456,7 +411,7 @@ int main(int argc,char *argv[]){
     mvwaddstr(filtering,row++,col,"Low");
     mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->filter.high);
     mvwaddstr(filtering,row++,col,"High");    
-    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->shift.freq);
+    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->tune.shift);
     mvwaddstr(filtering,row++,col,"Shift");
     mvwprintw(filtering,row,col,"%'17.3f",demod->filter.kaiser_beta);
     mvwaddstr(filtering,row++,col,"Beta");    
@@ -502,11 +457,10 @@ int main(int argc,char *argv[]){
 
     // Demodulator info
     wmove(demodulator,0,0);
-    wclrtobot(demodulator);    
+    wclrtobot(demodulator);
     row = 1;
     int rcol = 9;
     int lcol = 1;
-    // Display only if used by current mode
     // Display only if used by current mode
     switch(demod->demod_type){
     case AM_DEMOD:
@@ -573,48 +527,52 @@ int main(int argc,char *argv[]){
     // Demodulator options, can be set with mouse
     row = 1;
     col = 1;
-    if(demod->filter.isb)
-      wattron(options,A_UNDERLINE);
-    mvwprintw(options,row++,col,"ISB");
-    wattroff(options,A_UNDERLINE);
-
-    if(demod->opt.pll)
-      wattron(options,A_UNDERLINE);      
-    mvwprintw(options,row++,col,"PLL");
-    wattroff(options,A_UNDERLINE);
-
-    if(demod->opt.square)
-      wattron(options,A_UNDERLINE);            
-    mvwprintw(options,row++,col,"Square");
-    wattroff(options,A_UNDERLINE);
-
-    if(demod->output.channels == 1)
-      wattron(options,A_UNDERLINE);
-    mvwprintw(options,row++,col,"Mono");    
-    wattroff(options,A_UNDERLINE);
-
-    if(demod->output.channels == 2)
-      wattron(options,A_UNDERLINE);
-    mvwprintw(options,row++,col,"Stereo");    
-    wattroff(options,A_UNDERLINE);
+    wclrtobot(options);
+    if(demod->demod_type == 2){ // FM from status.h
+      if(demod->opt.flat)
+	wattron(options,A_UNDERLINE);
+      mvwprintw(options,row++,col,"FLAT");
+      wattroff(options,A_UNDERLINE);
+    } else if(demod->demod_type == LINEAR_DEMOD){
+      if(demod->filter.isb)
+	wattron(options,A_UNDERLINE);
+      mvwprintw(options,row++,col,"ISB");
+      wattroff(options,A_UNDERLINE);
+      
+      if(demod->opt.pll)
+	wattron(options,A_UNDERLINE);      
+      mvwprintw(options,row++,col,"PLL");
+      wattroff(options,A_UNDERLINE);
+      
+      if(demod->opt.square)
+	wattron(options,A_UNDERLINE);            
+      mvwprintw(options,row++,col,"Square");
+      wattroff(options,A_UNDERLINE);
+      
+      if(demod->output.channels == 1)
+	wattron(options,A_UNDERLINE);
+      mvwprintw(options,row++,col,"Mono");    
+      wattroff(options,A_UNDERLINE);
+      
+      if(demod->output.channels == 2)
+	wattron(options,A_UNDERLINE);
+      mvwprintw(options,row++,col,"Stereo");    
+      wattroff(options,A_UNDERLINE);
+    }
     
     box(options,0,0);
     mvwaddstr(options,0,2,"Options");
 
 
     // Display list of modes defined in /usr/local/share/ka9q-radio/modes.txt
-    // Underline the active one
+    // These are now really presets that select a demodulator and parameters,
+    // so they're no longer underlined
     // Can be selected with mouse
     row = 1; col = 1;
-    for(int i=0;i<Nmodes;i++){
-      if(strcasecmp(demod->mode,Modes[i].name) == 0)
-	wattron(modes,A_UNDERLINE);
+    for(int i=0;i<Nmodes;i++)
       mvwaddstr(modes,row++,col,Modes[i].name);
-      wattroff(modes,A_UNDERLINE);
-    }
     box(modes,0,0);
     mvwaddstr(modes,0,1,"Modes");
-
 
     row = 1;
     col = 1;
@@ -696,12 +654,15 @@ int main(int argc,char *argv[]){
     
     // Scan and process keyboard commands
     int c = getch(); // read keyboard with timeout; controls refresh rate
+    if(c == ERR)
+      continue;   // no key; timed out. Do nothing.
+
+    struct demod old_demod;
+    memcpy(&old_demod,demod,sizeof(old_demod));
 
     switch(c){
     case KEY_MOUSE: // Mouse event
       getmouse(&mouse_event);
-      break;
-    case ERR:   // no key; timed out. Do nothing.
       break;
     case 'q':   // Exit entire radio program. Should this be removed? ^C also works.
       goto done;
@@ -709,6 +670,7 @@ int main(int argc,char *argv[]){
     case '?':
       popup("help.txt");
       break;
+#if 0 // DO this later
     case 'I': // Change multicast address for input I/Q stream
       {
 	char str[160];
@@ -733,6 +695,7 @@ int main(int argc,char *argv[]){
 	memset(&demod->input.rtp,0,sizeof(demod->input.rtp));
       }
       break;
+#endif
     case 'l': // Toggle RF or first LO lock; affects how adjustments to LO and IF behave
       toggle_lock(demod);
       break;
@@ -772,6 +735,7 @@ int main(int argc,char *argv[]){
     case '\f':  // Screen repaint (formfeed, aka control-L)
       clearok(curscr,TRUE);
       break;
+#if 0 // Do later
     case 'b':   // Blocksize - sets both data and impulse response-1
                 // They should be separably set. Do this in the state file for now
       {
@@ -785,6 +749,7 @@ int main(int argc,char *argv[]){
 	demod->filter.M = demod->filter.L + 1;
       }
       break;
+#endif
     case 'm': // Manually set modulation mode
       {
 	char str[1024];
@@ -797,7 +762,8 @@ int main(int argc,char *argv[]){
 	getentry(str,str,sizeof(str));
 	if(strlen(str) <= 0)
 	  break;
-	strncpy(demod->mode,str,sizeof(demod->mode));
+	if(preset_mode(demod,str))
+	  engage_mode(demod);
       }
       break;
     case 'f':   // Tune to new radio frequency
@@ -853,9 +819,7 @@ int main(int argc,char *argv[]){
 	  beep();
 	  break; // beyond limits
 	}
-	if(b != demod->filter.kaiser_beta){
-	  demod->filter.kaiser_beta = b;
-	}
+	demod->filter.kaiser_beta = b;
       }
       break;
     case 'o': // Set/clear option flags, most apply only to linear detector
@@ -939,31 +903,95 @@ int main(int argc,char *argv[]){
       } else if(wmouse_trafo(modes,&my,&mx,false)){
 	// In the modes window?
 	my--;
-	if(my >= 0 && my < Nmodes){
-	  strncpy(demod->mode,Modes[my].name,sizeof(demod->mode));
-	}
+	if(my >= 0 && my < Nmodes)
+	  if(preset_mode(demod,Modes[my].name))
+	    engage_mode(demod);
+
       } else if(wmouse_trafo(options,&my,&mx,false)){
 	// In the options window
-	switch(my){
-	case 1:
-	  demod->filter.isb = !demod->filter.isb;
-	  break;
-	case 2:
-	  demod->opt.pll = !demod->opt.pll;
-	  break;
-	case 3:
-	  demod->opt.square = !demod->opt.square;
-	  if(demod->opt.square)
-	    demod->opt.pll = 1;
-	  break;
-	case 4:
-	  demod->output.channels = 1;
-	  break;
-	case 5:
-	  demod->output.channels = 2;
-	  break;
+	if(demod->demod_type == FM_DEMOD){
+	  switch(my){
+	  case 1:
+	    demod->opt.flat = !demod->opt.flat;
+	    break;
+	  }
+	} else if(demod->demod_type == LINEAR_DEMOD){
+	  switch(my){
+	  case 1:
+	    demod->filter.isb = !demod->filter.isb;
+	    break;
+	  case 2:
+	    demod->opt.pll = !demod->opt.pll;
+	    break;
+	  case 3:
+	    demod->opt.square = !demod->opt.square;
+	    if(demod->opt.square)
+	      demod->opt.pll = 1;
+	    break;
+	  case 4:
+	    demod->output.channels = 1;
+	    break;
+	  case 5:
+	    demod->output.channels = 2;
+	    break;
+	  }
 	}
       }
+    }
+    // OK, what changed?
+    {
+      unsigned char cmd_packet[8192],*bp;
+      memset(cmd_packet,0,sizeof(cmd_packet));
+      bp = cmd_packet;
+      *bp++ = 1; // Command
+
+      if(demod->demod_type != old_demod.demod_type)
+	encode_int(&bp,DEMOD_TYPE,demod->demod_type);
+
+      if(demod->tune.freq != old_demod.tune.freq)
+	encode_double(&bp,RADIO_FREQUENCY,demod->tune.freq);
+
+      if(demod->second_LO.freq != old_demod.second_LO.freq)
+	encode_double(&bp,SECOND_LO_FREQUENCY,demod->second_LO.freq);
+
+      if(demod->filter.high != old_demod.filter.high)
+	encode_float(&bp,HIGH_EDGE,demod->filter.high);
+
+      if(demod->filter.low != old_demod.filter.low)
+	encode_float(&bp,LOW_EDGE,demod->filter.low);
+
+      if(demod->tune.shift != old_demod.tune.shift)
+	encode_float(&bp,SHIFT_FREQUENCY,demod->tune.shift);
+
+      if(demod->filter.kaiser_beta != old_demod.filter.kaiser_beta)
+	encode_float(&bp,KAISER_BETA,demod->filter.kaiser_beta);
+
+      if(demod->tune.freq != old_demod.tune.freq)
+	encode_double(&bp,RADIO_FREQUENCY,demod->tune.freq);
+      
+      if(demod->filter.kaiser_beta != old_demod.filter.kaiser_beta)
+	encode_int(&bp,KAISER_BETA,demod->filter.kaiser_beta);
+
+      if(demod->output.channels != old_demod.output.channels)
+	encode_int(&bp,OUTPUT_CHANNELS,demod->output.channels);
+
+      if(demod->filter.isb != old_demod.filter.isb)
+	encode_int(&bp,INDEPENDENT_SIDEBAND,demod->filter.isb);
+
+      if(demod->opt.pll != old_demod.opt.pll)
+	encode_int(&bp,PLL_ENABLE,demod->opt.pll);
+
+      if(demod->opt.square != old_demod.opt.square)
+	encode_int(&bp,PLL_SQUARE,demod->opt.square);	
+
+      if(demod->opt.flat != old_demod.opt.flat)
+	encode_int(&bp,FM_FLAT,demod->opt.flat);
+
+      demod->command_tag = random();
+      encode_int(&bp,COMMAND_TAG,demod->command_tag);
+
+      encode_eol(&bp);
+      send(Nctl_sock, cmd_packet, bp - cmd_packet, 0);
     }
   }
  done:;
@@ -1212,11 +1240,7 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case NOISE_DENSITY:
       demod->sig.n0 = decode_float(cp,optlen);
       break;
-    case RADIO_MODE:
-      strncpy(demod->mode,(char *)cp,sizeof(demod->mode));
-      demod->mode[optlen] = '\0';
-      break;
-    case DEMOD_MODE:
+    case DEMOD_TYPE:
       demod->demod_type = decode_int(cp,optlen); // ????
       break;
     case INDEPENDENT_SIDEBAND:
@@ -1261,4 +1285,43 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     cp += optlen;
   }
  done:;
+}
+// Set major operating mode
+// Adapted from the version in radio,c, but simpler
+int preset_mode(struct demod * const demod,const char * const mode){
+  assert(demod != NULL);
+  if(demod == NULL)
+    return -1;
+
+  struct modetab *mp;
+  for(mp = &Modes[0]; mp < &Modes[Nmodes]; mp++){
+    if(strcasecmp(mode,mp->name) == 0)
+      break;
+  }
+  if(mp == &Modes[Nmodes])
+    return -1; // Unregistered mode
+
+  if(mp->low > mp->high){
+    demod->filter.low = mp->high;
+    demod->filter.high = mp->low;
+  } else {
+    demod->filter.low = mp->low;
+    demod->filter.high = mp->high; 
+  }
+  demod->tune.shift = mp->shift;
+  demod->opt.flat = mp->flat;
+  demod->filter.isb = mp->isb;
+  demod->output.channels = mp->channels;
+  demod->opt.pll = mp->pll;
+  demod->opt.square = mp->square;
+  demod->agc.attack_rate = mp->attack_rate;
+  demod->agc.recovery_rate = mp->recovery_rate;
+  demod->agc.hangtime = mp->hangtime;
+  demod->demod_type = mp->demod_type;
+  return 0;
+}      
+
+// Dummy stub
+int engage_mode(struct demod *demod){
+  return 0;
 }

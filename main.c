@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.125 2018/12/03 11:43:30 karn Exp karn $
+// $Id: main.c,v 1.127 2018/12/05 07:08:41 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -98,18 +98,15 @@ int main(int argc,char *argv[]){
     exit(1);
   }
 
-  // Must do this before first filter is created with set_mode(), otherwise a segfault can occur
+  // Must do this before first filter is created, otherwise a segfault can occur
   fftwf_import_system_wisdom();
   fftwf_make_planner_thread_safe();
 
   struct demod * const demod = &Demod; // Only one demodulator per program for now
+  memset(demod,0,sizeof(*demod)); // Just in case it's ever dynamic
 
   // Set program defaults, can be overridden by state file and command line args, in that order
-  memset(demod,0,sizeof(*demod)); // Just in case it's ever dynamic
   demod->output.samprate = DAC_samprate; // currently 48 kHz, hard to change
-  strcpy(demod->mode,"FM");
-  demod->tune.freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
-
   demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
   demod->filter.M = 4352+1;    // Length of filter impulse response
   demod->filter.kaiser_beta = 3.0; // Reasonable compromise
@@ -117,15 +114,15 @@ int main(int argc,char *argv[]){
   demod->agc.headroom = pow(10.,-15./20); // -15 dB
   strlcpy(demod->output.dest_address_text,"pcm.hf.mcast.local",sizeof(demod->output.dest_address_text));
   demod->tune.step = 0;  // single digit hertz position
-  demod->tune.shift = NAN;
   demod->sdr.imbalance = 1; // 0 dB
   demod->filter.decimate = 1; // default to avoid division by zero
   demod->filter.interpolate = 1;
+  preset_mode(demod,"FM");
+  demod->tune.freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
+  demod->agc.gain = dB2voltage(80.); // Empirical starting point
 
   // set invalid to start
   demod->input.source_address.ss_family = -1; // Set invalid
-  demod->filter.low = NAN;
-  demod->filter.high = NAN;
 
   // Find any file argument and load it
   char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:";
@@ -160,8 +157,8 @@ int main(int argc,char *argv[]){
     case 'L':   // Pre-detection filter block size
       demod->filter.L = strtol(optarg,NULL,0);
       break;
-    case 'm':   // receiver mode (AM/FM, etc)
-      strlcpy(demod->mode,optarg,sizeof(demod->mode));
+    case 'm':   // preset receiver mode (AM/FM, etc)
+      preset_mode(demod,optarg);
       break;
     case 'M':   // Pre-detection filter impulse length
       demod->filter.M = strtol(optarg,NULL,0);
@@ -210,14 +207,36 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&demod->input.qmutex,NULL);
   pthread_cond_init(&demod->input.qcond,NULL);
 
-  // Input socket for I/Q data from SDR
-  demod->input.fd = setup_mcast(demod->input.dest_address_text,(struct sockaddr *)&demod->input.dest_address,0,0,0);
+  // Output socket for commands to SDR
+  demod->input.ctl_fd = setup_mcast(demod->input.dest_address_text,NULL,1,Mcast_ttl,2);
+  if(demod->input.ctl_fd == -1){
+    fprintf(stderr,"Can't set up SDR control socket\n");
+    exit(1);
+  }
+  // Input socket for status from SDR
+  demod->input.nctlrx_fd = setup_mcast(demod->input.dest_address_text,NULL,0,0,2);
+  if(demod->input.nctlrx_fd == -1){
+    fprintf(stderr,"Can't set up SDR status socket\n");
+    exit(1);
+  }
+  
+  pthread_t recv_sdr_status_thread;
+  pthread_create(&recv_sdr_status_thread,NULL,recv_sdr_status,demod);
+
+  // Wait for metadata from the SDR
+  fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
+  pthread_mutex_lock(&demod->sdr.status_mutex);
+  while(demod->sdr.status.samprate == 0 || demod->input.dest_address.ss_family == 0)
+    pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
+  pthread_mutex_unlock(&demod->sdr.status_mutex);
+  fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
+
+  // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
+  demod->input.fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.dest_address,0,0,0);
   if(demod->input.fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
   }
-  // Output socket for commands to SDR
-  demod->input.ctl_fd = setup_mcast(demod->input.dest_address_text,NULL,1,Mcast_ttl,2);
 
   gettimeofday(&Starttime,NULL);
 
@@ -225,11 +244,22 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"Output setup failed\n");
     exit(1);
   }
-  // Create master half of filter
+  pthread_t status_thread;
+  pthread_create(&status_thread,NULL,send_status,demod);
+
+  pthread_t rtcp_thread;
+  pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
+
+  // Create filter now that we know the input sample rate and the decimate ratio
   // Must be done before the demodulator starts or it will fail an assert
   // If done in proc_samples(), will be a race condition
   // Blocksize really should be computed from demod->filter.L and decimate
   demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
+  demod->filter.out = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,demod->filter.isb ? CROSS_CONJ : COMPLEX);
+  set_filter(demod->filter.out,
+	     demod->filter.low/demod->output.samprate,
+	     demod->filter.high/demod->output.samprate,
+	     demod->filter.kaiser_beta);
 
   pthread_t rtp_recv_thread,proc_samples_thread;
   pthread_create(&rtp_recv_thread,NULL,rtp_recv,demod);
@@ -238,28 +268,6 @@ int main(int argc,char *argv[]){
   // Optional doppler correction
   if(demod->doppler_command)
     pthread_create(&demod->doppler_thread,NULL,doppler,demod);
-
-  pthread_t status_thread;
-  pthread_create(&status_thread,NULL,send_status,demod);
-
-  pthread_t rtcp_thread;
-  pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
-
-  pthread_t recv_sdr_status_thread;
-  pthread_create(&recv_sdr_status_thread,NULL,recv_sdr_status,demod);
-
-
-  // Block until we get a packet from the SDR and we know the sample rate
-  fprintf(stderr,"Waiting for first SDR packet to learn sample rate..."); fflush(stderr);
-  pthread_mutex_lock(&demod->sdr.status_mutex);
-  while(demod->sdr.status.samprate == 0)
-    pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
-  pthread_mutex_unlock(&demod->sdr.status_mutex);
-  fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
-
-  //  sleep(2);
-  // Actually set the mode and frequency already specified
-  set_mode(demod,demod->mode,0); // Don't override with defaults from mode table 
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -273,6 +281,9 @@ int main(int argc,char *argv[]){
   pthread_t display_thread;
   if(!Quiet)
     pthread_create(&display_thread,NULL,display,demod);
+
+  engage_mode(demod);
+  set_freq(demod,get_freq(demod),NAN);
 
   while(1)
     usleep(1000000); // probably get rid of this
@@ -387,7 +398,7 @@ int savestate(struct demod *dp,char const *filename){
   fprintf(fp,"Blocksize %d\n",dp->filter.L);
   fprintf(fp,"Impulse len %d\n",dp->filter.M);
   fprintf(fp,"Frequency %.3f Hz\n",dp->tune.freq);
-  fprintf(fp,"Mode %s\n",dp->mode);
+  fprintf(fp,"Demod %s\n",Demodtab[dp->demod_type].name);
   fprintf(fp,"Shift %.3f Hz\n",dp->tune.shift);
   fprintf(fp,"Filter low %.3f Hz\n",dp->filter.low);
   fprintf(fp,"Filter high %.3f Hz\n",dp->filter.high);
@@ -418,7 +429,7 @@ int loadstate(struct demod *dp,char const *filename){
     chomp(line);
     if(sscanf(line,"Frequency %lf",&dp->tune.freq) > 0){
     } else if(strncmp(line,"Mode ",5) == 0){
-      strlcpy(dp->mode,&line[5],sizeof(dp->mode));
+      preset_mode(dp,&line[5]);
     } else if(sscanf(line,"Shift %lf",&dp->tune.shift) > 0){
     } else if(sscanf(line,"Filter low %f",&dp->filter.low) > 0){
     } else if(sscanf(line,"Filter high %f",&dp->filter.high) > 0){
@@ -506,7 +517,7 @@ void *rtcp_send(void *arg){
     dp = gen_sdes(dp,sizeof(buffer) - (dp-buffer),demod->output.rtp.ssrc,sdes,4);
 
 
-    send(demod->output.rtcp_fd,buffer,dp-buffer,0);
+    send(demod->output.rtcp_sock,buffer,dp-buffer,0);
   done:;
     usleep(1000000);
   }

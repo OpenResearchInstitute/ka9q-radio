@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.19 2018/12/06 09:48:30 karn Exp karn $
+// $Id: hackrf.c,v 1.20 2018/12/07 10:15:49 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -666,7 +666,7 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   // Signals - these ALWAYS change
   encode_float(&bp,BASEBAND_POWER,sdr->in_power);
   
-  encode_byte(&bp,DEMOD_MODE,0); // actually LINEAR_MODE
+  encode_byte(&bp,DEMOD_TYPE,0); // actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
   encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
   encode_eol(&bp);

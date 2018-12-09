@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.142 2018/12/02 09:41:57 karn Exp karn $
+// $Id: display.c,v 1.143 2018/12/05 07:08:01 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -426,8 +426,6 @@ void *display(void *arg){
     // Lines are variable length, so clear window before starting
     wclrtobot(info);  // Output 
     row = 1;
-    mvwprintw(info,row++,1,"Receiver profile: %s",demod->mode);
-
     if(demod->doppler_command)
       mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
 
@@ -601,7 +599,12 @@ void *display(void *arg){
     row = 1;
     col = 1;
     wclrtobot(options);    
-    if(demod->demod_type == LINEAR_DEMOD){
+    if(demod->demod_type == FM_DEMOD){ // FM from status.h
+      if(demod->opt.flat)
+	wattron(options,A_UNDERLINE);
+      mvwprintw(options,row++,col,"FLAT");
+      wattroff(options,A_UNDERLINE);
+    } else if(demod->demod_type == LINEAR_DEMOD){
       if(demod->filter.isb)
 	wattron(options,A_UNDERLINE);
       mvwprintw(options,row++,col,"ISB");
@@ -631,15 +634,12 @@ void *display(void *arg){
 
 
     // Display list of modes defined in /usr/local/share/ka9q-radio/modes.txt
-    // Underline the active one
+    // They're now presets, so they're no longer underlined
     // Can be selected with mouse
     row = 1; col = 1;
-    for(int i=0;i<Nmodes;i++){
-      if(strcasecmp(demod->mode,Modes[i].name) == 0)
-	wattron(modes,A_UNDERLINE);
+    for(int i=0;i<Nmodes;i++)
       mvwaddstr(modes,row++,col,Modes[i].name);
-      wattroff(modes,A_UNDERLINE);
-    }
+
     box(modes,0,0);
     mvwaddstr(modes,0,1,"Modes");
 
@@ -720,67 +720,12 @@ void *display(void *arg){
     wnoutrefresh(options);
     wnoutrefresh(modes);
     wnoutrefresh(network);
-#if FUNCTIONKEYS
-    // Write function key labels for current mode
-    // These didn't turn out to be very useful
-    // There aren't enough function keys to go around and
-    // just using the mouse or entering the textual mode name seems easier
-    slk_set(1,"FM",1);
-    slk_set(2,"AM",1);
-    slk_set(3,"USB",1);
-    slk_set(4,"LSB",1);
-    slk_set(5,"CW",1);    
-    slk_set(6,"PLL",1);
-    slk_set(7,"CAL",1);
-    slk_set(8,"SQR",1);
-<    slk_set(9,"ISB",1);
-    slk_set(11,"STEREO",1);
-    slk_set(12,"MONO",1);
-
-    slk_noutrefresh(); // Do this after debug refresh since debug can overlap us
-#endif
     doupdate();      // Update the screen right before we pause
     
     // Scan and process keyboard commands
     int c = getch(); // read keyboard with timeout; controls refresh rate
 
     switch(c){
-#if FUNCTIONKEYS
-    case KEY_F(1):
-      set_mode(demod,"FM",1);
-      break;
-    case KEY_F(2):
-      set_mode(demod,"AM",1);
-      break;
-    case KEY_F(3):
-      set_mode(demod,"USB",1);
-      break;
-    case KEY_F(4):
-      set_mode(demod,"LSB",1);
-      break;
-    case KEY_F(5):
-      set_mode(demod,"CWU",1);
-      break;
-    case KEY_F(6):
-      demod->pll = 1;
-      break;
-    case KEY_F(8):
-      demod->square = !demod->square;
-      if(demod->square)
-	demod->pll = 1;
-      break;
-    case KEY_F(9):
-      demod->filter.isb = 1;
-      break;
-    case KEY_F(10):
-      break;
-    case KEY_F(11):
-      demod->output.channels = 2;
-      break;
-    case KEY_F(12):
-      demod->output.channels = 1;
-      break;
-#endif
     case KEY_MOUSE: // Mouse event
       getmouse(&mouse_event);
       break;
@@ -874,10 +819,10 @@ void *display(void *arg){
 	
 	demod->filter.L = i;
 	demod->filter.M = demod->filter.L + 1;
-	set_mode(demod,demod->mode,0); // Restart demod thread
+	// FIX THIS - need to restart demod thread
       }
       break;
-    case 'm': // Manually set modulation mode
+    case 'm': // Manually set mode presets
       {
 	char str[1024];
 	snprintf(str,sizeof(str),"Enter mode [ ");
@@ -889,7 +834,8 @@ void *display(void *arg){
 	getentry(str,str,sizeof(str));
 	if(strlen(str) <= 0)
 	  break;
-	set_mode(demod,str,1);
+	if(preset_mode(demod,str))
+	  engage_mode(demod);
       }
       break;
     case 'f':   // Tune to new radio frequency
@@ -1033,28 +979,37 @@ void *display(void *arg){
 	// In the modes window?
 	my--;
 	if(my >= 0 && my < Nmodes){
-	  set_mode(demod,Modes[my].name,1);
+	  if(preset_mode(demod,Modes[my].name))
+	    engage_mode(demod);
 	}
       } else if(wmouse_trafo(options,&my,&mx,false)){
 	// In the options window
-	switch(my){
-	case 1:
-	  demod->filter.isb = !demod->filter.isb;
-	  break;
-	case 2:
-	  demod->opt.pll = !demod->opt.pll;
-	  break;
-	case 3:
-	  demod->opt.square = !demod->opt.square;
-	  if(demod->opt.square)
-	    demod->opt.pll = 1;
-	  break;
-	case 4:
-	  demod->output.channels = 1;
-	  break;
-	case 5:
-	  demod->output.channels = 2;
-	  break;
+	if(demod->demod_type == FM_DEMOD){
+	  switch(my){
+	  case 1:
+	    demod->opt.flat = !demod->opt.flat;
+	    break;
+	  }
+	} else if(demod->demod_type == LINEAR_DEMOD){
+	  switch(my){
+	  case 1:
+	    demod->filter.isb = !demod->filter.isb;
+	    break;
+	  case 2:
+	    demod->opt.pll = !demod->opt.pll;
+	    break;
+	  case 3:
+	    demod->opt.square = !demod->opt.square;
+	    if(demod->opt.square)
+	      demod->opt.pll = 1;
+	    break;
+	  case 4:
+	    demod->output.channels = 1;
+	    break;
+	  case 5:
+	    demod->output.channels = 2;
+	    break;
+	  }
 	}
       }
     }

@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.107 2018/12/06 09:47:29 karn Exp karn $
+// $Id: radio.c,v 1.108 2018/12/06 09:49:53 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -93,6 +93,8 @@ void *proc_samples(void *arg){
 
 	if(in_cnt == demod->filter.in->ilen){
 	  // Run filter but freeze everything else?
+	  demod->filter.out->out_type = demod->filter.isb ? CROSS_CONJ : COMPLEX;
+
 	  execute_filter_input(demod->filter.in);
 	  in_cnt = 0;
 	}
@@ -140,9 +142,13 @@ void *proc_samples(void *arg){
       if(in_cnt == demod->filter.in->ilen){
 	// Filter buffer is full, execute it
 	execute_filter_input(demod->filter.in);
+	// Compute IF power and noise spectral density
 	demod->sig.if_power = block_energy / in_cnt;
-	block_energy = 0;
-	in_cnt = 0;
+	block_energy = in_cnt = 0;
+	if(!isnan(demod->sig.n0))
+	  demod->sig.n0 += .005 * (compute_n0(demod) - demod->sig.n0);
+	else
+	  demod->sig.n0 = compute_n0(demod); // Happens at startup
       } // Every FFT block
     } // for each sample in I/Q packet
     free(pkt); pkt = NULL;
@@ -261,8 +267,8 @@ double set_first_LO(struct demod * const demod,double first_LO){
   bp = packet;
   *bp++ = 1; // Command
   encode_double(&bp,RADIO_FREQUENCY,first_LO);
-  demod->sdr.command_tag = random();
-  encode_int32(&bp,COMMAND_TAG,demod->sdr.command_tag);
+  demod->command_tag = random();
+  encode_int32(&bp,COMMAND_TAG,demod->command_tag);
 
   encode_eol(&bp);
   int len = bp - packet;
@@ -306,6 +312,7 @@ double set_second_LO(struct demod * const demod,double const second_LO){
 // Set audio frequency shift after downconversion and detection (linear modes only: SSB, IQ, DSB)
 double set_shift(struct demod * const demod,double const shift){
   assert(demod != NULL);
+  demod->tune.shift = shift;
   if(shift == 0)
     set_osc(&demod->shift, 0.0, 0.0);
   else 
@@ -315,14 +322,13 @@ double set_shift(struct demod * const demod,double const shift){
 
 double get_shift(struct demod * const demod){
   assert(demod != NULL);
-  return demod->shift.freq * (double)demod->input.samprate / demod->filter.decimate;
+  return demod->tune.shift;
 }
 
 
-// Set major operating mode
-// This kills the current demodulator thread, sets up the predetection filter
-// and other demodulator parameters, and starts the appropriate demodulator thread
-int set_mode(struct demod * const demod,const char * const mode,int const defaults){
+// Load mode table entry presets without actually engaging
+// Return nonzero if demod has changed and must be engaged
+int preset_mode(struct demod * const demod,const char * const mode){
   assert(demod != NULL);
   if(demod == NULL)
     return -1;
@@ -335,29 +341,14 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   if(mp == &Modes[Nmodes])
     return -1; // Unregistered mode
 
-  // Kill current demod thread, if any, to cause clean exit
-  demod->terminate = 1;
-  pthread_join(demod->demod_thread,NULL); // Wait for it to finish
-  demod->terminate = 0;
-
-  // if the mode argument points to demod->mode, avoid the copy; can cause an abort
-  if(demod->mode != mode)
-    strlcpy(demod->mode,mode,sizeof(demod->mode));
-
-  demod->demod_type = mp->demod_type;
-
-  if(defaults || isnan(demod->filter.low) || isnan(demod->filter.high)){
-    if(mp->low > mp->high){
-      demod->filter.low = mp->high;
-      demod->filter.high = mp->low;
-    } else {
-      demod->filter.low = mp->low;
-      demod->filter.high = mp->high;
-    }
+  if(mp->low > mp->high){
+    demod->filter.low = mp->high;
+    demod->filter.high = mp->low;
+  } else {
+    demod->filter.low = mp->low;
+    demod->filter.high = mp->high;
   }
-  if(defaults || isnan(demod->tune.shift))
-    demod->tune.shift = mp->shift;
-
+  set_shift(demod,mp->shift);
   demod->opt.flat = mp->flat;
   demod->filter.isb = mp->isb;
   demod->output.channels = mp->channels;
@@ -366,15 +357,30 @@ int set_mode(struct demod * const demod,const char * const mode,int const defaul
   demod->agc.attack_rate = mp->attack_rate;
   demod->agc.recovery_rate = mp->recovery_rate;
   demod->agc.hangtime = mp->hangtime;
-  
-  set_shift(demod,demod->tune.shift);
-
-  // Might now be out of range because of change in filter passband
-  set_freq(demod,get_freq(demod),NAN);
-
-  pthread_create(&demod->demod_thread,NULL,Demodtab[mp->demod_type].demod,demod);
-  return 0;
+  int r = 0;
+  if(demod->demod_type != mp->demod_type){
+    demod->demod_type = mp->demod_type;
+    r = 1;
+  }
+  return r;
 }      
+
+// Engage whatever mode and settings have been loaded
+int engage_mode(struct demod *demod){
+  demod->terminate = 1;
+  pthread_join(demod->demod_thread,NULL); // Wait for it to finish
+  demod->terminate = 0;
+  // Start demod thread
+  set_filter(demod->filter.out,
+	     demod->filter.low/demod->output.samprate,
+	     demod->filter.high/demod->output.samprate,
+	     demod->filter.kaiser_beta);
+
+  pthread_create(&demod->demod_thread,NULL,Demodtab[demod->demod_type].demod,demod);
+  return 0;
+}
+
+
 
 
 
@@ -394,7 +400,7 @@ float const compute_n0(struct demod const * const demod){
   
   // Compute smoothed power spectrum
   // There will be some spectral leakage because the convolution FFT we're using is unwindowed
-  // Includes both real and imaginary components, so this will have to be divided by 2 to get 0dBFS convention
+  // Includes both real and imaginary components
   for(int n=0;n<N;n++)
     power_spectrum[n] = cnrmf(f->fdomain[n]);
 

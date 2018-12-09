@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.78 2018/11/22 09:57:27 karn Exp karn $
+// $Id: audio.c,v 1.79 2018/12/02 09:16:45 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -66,7 +66,7 @@ int send_stereo_output(struct demod * const demod,float const * buffer,int size)
       dp = hton_rtp(dp,&rtp);
       memcpy(dp,PCM_buf,2*chunk);
       dp += 2*chunk;
-      int r = send(demod->output.fd,&packet,dp - packet,0);
+      int r = send(demod->output.rtp_sock,&packet,dp - packet,0);
       if(r < 0){
 	perror("pcm: send");
 	break;
@@ -119,7 +119,7 @@ int send_mono_output(struct demod * const demod,float const * buffer,int size){
       memcpy(dp,PCM_buf,2*chunk);
       dp += 2 * chunk;
 
-      int r = send(demod->output.fd,&packet,dp - packet,0);
+      int r = send(demod->output.rtp_sock,&packet,dp - packet,0);
       if(r < 0){
 	perror("pcm: send");
 	break;
@@ -136,9 +136,9 @@ void output_cleanup(void *p){
   if(demod == NULL)
     return;
 
-  if(demod->output.fd > 0){
-    close(demod->output.fd);
-    demod->output.fd = -1;
+  if(demod->output.rtp_sock > 0){
+    close(demod->output.rtp_sock);
+    demod->output.rtp_sock = -1;
   }
 }
 
@@ -151,18 +151,22 @@ int setup_output(struct demod * const demod,int ttl){
     time_t tt = time(NULL);
     demod->output.rtp.ssrc = tt & 0xffffffff;
   }
-  demod->output.fd = setup_mcast(demod->output.dest_address_text,(struct sockaddr *)&demod->output.dest_address,1,ttl,0);
-  if(demod->output.fd == -1)
+  demod->output.rtp_sock = setup_mcast(demod->output.dest_address_text,(struct sockaddr *)&demod->output.dest_address,1,ttl,0);
+  if(demod->output.rtp_sock == -1)
     return -1;
   socklen_t len = sizeof(demod->output.source_address);
-  getsockname(demod->output.fd,(struct sockaddr *)&demod->output.source_address,&len);
+  getsockname(demod->output.rtp_sock,(struct sockaddr *)&demod->output.source_address,&len);
 
-  demod->output.rtcp_fd = setup_mcast(demod->output.dest_address_text,NULL,1,ttl,1);
-  if(demod->output.rtcp_fd == -1)
+  demod->output.rtcp_sock = setup_mcast(demod->output.dest_address_text,NULL,1,ttl,1);
+  if(demod->output.rtcp_sock == -1)
     return -1;
 
-  demod->output.status_fd = setup_mcast(demod->output.dest_address_text,NULL,1,ttl,2);
-  if(demod->output.status_fd == -1)
+  demod->output.status_sock = setup_mcast(demod->output.dest_address_text,NULL,1,ttl,2);
+  if(demod->output.status_sock == -1)
+    return -1;
+
+  demod->output.nctl_sock = setup_mcast(demod->output.dest_address_text,NULL,0,ttl,2);
+  if(demod->output.nctl_sock == -1)
     return -1;
 
   return 0;

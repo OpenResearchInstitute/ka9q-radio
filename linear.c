@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.31 2018/12/05 09:07:18 karn Exp karn $
+// $Id: linear.c,v 1.32 2018/12/06 09:45:52 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -36,7 +36,6 @@ void *demod_linear(void *arg){
   float const attack_factor = dB2voltage(demod->agc.attack_rate * samptime);      // AGC ramp-down rate/sample
 #endif
   int const hangmax = demod->agc.hangtime / samptime; // samples before AGC increase
-  demod->agc.gain = dB2voltage(100.0); // initial setting
 
   // Coherent mode parameters
   float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
@@ -75,10 +74,7 @@ void *demod_linear(void *arg){
   demod->sig.snr = 0;
 
   // Detection filter
-  struct filter_out * const filter = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,
-					       (demod->filter.isb) ? CROSS_CONJ : COMPLEX);
-  demod->filter.out = filter;
-  set_filter(filter,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);
+  struct filter_out * const filter = demod->filter.out;
 
   // Carrier search FFT
   complex float * fftinbuf = NULL;
@@ -114,16 +110,8 @@ void *demod_linear(void *arg){
   while(!demod->terminate){
     // New samples
     // Copy ISB flag to filter, since it might change
-    if(demod->filter.isb)
-      filter->out_type = CROSS_CONJ;
-    else
-      filter->out_type = COMPLEX;
 
     execute_filter_output(filter);    
-    if(!isnan(demod->sig.n0))
-      demod->sig.n0 += .001 * (compute_n0(demod) - demod->sig.n0);
-    else
-      demod->sig.n0 = compute_n0(demod); // Happens at startup
 
     // Carrier (or regenerated carrier) tracking in coherent mode
     if(demod->opt.pll){
@@ -315,8 +303,5 @@ void *demod_linear(void *arg){
     fftwf_free(fftoutbuf);  
   if(fft_plan)
     fftwf_destroy_plan(fft_plan);
-  if(filter)
-    delete_filter_output(filter);
-  demod->filter.out = NULL;
   pthread_exit(NULL);
 }

@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.62 2018/12/06 10:07:13 karn Exp karn $
+// $Id: funcube.c,v 1.63 2018/12/07 10:15:49 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -435,9 +435,10 @@ void *ncmd(void *arg){
 	continue; // Ignore our own status messages
       Commands++;
       decode_fcd_commands(sdr,cp,length-1);
+      counter = 0; // Respond with full status
     }
     readback(sdr);
-    send_fcd_status(sdr,(counter++ % 10) == 0);
+    send_fcd_status(sdr,counter == 0);
     sdr->command_tag = 0; // Send only once
     if(!No_hold_open){
       do_fcd_agc(sdr);
@@ -445,6 +446,8 @@ void *ncmd(void *arg){
       fcdClose(sdr->phd);
       sdr->phd = NULL;
     }
+    if(counter-- <= 0)
+      counter = 10;
   }
 }
 
@@ -622,7 +625,7 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   // Signals - these ALWAYS change
   encode_float(&bp,BASEBAND_POWER,sdr->in_power);
   
-  encode_byte(&bp,DEMOD_MODE,0); // Actually LINEAR_MODE
+  encode_byte(&bp,DEMOD_TYPE,0); // Actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
   encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
   encode_eol(&bp);

@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.60 2018/12/05 07:08:01 karn Exp karn $
+// $Id: fm.c,v 1.61 2018/12/06 09:45:36 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -29,10 +29,7 @@ void *demod_fm(void *arg){
   demod->sig.foffset = 0;
   demod->output.channels = 1; // Only mono for now
 
-  // Create predetection filter, leaving response momentarily empty
-  struct filter_out * const filter = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,COMPLEX);
-  demod->filter.out = filter;
-  set_filter(filter,demod->filter.low/dsamprate,demod->filter.high/dsamprate,demod->filter.kaiser_beta);
+  struct filter_out * const filter = demod->filter.out;
 
   // Set up audio baseband filter master
   // Can have two slave filters: one for the de-emphasized audio output, another for the PL tone measurement
@@ -48,23 +45,20 @@ void *demod_fm(void *arg){
   pthread_t pl_thread;
   pthread_create(&pl_thread,NULL,pltask,demod);
 
-  // Voice filter, unless FLAT mode is selected
+  // Voice filter, not used when FLAT mode is selected
   // Audio response is high pass with 300 Hz corner to remove PL tone
   // then -6 dB/octave post-emphasis since demod is FM and modulation is actually PM (indirect FM)
-  struct filter_out *audio_filter = NULL;
-  if(!demod->opt.flat){
-    complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
-    assert(aresponse != NULL);
-    memset(aresponse,0,(AN/2+1) * sizeof(*aresponse));
-    for(int j=0;j<=AN/2;j++){
-      float const f = (float)j * dsamprate / AN;
-      if(f >= 300 && f <= 6000)
-	aresponse[j] = filter_gain * 300./f; // -6 dB/octave de-emphasis to handle PM (indirect FM) transmission
-    }
-    // Window scaling for REAL input, REAL output
-    window_rfilter(AL,AM,aresponse,demod->filter.kaiser_beta);
-    audio_filter = create_filter_output(audio_master,aresponse,1,REAL); // Real input, real output, same sample rate
+  complex float * const aresponse = fftwf_alloc_complex(AN/2+1);
+  assert(aresponse != NULL);
+  memset(aresponse,0,(AN/2+1) * sizeof(*aresponse));
+  for(int j=0;j<=AN/2;j++){
+    float const f = (float)j * dsamprate / AN;
+    if(f >= 300 && f <= 6000)
+      aresponse[j] = filter_gain * 300./f; // -6 dB/octave de-emphasis to handle PM (indirect FM) transmission
   }
+  // Window scaling for REAL input, REAL output
+  window_rfilter(AL,AM,aresponse,demod->filter.kaiser_beta);
+  struct filter_out *audio_filter = create_filter_output(audio_master,aresponse,1,REAL); // Real input, real output, same sample rate
   
   float lastaudio = 0; // state for impulse noise removal
   int snr_below_threshold = 0; // Number of blocks in which FM snr is below threshold, used for squelch
@@ -75,11 +69,6 @@ void *demod_fm(void *arg){
     execute_filter_output(filter);
     // Compute bb_power below along with average amplitude to save time
     //    demod->sig.bb_power = cpower(filter->output.c,filter->olen);
-    float const n0 = compute_n0(demod);
-    if(isnan(demod->sig.n0))
-      demod->sig.n0 = n0; // handle startup transient
-    else
-      demod->sig.n0 += .01 * (n0 - demod->sig.n0);
 
     // Constant gain used by FM only; automatically adjusted by AGC in linear modes
     // We do this in the loop because BW can change
@@ -159,16 +148,14 @@ void *demod_fm(void *arg){
       memset(samples,0,audio_master->ilen * sizeof(*samples));
       memset(audio_master->input.r,0,audio_master->ilen*sizeof(*audio_master->input.r));
     }
-    execute_filter_input(audio_master); // Pass to post-detection audio filter(s)
+    execute_filter_input(audio_master); // Pass to post-detection audio filter(s) (audio and PL slaves)
 
-    if(audio_filter != NULL){
+    // in FM flat mode there is no audio filter, and audio is already in samples[]
+    if(!demod->opt.flat){
       execute_filter_output(audio_filter);
-
-      // in FM flat mode there is no audio filter, and audio is already in samples[]
       assert(audio_master->ilen == audio_filter->olen);
       for(int n=0; n < audio_filter->olen; n++)
 	samples[n] = audio_filter->output.r[n] * gain;
-
     }
     send_mono_output(demod,samples,audio_master->ilen);
   }
@@ -179,8 +166,6 @@ void *demod_fm(void *arg){
   if(audio_filter != NULL)
     delete_filter_output(audio_filter); // Must delete first
   delete_filter_input(audio_master);
-  delete_filter_output(filter);
-  demod->filter.out = NULL;
 
   pthread_exit(NULL);
 }

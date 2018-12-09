@@ -55,7 +55,7 @@ enum status_type {
 
   // Demodulation
   RADIO_MODE, // printable string "usb", "lsb", etc
-  DEMOD_MODE, // 0 = linear (default), 1 = AM envelope, 2 = FM
+  DEMOD_TYPE, // 0 = linear (default), 1 = AM envelope, 2 = FM
   INDEPENDENT_SIDEBAND, // Linear only
   DEMOD_SNR,       // FM, PLL linear
   DEMOD_GAIN,      // AM, Linear
@@ -72,6 +72,7 @@ enum status_type {
   COMMAND_TAG,    // Echoes tag from requester
   OUTPUT_SOURCE_SOCKET,
   PLL_ENABLE,
+  FM_FLAT,
 };
 
 
@@ -85,6 +86,7 @@ struct state {
 int encode_string(unsigned char **bp,enum status_type type,void *buf,int buflen);
 int encode_eol(unsigned char **buf);
 int encode_byte(unsigned char **buf,enum status_type type,unsigned char x);
+int encode_int(unsigned char **buf,enum status_type type,int x);
 int encode_int16(unsigned char **buf,enum status_type type,uint16_t x);
 int encode_int32(unsigned char **buf,enum status_type type,uint32_t x);
 int encode_int64(unsigned char **buf,enum status_type type,uint64_t x);

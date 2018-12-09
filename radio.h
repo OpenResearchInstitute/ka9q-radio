@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.81 2018/12/05 07:08:16 karn Exp karn $
+// $Id: radio.h,v 1.82 2018/12/06 09:46:08 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -65,6 +65,7 @@ struct demod {
   struct {
     int fd;       // Socket for raw incoming I/Q data
     int ctl_fd;   // Socket for commands to front end
+    int nctlrx_fd; // Socket for status from front end
 
     char dest_address_text[256];
     struct sockaddr_storage source_address; // Source of I/Q data
@@ -93,7 +94,7 @@ struct demod {
     float max_IF;
     
     float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
-    uint32_t command_tag;
+
 
     // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
     pthread_mutex_t status_mutex;
@@ -144,7 +145,6 @@ struct demod {
   int terminate;              // set to 1 by set_mode() to request graceful termination
 
   enum demod_type demod_type;            // Index into demodulator table (AM, FM, Linear)
-  char mode[16];              // printable mode name (USB, LSB, etc)
 
   struct {
     int flat;    // Flat FM frequency response
@@ -187,11 +187,14 @@ struct demod {
     char dest_address_text[256];
     struct sockaddr_storage source_address;
     struct sockaddr_storage dest_address;
-    int fd;         // File descriptor for multicast output
-    int rtcp_fd;    // File descriptor for RTP control protocol
-    int status_fd;  // File descriptor for receiver status
+    int rtp_sock;         // File descriptor for multicast output
+    int rtcp_sock;    // File descriptor for RTP control protocol
+    int status_sock;  // File descriptor for receiver status
+    int nctl_sock;     // File descriptor for receiving user commands
     int channels;   // 1 = mono, 2 = stereo
+    uint32_t command_tag; // Echoed in responses to commands
   } output;
+  uint32_t command_tag;
 };
 extern char Libdir[];
 extern int Tunestep;
@@ -214,7 +217,8 @@ double set_second_LO(struct demod *,double);
 double get_doppler(struct demod *);
 double get_doppler_rate(struct demod *);
 int set_doppler(struct demod *,double,double);
-int set_mode(struct demod *,const char *,int);
+int preset_mode(struct demod *,const char *);
+int engage_mode(struct demod *);
 int set_cal(struct demod *,double);
 void *proc_samples(void *);
 const float compute_n0(struct demod const *);

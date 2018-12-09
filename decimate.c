@@ -1,4 +1,4 @@
-// $Id: decimate.c,v 1.7 2018/12/02 09:16:45 karn Exp karn $
+// $Id: decimate.c,v 1.8 2018/12/03 11:43:00 karn Exp karn $
 // half-band filters for sample rate decimation by powers of 2
 // Note: filters have unity middle tap, which usually results in overall gain of +6 dB
 // Copyright July 2018, Phil Karn, KA9Q
@@ -9,7 +9,9 @@
 
 // Pick up vectorized versions if available
 #if defined(__SSSE3__)
+#if 0 // messages apparently treated as warnings
 #pragma message "Vectorized versions of decimation filters will require SSSE3 or better to run"
+#endif
 
   #include <x86intrin.h>  // GCC-compatible compiler, targeting x86/x86-64
 
