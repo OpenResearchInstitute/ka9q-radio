@@ -370,12 +370,14 @@ int engage_mode(struct demod *demod){
   demod->terminate = 1;
   pthread_join(demod->demod_thread,NULL); // Wait for it to finish
   demod->terminate = 0;
-  // Start demod thread
+
+  set_freq(demod,demod->tune.freq,NAN);
+  set_shift(demod,demod->tune.shift);
   set_filter(demod->filter.out,
 	     demod->filter.low/demod->output.samprate,
 	     demod->filter.high/demod->output.samprate,
 	     demod->filter.kaiser_beta);
-
+  // Start demod thread
   pthread_create(&demod->demod_thread,NULL,Demodtab[demod->demod_type].demod,demod);
   return 0;
 }
