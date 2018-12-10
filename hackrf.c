@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.20 2018/12/07 10:15:49 karn Exp karn $
+// $Id: hackrf.c,v 1.21 2018/12/09 12:12:20 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -79,7 +79,8 @@ struct rtp_state Rtp;
 int Rtp_sock;     // Socket handle for sending real time stream
 int Nctl_sock;    // Socket handle for incoming commands
 int Status_sock;  // Socket handle for outgoing status messages
-struct sockaddr_storage Output_dest_address; // Multicast output socket
+struct sockaddr_storage Output_data_dest_address; // Multicast output socket
+uint64_t Output_metadata_packets;
 
 struct sdrstate HackCD;
 pthread_t Display_thread;
@@ -219,7 +220,7 @@ int main(int argc,char *argv[]){
   Filter_atten = powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
 
   // Set up RTP output socket
-  Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Output_dest_address,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s",strerror(errno));
     exit(1);
@@ -476,19 +477,21 @@ void *ncmd(void *arg){
     close(Status_sock);
     return NULL;
   }
-  struct timeval tv;
-  tv.tv_sec = 0;
-  tv.tv_usec = 100000; // 100 ms
 
-  if(setsockopt(Nctl_sock,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))){
-    perror("ncmd setsockopt");
-    return NULL;
-  }
 
   int counter = 0;
   while(1){
     unsigned char buffer[8192];
     memset(buffer,0,sizeof(buffer));
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000; // 100 ms
+
+    if(setsockopt(Nctl_sock,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))){
+      perror("ncmd setsockopt");
+      return NULL;
+    }
+
     int length = recv(Nctl_sock,buffer,sizeof(buffer),0);
     if(length > 0){
       // Parse entries
@@ -500,8 +503,11 @@ void *ncmd(void *arg){
       Commands++;
       decode_hackrf_commands(sdr,cp,length-1);
     }      
-    send_hackrf_status(sdr,(counter++ % 10) == 0);
-    sdr->command_tag = 0; // Send only once
+    Output_metadata_packets++;
+    send_hackrf_status(sdr,(counter == 0));
+    if(counter-- <= 0)
+      counter = 10;
+		       
     do_hackrf_agc(sdr);
   }
 }
@@ -606,12 +612,15 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   
   *bp++ = 0;   // Command/response = response
   
+  encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
+  encode_int64(&bp,COMMANDS,Commands);
+
   struct timeval tp;
   gettimeofday(&tp,NULL);
   // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
   long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
   encode_int64(&bp,GPS_TIME,timestamp);
-  encode_int64(&bp,COMMANDS,Commands);
+
   // Where we're sending output
   // Right now the metadata and data are both sent to Output_dest_address, but I may add
   // the option to make them different. Then Output_dest_address will refer to the data stream
@@ -619,10 +628,11 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   {
     struct sockaddr_in *sin;
     struct sockaddr_in6 *sin6;
-    *bp++ = OUTPUT_DEST_SOCKET;
-    switch(Output_dest_address.ss_family){
+
+    switch(Output_data_dest_address.ss_family){
     case AF_INET:
-      sin = (struct sockaddr_in *)&Output_dest_address;
+      *bp++ = OUTPUT_DATA_DEST_SOCKET;
+      sin = (struct sockaddr_in *)&Output_data_dest_address;
       *bp++ = 6;
       memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
       bp += 4;
@@ -630,7 +640,8 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
       bp += 2;
       break;
     case AF_INET6:
-      sin6 = (struct sockaddr_in6 *)&Output_dest_address;
+      *bp++ = OUTPUT_DATA_DEST_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&Output_data_dest_address;
       *bp++ = 10;
       memcpy(bp,&sin6->sin6_addr,8);
       bp += 8;
@@ -644,7 +655,8 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   encode_int32(&bp,OUTPUT_SSRC,Rtp.ssrc);
   encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
   encode_int32(&bp,OUTPUT_SAMPRATE,Out_samprate);
-  encode_int64(&bp,OUTPUT_PACKETS,Rtp.packets);
+  encode_int64(&bp,OUTPUT_DATA_PACKETS,Rtp.packets);
+  encode_int64(&bp,OUTPUT_METADATA_PACKETS,Output_metadata_packets);
   
   // Tuning
   encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
@@ -668,7 +680,7 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   
   encode_byte(&bp,DEMOD_TYPE,0); // actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
-  encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
+
   encode_eol(&bp);
   
   int len = compact_packet(&State[0],packet,full);

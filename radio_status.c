@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <pthread.h>
 #if defined(linux)
 #include <bsd/string.h>
 #endif
@@ -64,10 +65,8 @@ void *send_status(void *arg){
       counter = 0; // Send complete status in response
     }
     send_radio_status(demod,(counter == 0));
-    counter--;
-    if(counter <= 0)
+    if(counter-- <= 0)
       counter = 10;
-    demod->output.command_tag = 0;
   }
 }
 
@@ -78,21 +77,24 @@ void send_radio_status(struct demod *demod,int full){
   
   *bp++ = 0; // Response (not a command);
   
+  encode_int(&bp,COMMAND_TAG,demod->command_tag);
+  encode_int64(&bp,COMMANDS,Commands);
+
   struct timeval tp;
   gettimeofday(&tp,NULL);
   // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
   long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
   encode_int64(&bp,GPS_TIME,timestamp);
-  encode_int64(&bp,COMMANDS,Commands);
-  // Source information
-  // Who's sending us information
+
+  // Who's sending us I/Q data
   {
     struct sockaddr_in *sin;
     struct sockaddr_in6 *sin6;
-    *bp++ = INPUT_SOURCE_SOCKET;
-    switch(demod->input.source_address.ss_family){
+    
+    switch(demod->input.data_source_address.ss_family){
     case AF_INET:
-      sin = (struct sockaddr_in *)&demod->input.source_address;
+      *bp++ = INPUT_DATA_SOURCE_SOCKET;
+      sin = (struct sockaddr_in *)&demod->input.data_source_address;
       *bp++= 6;
       memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
       bp += 4;
@@ -100,7 +102,8 @@ void send_radio_status(struct demod *demod,int full){
       bp += 2;
       break;
     case AF_INET6:
-      sin6 = (struct sockaddr_in6 *)&demod->input.source_address;
+      *bp++ = INPUT_DATA_SOURCE_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&demod->input.data_source_address;
       *bp++ = 10;
       memcpy(bp,&sin6->sin6_addr,8);
       bp += 8;
@@ -111,14 +114,15 @@ void send_radio_status(struct demod *demod,int full){
       break;
     }
   }
-  // Destination address (usually multicast) and port on which we're getting input data
+  // Destination address for I/Q data
   {
     struct sockaddr_in *sin;
     struct sockaddr_in6 *sin6;
-    *bp++ = INPUT_DEST_SOCKET;
-    switch(demod->input.dest_address.ss_family){
+
+    switch(demod->input.data_dest_address.ss_family){
     case AF_INET:
-      sin = (struct sockaddr_in *)&demod->input.dest_address;
+      *bp++ = INPUT_DATA_DEST_SOCKET;
+      sin = (struct sockaddr_in *)&demod->input.data_dest_address;
       *bp++ = 6;
       memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
       bp += 4;
@@ -126,7 +130,64 @@ void send_radio_status(struct demod *demod,int full){
       bp += 2;
       break;
     case AF_INET6:
-      sin6 = (struct sockaddr_in6 *)&demod->input.dest_address;
+      *bp++ = INPUT_DATA_DEST_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&demod->input.data_dest_address;
+      *bp++ = 10;
+      memcpy(bp,&sin6->sin6_addr,8);
+      bp += 8;
+      memcpy(bp,&sin6->sin6_port,2);
+      bp += 2;
+      break;
+    default:
+      break;
+    }
+  }
+  // Source of metadata
+  {
+    struct sockaddr_in *sin;
+    struct sockaddr_in6 *sin6;
+
+    switch(demod->input.metadata_source_address.ss_family){
+    case AF_INET:
+      *bp++ = INPUT_METADATA_SOURCE_SOCKET;
+      sin = (struct sockaddr_in *)&demod->input.metadata_source_address;
+      *bp++= 6;
+      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+      bp += 4;
+      memcpy(bp,&sin->sin_port,2);
+      bp += 2;
+      break;
+    case AF_INET6:
+      *bp++ = INPUT_METADATA_SOURCE_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&demod->input.metadata_source_address;
+      *bp++ = 10;
+      memcpy(bp,&sin6->sin6_addr,8);
+      bp += 8;
+      memcpy(bp,&sin6->sin6_port,2);
+      bp += 2;
+      break;
+    default:
+      break;
+    }
+  }
+  // Destination address (usually multicast) and port on which we're getting metadata
+  {
+    struct sockaddr_in *sin;
+    struct sockaddr_in6 *sin6;
+
+    switch(demod->input.metadata_dest_address.ss_family){
+    case AF_INET:
+      *bp++ = INPUT_METADATA_DEST_SOCKET;
+      sin = (struct sockaddr_in *)&demod->input.metadata_dest_address;
+      *bp++ = 6;
+      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+      bp += 4;
+      memcpy(bp,&sin->sin_port,2);
+      bp += 2;
+      break;
+    case AF_INET6:
+      *bp++ = INPUT_METADATA_DEST_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&demod->input.metadata_dest_address;
       *bp++ = 10;
       memcpy(bp,&sin6->sin6_addr,8);
       bp += 8;
@@ -139,13 +200,18 @@ void send_radio_status(struct demod *demod,int full){
   }
   encode_int32(&bp,INPUT_SSRC,demod->input.rtp.ssrc);
   encode_int32(&bp,INPUT_SAMPRATE,demod->sdr.status.samprate);
+  encode_int64(&bp,INPUT_METADATA_PACKETS,demod->input.metadata_packets);
+  encode_int64(&bp,INPUT_DATA_PACKETS,demod->input.rtp.packets);
+  encode_int64(&bp,INPUT_SAMPLES,demod->input.samples);
+  // Source address we're using to send data
   {
     struct sockaddr_in *sin;
     struct sockaddr_in6 *sin6;
-    *bp++ = OUTPUT_SOURCE_SOCKET;
-    switch(demod->output.source_address.ss_family){
+    
+    switch(demod->output.data_source_address.ss_family){
     case AF_INET:
-      sin = (struct sockaddr_in *)&demod->output.source_address;
+      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
+      sin = (struct sockaddr_in *)&demod->output.data_source_address;
       *bp++ = 6;
       memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
       bp += 4;
@@ -153,7 +219,8 @@ void send_radio_status(struct demod *demod,int full){
       bp += 2;
       break;
     case AF_INET6:
-      sin6 = (struct sockaddr_in6 *)&demod->output.source_address;
+      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&demod->output.data_source_address;
       *bp++ = 10;
       memcpy(bp,&sin6->sin6_addr,8);
       bp += 8;
@@ -164,14 +231,15 @@ void send_radio_status(struct demod *demod,int full){
       break;
     }
   }
-  // Where we're sending output
+  // Where we're sending PCM output
   {
     struct sockaddr_in *sin;
     struct sockaddr_in6 *sin6;
-    *bp++ = OUTPUT_DEST_SOCKET;
-    switch(demod->output.dest_address.ss_family){
+
+    switch(demod->output.data_dest_address.ss_family){
     case AF_INET:
-      sin = (struct sockaddr_in *)&demod->output.dest_address;
+      *bp++ = OUTPUT_DATA_DEST_SOCKET;
+      sin = (struct sockaddr_in *)&demod->output.data_dest_address;
       *bp++ = 6;
       memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
       bp += 4;
@@ -179,7 +247,8 @@ void send_radio_status(struct demod *demod,int full){
       bp += 2;
       break;
     case AF_INET6:
-      sin6 = (struct sockaddr_in6 *)&demod->output.dest_address;
+      *bp++ = OUTPUT_DATA_DEST_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&demod->output.data_dest_address;
       *bp++ = 10;
       memcpy(bp,&sin6->sin6_addr,8);
       bp += 8;
@@ -190,14 +259,17 @@ void send_radio_status(struct demod *demod,int full){
       break;
     }
   }
+
   encode_int32(&bp,OUTPUT_SSRC,demod->output.rtp.ssrc);
   encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
   encode_int32(&bp,OUTPUT_SAMPRATE,demod->output.samprate);
-  encode_int64(&bp,INPUT_PACKETS,demod->input.rtp.packets);
+  encode_int64(&bp,INPUT_METADATA_PACKETS,demod->input.metadata_packets);
+  encode_int64(&bp,INPUT_DATA_PACKETS,demod->input.rtp.packets);
   encode_int64(&bp,INPUT_SAMPLES,demod->input.samples);
   encode_int64(&bp,INPUT_DROPS,demod->input.rtp.drops);
   encode_int64(&bp,INPUT_DUPES,demod->input.rtp.dupes);
-  encode_int64(&bp,OUTPUT_PACKETS,demod->output.rtp.packets);
+  encode_int64(&bp,OUTPUT_DATA_PACKETS,demod->output.rtp.packets);
+  encode_int64(&bp,OUTPUT_METADATA_PACKETS,demod->output.metadata_packets);
   
   // Tuning
   encode_double(&bp,RADIO_FREQUENCY,get_freq(demod));
@@ -265,6 +337,7 @@ void send_radio_status(struct demod *demod,int full){
   
   int len = compact_packet(&State[0],packet,full);
   send(demod->output.status_sock,packet,len,0);
+  demod->output.metadata_packets++;
 }
 
 void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length){
@@ -280,8 +353,8 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
     if(cp - buffer + optlen >= length)
       break; // Invalid length
     
-    double first_LO,second_LO;
     double samptime = 1./demod->input.samprate;
+    double nval;
     int i;
 
     switch(type){
@@ -292,11 +365,10 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       // Kill current demod thread, if any, to cause clean exit
       
       if(demod->demod_type != i){
+	pthread_mutex_lock(&demod->demod_mutex);
 	demod->demod_type = i;
-	demod->terminate = 1;
-	pthread_join(demod->demod_thread,NULL); // Wait for it to finish
-	demod->terminate = 0;
-	pthread_create(&demod->demod_thread,NULL,Demodtab[demod->demod_type].demod,demod);
+	pthread_cond_signal(&demod->demod_cond);
+	pthread_mutex_unlock(&demod->demod_mutex);
       }
       break;
     case CALIBRATE:
@@ -307,15 +379,15 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       set_freq(demod,demod->tune.freq,NAN);
       break;
     case FIRST_LO_FREQUENCY:
-      first_LO = decode_double(cp,optlen);
-      set_first_LO(demod,first_LO); // Will automatically adjust second LO
+      nval = decode_double(cp,optlen);
+      set_first_LO(demod,nval); // Will automatically adjust second LO
       break;
     case SECOND_LO_FREQUENCY:
-      second_LO = decode_double(cp,optlen);
-      if(LO2_in_range(demod,second_LO,0)){
+      nval = decode_double(cp,optlen);
+      if(LO2_in_range(demod,nval,0)){
 	// Only if valid
-	demod->tune.freq += second_LO - get_second_LO(demod);
-	set_freq(demod,demod->tune.freq,second_LO);
+	demod->tune.freq += nval - get_second_LO(demod);
+	set_freq(demod,demod->tune.freq,nval);
       }
       break;
     case LOW_EDGE:
@@ -380,7 +452,8 @@ void *recv_sdr_status(void *arg){
     unsigned char buffer[8192];
 
     memset(buffer,0,sizeof(buffer));
-    int len = recv(demod->input.nctlrx_fd,buffer,sizeof(buffer),0);
+    socklen_t socklen;
+    int len = recvfrom(demod->input.nctlrx_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->input.metadata_source_address,&socklen);
     if(len <= 0){
       sleep(1);
       continue;
@@ -391,6 +464,7 @@ void *recv_sdr_status(void *arg){
     if(cr == 1)
       continue; // Ignore commands
     
+    demod->input.metadata_packets++;
     decode_sdr_status(demod,buffer+1,len-1);
     pthread_mutex_lock(&demod->sdr.status_mutex);
     pthread_cond_broadcast(&demod->sdr.status_cond);
@@ -402,6 +476,7 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
   double nfreq = NAN;
   int gainchange = 0;
+  int nsamprate = 0;
 
   while(cp - buffer < length){
     enum status_type type = *cp++; // increment cp to length field
@@ -415,18 +490,18 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     switch(type){
     case EOL: // Shouldn't get here since it's checked above
       goto done;
-    case OUTPUT_DEST_SOCKET:
+    case OUTPUT_DATA_DEST_SOCKET:
       // SDR data destination address (usually multicast)
       // Becomes our data input socket
       if(optlen == 6){
 	struct sockaddr_in *sin;
-	sin = (struct sockaddr_in *)&demod->input.dest_address;
+	sin = (struct sockaddr_in *)&demod->input.data_dest_address;
 	sin->sin_family = AF_INET;
 	memcpy(&sin->sin_addr.s_addr,cp,4);
 	memcpy(&sin->sin_port,cp+4,2);
       } else if(optlen == 10){
 	struct sockaddr_in6 *sin6;
-	sin6 = (struct sockaddr_in6 *)&demod->input.dest_address;
+	sin6 = (struct sockaddr_in6 *)&demod->input.data_dest_address;
 	sin6->sin6_family = AF_INET6;
 	memcpy(&sin6->sin6_addr,cp,8);
 	memcpy(&sin6->sin6_port,cp+8,2);
@@ -436,8 +511,16 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       nfreq = decode_double(cp,optlen);
       break;
     case OUTPUT_SAMPRATE:
-      demod->input.samprate = demod->sdr.status.samprate = decode_int(cp,optlen);
-      demod->filter.decimate = demod->sdr.status.samprate / demod->output.samprate;
+      nsamprate = decode_int(cp,optlen);
+      if(nsamprate != demod->sdr.status.samprate){
+	demod->input.samprate = demod->sdr.status.samprate = nsamprate;
+	demod->filter.decimate = demod->sdr.status.samprate / demod->output.samprate;
+	if(demod->filter.out)
+	  set_filter(demod->filter.out,
+		     demod->filter.low/demod->output.samprate,
+		     demod->filter.high/demod->output.samprate,
+		     demod->filter.kaiser_beta);
+      }
       break;
     case GPS_TIME:
       demod->sdr.status.timestamp = decode_int(cp,optlen);

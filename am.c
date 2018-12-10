@@ -36,7 +36,13 @@ void *demod_am(void *arg){
 
   struct filter_out * const filter = demod->filter.out;
 
-  while(!demod->terminate){
+  while(1){
+    // Are we active?
+    pthread_mutex_lock(&demod->demod_mutex);
+    while(demod->demod_type != AM_DEMOD)
+      pthread_cond_wait(&demod->demod_cond,&demod->demod_mutex);
+    pthread_mutex_unlock(&demod->demod_mutex);
+
     // New samples
     execute_filter_output(filter);    
 
@@ -67,6 +73,5 @@ void *demod_am(void *arg){
     send_mono_output(demod,samples,filter->olen);
     // Scale to each sample so baseband power will display correctly
     demod->sig.bb_power = signal / filter->olen;
-  } // terminate
-  pthread_exit(NULL);
+  }
 }

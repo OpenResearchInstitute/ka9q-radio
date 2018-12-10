@@ -68,8 +68,12 @@ struct demod {
     int nctlrx_fd; // Socket for status from front end
 
     char dest_address_text[256];
-    struct sockaddr_storage source_address; // Source of I/Q data
-    struct sockaddr_storage dest_address;   // Dest of I/Q data (typically multicast)
+    struct sockaddr_storage metadata_source_address; // Source of SDR metadata
+    struct sockaddr_storage metadata_dest_address;   // Dest of metadata (typically multicast)
+    uint64_t metadata_packets;
+    
+    struct sockaddr_storage data_source_address; // Source of I/Q data
+    struct sockaddr_storage data_dest_address;   // Dest of I/Q data (typically multicast)
     struct rtp_state rtp; // State of the I/Q RTP receiver
     long long samples;    // Count of raw I/Q samples received
     int samprate;
@@ -137,13 +141,18 @@ struct demod {
     int isb;     // Independent sideband mode
   } filter;
 
-  // Mode-specific demodulator thread
+  // Demodulator threads
+  // All three threads now run continuously, but only the selected one processes input
   // Run output half of pre-detection filter and pass through AM, FM or linear demodulator
   // The AM and linear demodulators send baseband audio directly to the network;
   // the FM demodulator performs further audio filtering
-  pthread_t demod_thread;
-  int terminate;              // set to 1 by set_mode() to request graceful termination
+  pthread_t am_demod_thread;
+  pthread_t fm_demod_thread;
+  pthread_t linear_demod_thread;
 
+  // Protect demod_type
+  pthread_mutex_t demod_mutex;
+  pthread_cond_t demod_cond;
   enum demod_type demod_type;            // Index into demodulator table (AM, FM, Linear)
 
   struct {
@@ -185,8 +194,12 @@ struct demod {
     int silent; // last packet was suppressed (used to generate RTP mark bit)
     struct rtp_state rtp;
     char dest_address_text[256];
-    struct sockaddr_storage source_address;
-    struct sockaddr_storage dest_address;
+    struct sockaddr_storage metadata_source_address; // Source of SDR metadata
+    struct sockaddr_storage metadata_dest_address;   // Dest of metadata (typically multicast)
+    uint64_t metadata_packets;
+    
+    struct sockaddr_storage data_source_address; // Source of I/Q data
+    struct sockaddr_storage data_dest_address;   // Dest of I/Q data (typically multicast)
     int rtp_sock;         // File descriptor for multicast output
     int rtcp_sock;    // File descriptor for RTP control protocol
     int status_sock;  // File descriptor for receiver status
@@ -218,7 +231,6 @@ double get_doppler(struct demod *);
 double get_doppler_rate(struct demod *);
 int set_doppler(struct demod *,double,double);
 int preset_mode(struct demod *,const char *);
-int engage_mode(struct demod *);
 int set_cal(struct demod *,double);
 void *proc_samples(void *);
 const float compute_n0(struct demod const *);

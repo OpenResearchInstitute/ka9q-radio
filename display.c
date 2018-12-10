@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.143 2018/12/05 07:08:01 karn Exp karn $
+// $Id: display.c,v 1.144 2018/12/09 12:12:20 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -366,11 +366,21 @@ void *display(void *arg){
   wprintw(debug,"KA9Q SDR Receiver v1.0; Copyright 2017-2018 Phil Karn\n");
   wprintw(debug,"Compiled on %s at %s\n",__DATE__,__TIME__);
 
-  struct sockcache input_source,input_dest,output_dest,output_source;
-  memset(&input_source,0,sizeof(input_source));
-  memset(&output_source,0,sizeof(output_source));
-  memset(&input_dest,0,sizeof(input_dest));
-  memset(&output_dest,0,sizeof(output_dest));
+  struct sockcache input_data_source,input_data_dest;
+  memset(&input_data_source,0,sizeof(input_data_source));
+  memset(&input_data_dest,0,sizeof(input_data_dest));
+  
+  struct sockcache output_data_source,output_data_dest;
+  memset(&output_data_source,0,sizeof(output_data_source));
+  memset(&output_data_dest,0,sizeof(output_data_dest));
+  
+  struct sockcache input_metadata_source,input_metadata_dest;
+  memset(&input_metadata_source,0,sizeof(input_metadata_source));
+  memset(&input_metadata_dest,0,sizeof(input_metadata_dest));  
+
+  struct sockcache output_metadata_source,output_metadata_dest;
+  memset(&output_metadata_source,0,sizeof(output_metadata_source));
+  memset(&output_metadata_dest,0,sizeof(output_metadata_dest));
 
   mmask_t mask = ALL_MOUSE_EVENTS;
   mousemask(mask,NULL);
@@ -648,14 +658,21 @@ void *display(void *arg){
     col = 1;
     wmove(network,0,0);
     wclrtobot(network);
-    update_sockcache(&input_source,(struct sockaddr *)&demod->input.source_address);
-    update_sockcache(&input_dest,(struct sockaddr *)&demod->input.dest_address);
-    mvwprintw(network,row++,col,"Source: %s:%s -> %s:%s; ssrc %0lx",
-	      input_source.host,input_source.port,
-	      input_dest.host,input_dest.port,
+    update_sockcache(&input_metadata_source,(struct sockaddr *)&demod->input.metadata_source_address);
+    update_sockcache(&input_metadata_dest,(struct sockaddr *)&demod->input.metadata_dest_address);
+    mvwprintw(network,row++,col,"Input metadata: %s:%s -> %s:%s; pkts %'llu",
+	      input_metadata_source.host,input_metadata_source.port,
+	      input_metadata_dest.host,input_metadata_dest.port,
+	      demod->input.metadata_packets);
+    
+    update_sockcache(&input_data_source,(struct sockaddr *)&demod->input.data_source_address);
+    update_sockcache(&input_data_dest,(struct sockaddr *)&demod->input.data_dest_address);
+    mvwprintw(network,row++,col,"Input data: %s:%s -> %s:%s; ssrc %0lx",
+	      input_data_source.host,input_data_source.port,
+	      input_data_dest.host,input_data_dest.port,
 	      demod->input.rtp.ssrc);
 
-    mvwprintw(network,row++,col,"IQ pkts %'llu samples %'llu",
+    mvwprintw(network,row++,col,"  pkts %'llu samples %'llu",
 	      demod->input.rtp.packets,demod->input.samples);
 
     if(demod->input.rtp.drops)
@@ -664,11 +681,11 @@ void *display(void *arg){
       wprintw(network," dupes %'llu",demod->input.rtp.dupes);
 
     mvwprintw(network,row++,col,"Time: %s",lltime(demod->sdr.status.timestamp));
-    update_sockcache(&output_source,(struct sockaddr *)&demod->output.source_address);
-    update_sockcache(&output_dest,(struct sockaddr *)&demod->output.dest_address);
-    mvwprintw(network,row++,col,"Sink: %s:%s -> %s:%s; ssrc %8x; TTL %d%s",
-	      output_source.host,output_source.port,
-	      output_dest.host,output_dest.port,
+    update_sockcache(&output_data_source,(struct sockaddr *)&demod->output.data_source_address);
+    update_sockcache(&output_data_dest,(struct sockaddr *)&demod->output.data_dest_address);
+    mvwprintw(network,row++,col,"Output data: %s:%s -> %s:%s; ssrc %8x; TTL %d%s",
+	      output_data_source.host,output_data_source.port,
+	      output_data_dest.host,output_data_dest.port,
 	      demod->output.rtp.ssrc,Mcast_ttl,Mcast_ttl == 0 ? " (Local host only)":"");
     mvwprintw(network,row++,col,"PCM %'d Hz; pkts %'llu",demod->output.samprate,demod->output.rtp.packets);
 
@@ -745,14 +762,14 @@ void *display(void *arg){
 	  savestate(demod,str);
       }
       break;
-    case 'I': // Change multicast address for input I/Q stream
+    case 'I': // Change multicast address for input metadata
       {
 	char str[160];
 	getentry("IQ input IP dest address: ",str,sizeof(str));
 	if(strlen(str) <= 0)
 	  break;
 
-	int const i = setup_mcast(str,(struct sockaddr *)&demod->input.dest_address,0,0,0);
+	int const i = setup_mcast(str,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,0);
 	if(i == -1){
 	  beep();
 	  break;
@@ -834,8 +851,7 @@ void *display(void *arg){
 	getentry(str,str,sizeof(str));
 	if(strlen(str) <= 0)
 	  break;
-	if(preset_mode(demod,str))
-	  engage_mode(demod);
+	preset_mode(demod,str);
       }
       break;
     case 'f':   // Tune to new radio frequency
@@ -979,8 +995,7 @@ void *display(void *arg){
 	// In the modes window?
 	my--;
 	if(my >= 0 && my < Nmodes){
-	  if(preset_mode(demod,Modes[my].name))
-	    engage_mode(demod);
+	  preset_mode(demod,Modes[my].name);
 	}
       } else if(wmouse_trafo(options,&my,&mx,false)){
 	// In the options window

@@ -1,11 +1,11 @@
-# $Id: Makefile,v 1.127 2018/12/05 07:09:09 karn Exp karn $
-COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
-#COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+# $Id: Makefile,v 1.128 2018/12/06 09:47:42 karn Exp karn $
+#COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
+COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LDLIBS=-lpthread -lbsd -lm
-EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio pcmcat control
+EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio pcmcat control metadump
 AFILES=bandplan.txt help.txt modes.txt
 SYSTEMD_FILES=funcube0.service funcube1.service hackrf0.service radio34.service radio39.service packet.service aprsfeed.service opus-hf.service opus-vhf.service opus-hackrf.service opus-uhf.service
 UDEV_FILES=66-hackrf.rules 68-funcube-dongle-proplus.rules 68-funcube-dongle.rules 69-funcube-ka9q.rules
@@ -62,10 +62,13 @@ pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lbsd
 
 radio: main.o am.o audio.o bandplan.o display.o doppler.o fm.o linear.o modes.o radio.o knob.o touch.o radio_status.o status.o libradio.a
-	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lbsd -lm -lpthread
+	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lbsd -lpthread -lm
 
 control: control.o modes.o misc.o multicast.o bandplan.o status.o
-	$(CC) -g -o $@ $^ -lncurses -lbsd -lm -lpthread -lm
+	$(CC) -g -o $@ $^ -lncurses -lbsd -lpthread -lm
+
+metadump: metadump.o multicast.o status.o libradio.a
+	$(CC) -g -o $@ $^ -lbsd -lpthread -lm
 
 
 # Binary libraries

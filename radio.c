@@ -259,20 +259,20 @@ double set_first_LO(struct demod * const demod,double first_LO){
   double current_lo1 = get_first_LO(demod);
 
   // Just return actual frequency without changing anything
-  if(first_LO == current_lo1 || first_LO <= 0 || demod->tune.lock || demod->input.source_address.ss_family != AF_INET)
+  if(first_LO == current_lo1 || first_LO <= 0 || demod->tune.lock)
     return first_LO;
 
   unsigned char packet[8192],*bp;
   memset(packet,0,sizeof(packet));
   bp = packet;
   *bp++ = 1; // Command
-  encode_double(&bp,RADIO_FREQUENCY,first_LO);
   demod->command_tag = random();
   encode_int32(&bp,COMMAND_TAG,demod->command_tag);
-
+  encode_double(&bp,RADIO_FREQUENCY,first_LO);
   encode_eol(&bp);
   int len = bp - packet;
-  send(demod->input.ctl_fd,packet,len,0);
+  int i = send(demod->input.ctl_fd,packet,len,0);
+  assert(i>0);
   return first_LO;
 }  
 // If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
@@ -348,7 +348,7 @@ int preset_mode(struct demod * const demod,const char * const mode){
     demod->filter.low = mp->low;
     demod->filter.high = mp->high;
   }
-  set_shift(demod,mp->shift);
+  demod->tune.shift = mp->shift;
   demod->opt.flat = mp->flat;
   demod->filter.isb = mp->isb;
   demod->output.channels = mp->channels;
@@ -357,34 +357,19 @@ int preset_mode(struct demod * const demod,const char * const mode){
   demod->agc.attack_rate = mp->attack_rate;
   demod->agc.recovery_rate = mp->recovery_rate;
   demod->agc.hangtime = mp->hangtime;
-  int r = 0;
   if(demod->demod_type != mp->demod_type){
+    pthread_mutex_lock(&demod->demod_mutex);
     demod->demod_type = mp->demod_type;
-    r = 1;
+    pthread_cond_broadcast(&demod->demod_cond);
+    pthread_mutex_unlock(&demod->demod_mutex);
   }
-  return r;
-}      
-
-// Engage whatever mode and settings have been loaded
-int engage_mode(struct demod *demod){
-  demod->terminate = 1;
-  pthread_join(demod->demod_thread,NULL); // Wait for it to finish
-  demod->terminate = 0;
-
-  set_freq(demod,demod->tune.freq,NAN);
   set_shift(demod,demod->tune.shift);
   set_filter(demod->filter.out,
 	     demod->filter.low/demod->output.samprate,
 	     demod->filter.high/demod->output.samprate,
 	     demod->filter.kaiser_beta);
-  // Start demod thread
-  pthread_create(&demod->demod_thread,NULL,Demodtab[demod->demod_type].demod,demod);
   return 0;
-}
-
-
-
-
+}      
 
 // Compute noise spectral density - experimental, my algorithm
 // The problem is telling signal from noise

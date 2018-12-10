@@ -122,7 +122,7 @@ int main(int argc,char *argv[]){
   demod->agc.gain = dB2voltage(80.); // Empirical starting point
 
   // set invalid to start
-  demod->input.source_address.ss_family = -1; // Set invalid
+  demod->input.metadata_source_address.ss_family = -1; // Set invalid
 
   // Find any file argument and load it
   char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:";
@@ -206,15 +206,17 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&demod->second_LO.mutex,NULL);
   pthread_mutex_init(&demod->input.qmutex,NULL);
   pthread_cond_init(&demod->input.qcond,NULL);
+  pthread_mutex_init(&demod->demod_mutex,NULL);
+  pthread_cond_init(&demod->demod_cond,NULL);
 
   // Output socket for commands to SDR
-  demod->input.ctl_fd = setup_mcast(demod->input.dest_address_text,NULL,1,Mcast_ttl,2);
+  demod->input.ctl_fd = setup_mcast(demod->input.dest_address_text,(struct sockaddr *)&demod->input.metadata_dest_address,1,Mcast_ttl,2);
   if(demod->input.ctl_fd == -1){
     fprintf(stderr,"Can't set up SDR control socket\n");
     exit(1);
   }
   // Input socket for status from SDR
-  demod->input.nctlrx_fd = setup_mcast(demod->input.dest_address_text,NULL,0,0,2);
+  demod->input.nctlrx_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,0);
   if(demod->input.nctlrx_fd == -1){
     fprintf(stderr,"Can't set up SDR status socket\n");
     exit(1);
@@ -226,13 +228,13 @@ int main(int argc,char *argv[]){
   // Wait for metadata from the SDR
   fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
   pthread_mutex_lock(&demod->sdr.status_mutex);
-  while(demod->sdr.status.samprate == 0 || demod->input.dest_address.ss_family == 0)
+  while(demod->sdr.status.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
     pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
   pthread_mutex_unlock(&demod->sdr.status_mutex);
   fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
 
   // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
-  demod->input.fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.dest_address,0,0,0);
+  demod->input.fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
   if(demod->input.fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
@@ -277,13 +279,16 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
 
+  set_freq(demod,demod->tune.freq,NAN);
+  // Start demodulators
+  pthread_create(&demod->am_demod_thread,NULL,demod_am,demod);
+  pthread_create(&demod->fm_demod_thread,NULL,demod_fm,demod);  
+  pthread_create(&demod->linear_demod_thread,NULL,demod_linear,demod);
+
   // Start the display thread unless quiet; then just twiddle our thumbs
   pthread_t display_thread;
   if(!Quiet)
     pthread_create(&display_thread,NULL,display,demod);
-
-  engage_mode(demod);
-  set_freq(demod,get_freq(demod),NAN);
 
   while(1)
     usleep(1000000); // probably get rid of this
@@ -317,8 +322,8 @@ void *rtp_recv(void *arg){
     if(!pkt)
       pkt = malloc(sizeof(*pkt));
 
-    socklen_t socksize = sizeof(demod->input.source_address);
-    int size = recvfrom(demod->input.fd,pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&demod->input.source_address,&socksize);
+    socklen_t socksize = sizeof(demod->input.data_source_address);
+    int size = recvfrom(demod->input.fd,pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&demod->input.data_source_address,&socksize);
     if(size <= 0){    // ??
       perror("recvfrom");
       usleep(50000);

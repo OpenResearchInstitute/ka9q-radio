@@ -107,7 +107,13 @@ void *demod_linear(void *arg){
 
   int fft_samples = 0;                  // FFT input samples since last transform
 
-  while(!demod->terminate){
+  while(1){
+    // Are we active?
+    pthread_mutex_lock(&demod->demod_mutex);
+    while(demod->demod_type != LINEAR_DEMOD)
+      pthread_cond_wait(&demod->demod_cond,&demod->demod_mutex);
+    pthread_mutex_unlock(&demod->demod_mutex);
+
     // New samples
     // Copy ISB flag to filter, since it might change
 
@@ -296,12 +302,5 @@ void *demod_linear(void *arg){
     } else
       demod->sig.snr = NAN;
 
-  } // terminate
-  if(fftinbuf)
-    fftwf_free(fftinbuf);
-  if(fftoutbuf)
-    fftwf_free(fftoutbuf);  
-  if(fft_plan)
-    fftwf_destroy_plan(fft_plan);
-  pthread_exit(NULL);
+  }
 }

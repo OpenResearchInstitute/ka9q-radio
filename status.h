@@ -5,22 +5,29 @@
 
 enum status_type {
   EOL = 0,	  
-  GPS_TIME,       // Nanoseconds since GPS epoch (remember to update the leap second tables!)
+  COMMAND_TAG,    // Echoes tag from requester
   COMMANDS,       // Count of input commands
-  INPUT_SOURCE_SOCKET,
-  INPUT_DEST_SOCKET,
+  GPS_TIME,       // Nanoseconds since GPS epoch (remember to update the leap second tables!)
+
+  INPUT_DATA_SOURCE_SOCKET,
+  INPUT_DATA_DEST_SOCKET,
+  INPUT_METADATA_SOURCE_SOCKET,
+  INPUT_METADATA_DEST_SOCKET,
   INPUT_SSRC,
   INPUT_SAMPRATE, // Nominal sample rate (integer)
-  INPUT_PACKETS,
+  INPUT_METADATA_PACKETS,
+  INPUT_DATA_PACKETS,
   INPUT_SAMPLES,
   INPUT_DROPS,
   INPUT_DUPES,
 
-  OUTPUT_DEST_SOCKET,
+  OUTPUT_DATA_SOURCE_SOCKET,
+  OUTPUT_DATA_DEST_SOCKET,
   OUTPUT_SSRC,
   OUTPUT_TTL,
   OUTPUT_SAMPRATE,
-  OUTPUT_PACKETS,
+  OUTPUT_METADATA_PACKETS,
+  OUTPUT_DATA_PACKETS,
 
   // Tuning
   RADIO_FREQUENCY,
@@ -54,25 +61,22 @@ enum status_type {
   NOISE_DENSITY,
 
   // Demodulation
-  RADIO_MODE, // printable string "usb", "lsb", etc
   DEMOD_TYPE, // 0 = linear (default), 1 = AM envelope, 2 = FM
   INDEPENDENT_SIDEBAND, // Linear only
   DEMOD_SNR,       // FM, PLL linear
   DEMOD_GAIN,      // AM, Linear
   FREQ_OFFSET,     // FM, PLL linear
 
+  FM_FLAT,
   PEAK_DEVIATION, // FM only
   PL_TONE,        // FM only
   
+  PLL_ENABLE,
   PLL_LOCK,       // Linear PLL
   PLL_SQUARE,     // Linear PLL
   PLL_PHASE,      // Linear PLL
 
   OUTPUT_CHANNELS, // 1 or 2 in Linear, otherwise 1
-  COMMAND_TAG,    // Echoes tag from requester
-  OUTPUT_SOURCE_SOCKET,
-  PLL_ENABLE,
-  FM_FLAT,
 };
 
 
@@ -99,5 +103,6 @@ uint64_t decode_int(unsigned char *,int);
 float decode_float(unsigned char *,int);
 double decode_double(unsigned char *,int);
 
+void dump_radio_status(unsigned char *buffer,int length);
 
 #endif

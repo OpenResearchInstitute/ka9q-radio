@@ -63,7 +63,12 @@ void *demod_fm(void *arg){
   float lastaudio = 0; // state for impulse noise removal
   int snr_below_threshold = 0; // Number of blocks in which FM snr is below threshold, used for squelch
 
-  while(!demod->terminate){
+  while(1){
+    // Are we active?
+    pthread_mutex_lock(&demod->demod_mutex);
+    while(demod->demod_type != FM_DEMOD)
+      pthread_cond_wait(&demod->demod_cond,&demod->demod_mutex);
+    pthread_mutex_unlock(&demod->demod_mutex);
 
     // Wait for next block of frequency domain data
     execute_filter_output(filter);
@@ -159,15 +164,6 @@ void *demod_fm(void *arg){
     }
     send_mono_output(demod,samples,audio_master->ilen);
   }
-  // Clean up subthreads
-  pthread_join(pl_thread,NULL);
-
-
-  if(audio_filter != NULL)
-    delete_filter_output(audio_filter); // Must delete first
-  delete_filter_input(audio_master);
-
-  pthread_exit(NULL);
 }
 
 // pltask to measure PL tone frequency with FFT
@@ -215,7 +211,7 @@ void *pltask(void *arg){
 
   int fft_ptr = 0;
   int last_fft = 0;
-  while(!demod->terminate){
+  while(1){
     execute_filter_output(pl_filter);
  
     // Determine PL tone frequency with a long FFT operating at the low PL filter sample rate
@@ -261,10 +257,4 @@ void *pltask(void *arg){
 	demod->sig.plfreq = NAN;
     }
   }
-  // Clean up
-  delete_filter_output(pl_filter);
-  fftwf_destroy_plan(pl_plan);
-  fftwf_free(pl_input);
-  fftwf_free(pl_spectrum);
-  return NULL;
 }

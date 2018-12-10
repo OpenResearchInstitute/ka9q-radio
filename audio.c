@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.79 2018/12/02 09:16:45 karn Exp karn $
+// $Id: audio.c,v 1.80 2018/12/09 12:12:20 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -151,21 +151,24 @@ int setup_output(struct demod * const demod,int ttl){
     time_t tt = time(NULL);
     demod->output.rtp.ssrc = tt & 0xffffffff;
   }
-  demod->output.rtp_sock = setup_mcast(demod->output.dest_address_text,(struct sockaddr *)&demod->output.dest_address,1,ttl,0);
+  demod->output.rtp_sock = setup_mcast(demod->output.dest_address_text,(struct sockaddr *)&demod->output.data_dest_address,1,ttl,0);
   if(demod->output.rtp_sock == -1)
     return -1;
-  socklen_t len = sizeof(demod->output.source_address);
-  getsockname(demod->output.rtp_sock,(struct sockaddr *)&demod->output.source_address,&len);
+  socklen_t len = sizeof(demod->output.data_source_address);
+  getsockname(demod->output.rtp_sock,(struct sockaddr *)&demod->output.data_source_address,&len);
 
-  demod->output.rtcp_sock = setup_mcast(demod->output.dest_address_text,NULL,1,ttl,1);
+  // Use same data destination for RTCP
+  demod->output.rtcp_sock = setup_mcast(NULL,(struct sockaddr *)&demod->output.data_dest_address,1,ttl,1);
   if(demod->output.rtcp_sock == -1)
     return -1;
 
-  demod->output.status_sock = setup_mcast(demod->output.dest_address_text,NULL,1,ttl,2);
+  // These will eventually move to separate configured metadata output addresses
+  demod->output.status_sock = setup_mcast(demod->output.dest_address_text,(struct sockaddr *)&demod->output.metadata_dest_address,1,ttl,2);
   if(demod->output.status_sock == -1)
     return -1;
 
-  demod->output.nctl_sock = setup_mcast(demod->output.dest_address_text,NULL,0,ttl,2);
+  // Same remote as status
+  demod->output.nctl_sock = setup_mcast(NULL,(struct sockaddr *)&demod->output.metadata_dest_address,0,ttl,2);
   if(demod->output.nctl_sock == -1)
     return -1;
 

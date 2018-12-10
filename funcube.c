@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.63 2018/12/07 10:15:49 karn Exp karn $
+// $Id: funcube.c,v 1.64 2018/12/09 12:12:20 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -83,7 +83,9 @@ struct rtp_state Rtp;
 int Rtp_sock;     // Socket handle for sending real time stream
 int Nctl_sock;    // Socket handle for incoming commands
 int Status_sock;  // Socket handle for outgoing status messages
-struct sockaddr_storage Output_dest_address; // Multicast output socket
+struct sockaddr_storage Output_data_dest_address; // Multicast output socket
+uint64_t Output_metadata_packets;
+
 
 struct sdrstate FCD;
 pthread_t Display_thread;
@@ -258,7 +260,7 @@ int main(int argc,char *argv[]){
   }
   // Set up RTP output socket
   sleep(1);
-  Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Output_dest_address,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s\n",strerror(errno));
     exit(1);
@@ -438,8 +440,8 @@ void *ncmd(void *arg){
       counter = 0; // Respond with full status
     }
     readback(sdr);
+    Output_metadata_packets++;
     send_fcd_status(sdr,counter == 0);
-    sdr->command_tag = 0; // Send only once
     if(!No_hold_open){
       do_fcd_agc(sdr);
     } else if(sdr->phd != NULL){
@@ -572,16 +574,17 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   encode_int64(&bp,GPS_TIME,timestamp);
   encode_int64(&bp,COMMANDS,Commands);
   // Where we're sending output
-  // Right now the metadata and data are both sent to Output_dest_address, but I may add
-  // the option to make them different. Then Output_dest_address will refer to the data stream
+  // Right now the metadata and data are both sent to Output_data_dest_address, but I may add
+  // the option to make them different. Then Output_data_dest_address will refer to the data stream
   // ie., the users seeing this metadata stream will know where to look for the data stream
   {
     struct sockaddr_in *sin;
     struct sockaddr_in6 *sin6;
-    *bp++ = OUTPUT_DEST_SOCKET;
-    switch(Output_dest_address.ss_family){
+
+    switch(Output_data_dest_address.ss_family){
     case AF_INET:
-      sin = (struct sockaddr_in *)&Output_dest_address;
+      *bp++ = OUTPUT_DATA_DEST_SOCKET;
+      sin = (struct sockaddr_in *)&Output_data_dest_address;
       *bp++ = 6;
       memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
       bp += 4;
@@ -589,7 +592,8 @@ void send_fcd_status(struct sdrstate *sdr,int full){
       bp += 2;
       break;
     case AF_INET6:
-      sin6 = (struct sockaddr_in6 *)&Output_dest_address;
+      *bp++ = OUTPUT_DATA_DEST_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&Output_data_dest_address;
       *bp++ = 10;
       memcpy(bp,&sin6->sin6_addr,8);
       bp += 8;
@@ -603,7 +607,8 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   encode_int32(&bp,OUTPUT_SSRC,Rtp.ssrc);
   encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
   encode_int32(&bp,OUTPUT_SAMPRATE,ADC_samprate);
-  encode_int64(&bp,OUTPUT_PACKETS,Rtp.packets);
+  encode_int64(&bp,OUTPUT_DATA_PACKETS,Rtp.packets);
+  encode_int64(&bp,OUTPUT_METADATA_PACKETS,Output_metadata_packets);
   
   // Tuning
   encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
