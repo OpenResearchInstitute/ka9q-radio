@@ -77,7 +77,7 @@ void send_radio_status(struct demod *demod,int full){
   
   *bp++ = 0; // Response (not a command);
   
-  encode_int(&bp,COMMAND_TAG,demod->command_tag);
+  encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
   encode_int64(&bp,COMMANDS,Commands);
 
   struct timeval tp;
@@ -453,7 +453,7 @@ void *recv_sdr_status(void *arg){
 
     memset(buffer,0,sizeof(buffer));
     socklen_t socklen;
-    int len = recvfrom(demod->input.ctl_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->input.metadata_source_address,&socklen);
+    int len = recvfrom(demod->input.status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->input.metadata_source_address,&socklen);
     if(len <= 0){
       sleep(1);
       continue;

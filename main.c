@@ -144,7 +144,7 @@ int main(int argc,char *argv[]){
     case 'f':   // Initial RF tuning frequency
       demod->tune.freq = parse_frequency(optarg);
       break;
-    case 'I':   // Multicast address to listen to for I/Q data
+    case 'I':   // Multicast address to listen to for receiver metadata
       strlcpy(demod->input.dest_address_text,optarg,sizeof(demod->input.dest_address_text));
       break;
     case 'k':   // Kaiser window shape parameter; 0 = rectangular
@@ -216,8 +216,8 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   // Input socket for status from SDR
-  demod->input.ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,0);
-  if(demod->input.ctl_fd == -1){
+  demod->input.status_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,0);
+  if(demod->input.status_fd == -1){
     fprintf(stderr,"Can't set up SDR status socket\n");
     exit(1);
   }

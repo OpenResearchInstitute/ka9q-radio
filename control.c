@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.19 2018/12/09 12:12:20 karn Exp karn $
+// $Id: control.c,v 1.20 2018/12/10 11:53:31 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -1016,8 +1016,8 @@ int main(int argc,char *argv[]){
       if(demod->opt.flat != old_demod.opt.flat)
 	encode_int(&bp,FM_FLAT,demod->opt.flat);
 
-      demod->command_tag = random();
-      encode_int(&bp,COMMAND_TAG,demod->command_tag);
+      demod->output.command_tag = random();
+      encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
 
       encode_eol(&bp);
       send(Nctl_sock, cmd_packet, bp - cmd_packet, 0);
