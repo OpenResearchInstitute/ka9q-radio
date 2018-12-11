@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.127 2018/12/05 07:08:41 karn Exp karn $
+// $Id: main.c,v 1.129 2018/12/10 11:54:45 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -216,8 +216,8 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   // Input socket for status from SDR
-  demod->input.nctlrx_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,0);
-  if(demod->input.nctlrx_fd == -1){
+  demod->input.ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,0);
+  if(demod->input.ctl_fd == -1){
     fprintf(stderr,"Can't set up SDR status socket\n");
     exit(1);
   }
@@ -234,8 +234,8 @@ int main(int argc,char *argv[]){
   fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
 
   // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
-  demod->input.fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
-  if(demod->input.fd == -1){
+  demod->input.data_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
+  if(demod->input.data_fd == -1){
     fprintf(stderr,"Can't set up I/Q input\n");
     exit(1);
   }
@@ -323,7 +323,7 @@ void *rtp_recv(void *arg){
       pkt = malloc(sizeof(*pkt));
 
     socklen_t socksize = sizeof(demod->input.data_source_address);
-    int size = recvfrom(demod->input.fd,pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&demod->input.data_source_address,&socksize);
+    int size = recvfrom(demod->input.data_fd,pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&demod->input.data_source_address,&socksize);
     if(size <= 0){    // ??
       perror("recvfrom");
       usleep(50000);
@@ -522,7 +522,7 @@ void *rtcp_send(void *arg){
     dp = gen_sdes(dp,sizeof(buffer) - (dp-buffer),demod->output.rtp.ssrc,sdes,4);
 
 
-    send(demod->output.rtcp_sock,buffer,dp-buffer,0);
+    send(demod->output.rtcp_fd,buffer,dp-buffer,0);
   done:;
     usleep(1000000);
   }

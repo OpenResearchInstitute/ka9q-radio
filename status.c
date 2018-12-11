@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.9 2018/12/04 04:33:18 karn Exp karn $
+// $Id: status.c,v 1.10 2018/12/10 11:53:31 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -214,10 +214,10 @@ void dump_radio_status(unsigned char *buffer,int length){
     case EOL: // Shouldn't get here
       goto done;
     case COMMAND_TAG:
-      printf(" cmd tag %lx;",decode_int(cp,optlen));
+      printf(" cmd tag %llx;",decode_int(cp,optlen));
       break;
     case COMMANDS:
-      printf(" commands %'lu;",decode_int(cp,optlen));
+      printf(" commands %'llu;",decode_int(cp,optlen));
       break;
     case GPS_TIME:
       printf(" time %s;",lltime(decode_int(cp,optlen)));
@@ -239,25 +239,25 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" in metadata dst %s:%s;",host,port);
       break;
     case INPUT_SSRC:
-      printf(" in SSRC %lx;",decode_int(cp,optlen));
+      printf(" in SSRC %llx;",decode_int(cp,optlen));
       break;
     case INPUT_SAMPRATE:
-      printf(" in samprate %'lu Hz;",decode_int(cp,optlen));
+      printf(" in samprate %'llu Hz;",decode_int(cp,optlen));
       break;
     case INPUT_DATA_PACKETS:
-      printf(" in data packets %'lu",decode_int(cp,optlen));
+      printf(" in data packets %'llu",decode_int(cp,optlen));
       break;
     case INPUT_METADATA_PACKETS:
-      printf(" in metadata packets %'lu;",decode_int(cp,optlen));
+      printf(" in metadata packets %'llu;",decode_int(cp,optlen));
       break;
     case INPUT_SAMPLES:
-      printf(" in samples %'lu;",decode_int(cp,optlen));
+      printf(" in samples %'llu;",decode_int(cp,optlen));
       break;
     case INPUT_DROPS:
-      printf(" in drops %'lu;",decode_int(cp,optlen));
+      printf(" in drops %'llu;",decode_int(cp,optlen));
       break;
     case INPUT_DUPES:
-      printf(" in dupes %'lu;",decode_int(cp,optlen));
+      printf(" in dupes %'llu;",decode_int(cp,optlen));
       break;
     case OUTPUT_DATA_SOURCE_SOCKET:
       decode_socket(host,port,cp,optlen);      
@@ -268,19 +268,19 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" out data dst %s:%s;",host,port);
       break;
     case OUTPUT_SSRC:
-      printf(" out SSRC %lx;",decode_int(cp,optlen));
+      printf(" out SSRC %llx;",decode_int(cp,optlen));
       break;
     case OUTPUT_TTL:
-      printf(" out TTL %'lu;",decode_int(cp,optlen));
+      printf(" out TTL %'llu;",decode_int(cp,optlen));
       break;
     case OUTPUT_SAMPRATE:
-      printf(" out samprate %'lu Hz;",decode_int(cp,optlen));
+      printf(" out samprate %'llu Hz;",decode_int(cp,optlen));
       break;
     case OUTPUT_DATA_PACKETS:
-      printf(" out data pkts %'lu;",decode_int(cp,optlen));
+      printf(" out data pkts %'llu;",decode_int(cp,optlen));
       break;
     case OUTPUT_METADATA_PACKETS:
-      printf(" out metadata pkts %'lu;",decode_int(cp,optlen));
+      printf(" out metadata pkts %'llu;",decode_int(cp,optlen));
       break;
     case RADIO_FREQUENCY:
       printf(" radio %lg Hz;",decode_double(cp,optlen));
@@ -301,13 +301,13 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" doppler rate %lg Hz/s;",decode_double(cp,optlen));
       break;
     case LNA_GAIN:
-      printf(" lna gain %'lu dB;",decode_int(cp,optlen));
+      printf(" lna gain %'llu dB;",decode_int(cp,optlen));
       break;
     case MIXER_GAIN:
-      printf(" mixer gain %'lu dB;",decode_int(cp,optlen));
+      printf(" mixer gain %'llu dB;",decode_int(cp,optlen));
       break;
     case IF_GAIN:
-      printf(" if gain %'lu dB;",decode_int(cp,optlen));
+      printf(" if gain %'llu dB;",decode_int(cp,optlen));
       break;
     case DC_I_OFFSET:
       printf(" DC I offset %g;",decode_float(cp,optlen));
@@ -331,10 +331,10 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" filter kaiser %g;",decode_float(cp,optlen));      
       break;
     case FILTER_BLOCKSIZE:
-      printf(" filter L %'lu;",decode_int(cp,optlen));
+      printf(" filter L %'llu;",decode_int(cp,optlen));
       break;
     case FILTER_FIR_LENGTH:
-      printf(" filter M %'lu;",decode_int(cp,optlen));
+      printf(" filter M %'llu;",decode_int(cp,optlen));
       break;
     case NOISE_BANDWIDTH:
       printf(" noise BW %g Hz;",decode_float(cp,optlen));
@@ -353,7 +353,7 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" demod %d;",i);
       break;
     case INDEPENDENT_SIDEBAND:
-      printf(" ISB %'lu;",decode_int(cp,optlen));
+      printf(" ISB %'llu;",decode_int(cp,optlen));
       break;
     case DEMOD_SNR:
       printf(" Demod SNR %.1f dB;",10*log10f(decode_float(cp,optlen)));
@@ -371,19 +371,19 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" PL tone %g Hz;",decode_float(cp,optlen));
       break;
     case PLL_LOCK:
-      printf(" PLL lock %'lu;",decode_int(cp,optlen));
+      printf(" PLL lock %'llu;",decode_int(cp,optlen));
       break;
     case PLL_ENABLE:
-      printf(" PLL enable %'lu;",decode_int(cp,optlen));
+      printf(" PLL enable %'llu;",decode_int(cp,optlen));
       break;
     case PLL_SQUARE:
-      printf(" PLL square %'lu;",decode_int(cp,optlen));
+      printf(" PLL square %'llu;",decode_int(cp,optlen));
       break;
     case PLL_PHASE:
       printf(" PLL phase %g deg;",(180/M_PI)*decode_float(cp,optlen));
       break;
     case OUTPUT_CHANNELS:
-      printf(" out channels %'lu;",decode_int(cp,optlen));
+      printf(" out channels %'llu;",decode_int(cp,optlen));
       break;
     case CALIBRATE:
       printf(" calibration %lg;",decode_double(cp,optlen));

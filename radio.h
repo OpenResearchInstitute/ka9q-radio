@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.82 2018/12/06 09:46:08 karn Exp karn $
+// $Id: radio.h,v 1.84 2018/12/10 11:55:07 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -63,9 +63,9 @@ struct packet {
 // Demodulator state block
 struct demod {
   struct {
-    int fd;       // Socket for raw incoming I/Q data
+    int data_fd;       // Socket for raw incoming I/Q data
     int ctl_fd;   // Socket for commands to front end
-    int nctlrx_fd; // Socket for status from front end
+    int status_fd; // Socket for status from front end
 
     char dest_address_text[256];
     struct sockaddr_storage metadata_source_address; // Source of SDR metadata
@@ -200,10 +200,10 @@ struct demod {
     
     struct sockaddr_storage data_source_address; // Source of I/Q data
     struct sockaddr_storage data_dest_address;   // Dest of I/Q data (typically multicast)
-    int rtp_sock;         // File descriptor for multicast output
-    int rtcp_sock;    // File descriptor for RTP control protocol
-    int status_sock;  // File descriptor for receiver status
-    int nctl_sock;     // File descriptor for receiving user commands
+    int data_fd;         // File descriptor for multicast output
+    int rtcp_fd;    // File descriptor for RTP control protocol
+    int status_fd;  // File descriptor for receiver status
+    int ctl_fd;     // File descriptor for receiving user commands
     int channels;   // 1 = mono, 2 = stereo
     uint32_t command_tag; // Echoed in responses to commands
   } output;

@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.144 2018/12/09 12:12:20 karn Exp karn $
+// $Id: display.c,v 1.145 2018/12/10 11:53:31 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -774,11 +774,11 @@ void *display(void *arg){
 	  beep();
 	  break;
 	}
-	// demod->input.fd is not protected by a mutex, so swap it carefully
+	// demod->input.data_fd is not protected by a mutex, so swap it carefully
 	// Mutex protection would be difficult because input thread is usually
 	// blocked on the socket, and if there's no I/Q input we'd hang
-	int const j = demod->input.fd;
-	demod->input.fd = i;
+	int const j = demod->input.data_fd;
+	demod->input.data_fd = i;
 	if(j != -1)
 	  close(j); // This should cause the input thread to see an error
 	strlcpy(demod->input.dest_address_text,str,sizeof(demod->input.dest_address_text));

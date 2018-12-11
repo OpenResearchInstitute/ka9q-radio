@@ -44,7 +44,7 @@ void *send_status(void *arg){
   tv.tv_sec = 0;
   tv.tv_usec = 100000; // 100 ms
 
-  if(setsockopt(demod->output.nctl_sock,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))){
+  if(setsockopt(demod->output.ctl_fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))){
     perror("ncmd setsockopt");
     return NULL;
   }
@@ -52,7 +52,7 @@ void *send_status(void *arg){
   while(1){
     unsigned char buffer[8192];
     memset(buffer,0,sizeof(buffer));
-    int length = recv(demod->output.nctl_sock,buffer,sizeof(buffer),0); // Waits up to 100 ms for command
+    int length = recv(demod->output.ctl_fd,buffer,sizeof(buffer),0); // Waits up to 100 ms for command
     if(length > 0){
       // Parse entries
       unsigned char *cp = buffer;
@@ -336,7 +336,7 @@ void send_radio_status(struct demod *demod,int full){
   encode_eol(&bp);
   
   int len = compact_packet(&State[0],packet,full);
-  send(demod->output.status_sock,packet,len,0);
+  send(demod->output.status_fd,packet,len,0);
   demod->output.metadata_packets++;
 }
 
@@ -453,7 +453,7 @@ void *recv_sdr_status(void *arg){
 
     memset(buffer,0,sizeof(buffer));
     socklen_t socklen;
-    int len = recvfrom(demod->input.nctlrx_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->input.metadata_source_address,&socklen);
+    int len = recvfrom(demod->input.ctl_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->input.metadata_source_address,&socklen);
     if(len <= 0){
       sleep(1);
       continue;
