@@ -80,11 +80,8 @@ void send_radio_status(struct demod *demod,int full){
   encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
   encode_int64(&bp,COMMANDS,Commands);
 
-  struct timeval tp;
-  gettimeofday(&tp,NULL);
-  // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
-  long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
-  encode_int64(&bp,GPS_TIME,timestamp);
+  // Echo timestamp from source
+  encode_int64(&bp,GPS_TIME,demod->sdr.status.timestamp);
 
   // Who's sending us I/Q data
   {

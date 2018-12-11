@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.146 2018/12/11 08:13:15 karn Exp karn $
+// $Id: display.c,v 1.147 2018/12/11 10:57:10 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -358,7 +358,7 @@ void *display(void *arg){
   row += 12;
   WINDOW * const network = newwin(9,78,row,col); // Network status information
   col = 0;
-  row += 8;
+  row += 9;
   WINDOW * const debug = newwin(8,78,row,col); // Note: overlaps function keys
   scrollok(debug,1);
 
