@@ -1017,6 +1017,9 @@ uint32_t max2837_freq(uint32_t freq){
 
 void closedown(int a){
   errmsg("caught signal %d: %s\n",a,strsignal(a));
+  hackrf_close(HackCD.device);
+  hackrf_exit();
+
   if(a == SIGTERM) // sent by systemd when shutting down. Return success
     exit(0);
   exit(1);
