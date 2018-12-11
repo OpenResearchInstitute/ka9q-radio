@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.20 2018/12/10 11:53:31 karn Exp karn $
+// $Id: control.c,v 1.21 2018/12/11 09:18:15 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -30,6 +30,8 @@
 #include "multicast.h"
 #include "bandplan.h"
 #include "status.h"
+
+int DAC_samprate = 48000;
 
 float Spare; // General purpose knob for experiments
 

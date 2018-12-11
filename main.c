@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.129 2018/12/10 11:54:45 karn Exp karn $
+// $Id: main.c,v 1.131 2018/12/11 09:13:45 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -33,7 +33,7 @@
 // Config constants
 #define MAXPKT 1500 // Maximum bytes of data in incoming I/Q packet
 char Libdir[] = "/usr/local/share/ka9q-radio";
-int static DAC_samprate = 48000;
+int DAC_samprate = 48000;
 
 // Command line Parameters with default values
 int Nthreads = 1;

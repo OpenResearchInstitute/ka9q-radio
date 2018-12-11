@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.28 2018/11/27 07:35:39 karn Exp karn $
+// $Id: modes.c,v 1.29 2018/12/02 09:16:45 karn Exp karn $
 // Load and search mode definition table in /usr/local/share/ka9q-radio/modes.txt
 
 // Copyright 2018, Phil Karn, KA9Q
@@ -15,6 +15,7 @@
 
 #include "misc.h"
 #include "radio.h"
+#include "dsp.h"
 
 #define MAXMODES 256
 struct modetab Modes[MAXMODES];
@@ -86,9 +87,9 @@ int readmodes(char *file){
       mtp->high = high;
     }
     mtp->shift = strtod(stringp,&stringp);
-    mtp->attack_rate = -fabs(strtod(stringp,&stringp));
-    mtp->recovery_rate = fabs(strtod(stringp,&stringp));
-    mtp->hangtime = fabs(strtod(stringp,&stringp)); // Must be positive
+    mtp->attack_rate = dB2voltage(-fabs(strtod(stringp,&stringp)) / DAC_samprate);
+    mtp->recovery_rate = dB2voltage(fabs(strtod(stringp,&stringp)) / DAC_samprate);
+    mtp->hangtime = fabs(strtod(stringp,&stringp)) * DAC_samprate; // Must be positive
     mtp->channels = 2;
 
     // Process options

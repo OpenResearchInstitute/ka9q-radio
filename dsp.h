@@ -1,4 +1,4 @@
-// $Id: dsp.h,v 1.18 2018/07/06 06:10:44 karn Exp karn $
+// $Id: dsp.h,v 1.19 2018/12/05 09:07:18 karn Exp karn $
 // Low-level, ostly math functions useful for digital signal processing
 #ifndef _DSP_H
 #define _DSP_H 1
@@ -9,6 +9,8 @@
 #include <math.h> // Get M_PI
 
 #define M_1_2PI (0.5 * M_1_PI) // fraction of a rotation in one radian
+
+extern int DAC_samprate;
 
 double const angle_mod(double);
 

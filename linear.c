@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.32 2018/12/06 09:45:52 karn Exp karn $
+// $Id: linear.c,v 1.34 2018/12/10 11:54:45 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -31,11 +31,6 @@ void *demod_linear(void *arg){
 
   // AGC
   int hangcount = 0;
-  float const recovery_factor = dB2voltage(demod->agc.recovery_rate * samptime); // AGC ramp-up rate/sample
-#if 0
-  float const attack_factor = dB2voltage(demod->agc.attack_rate * samptime);      // AGC ramp-down rate/sample
-#endif
-  int const hangmax = demod->agc.hangtime / samptime; // samples before AGC increase
 
   // Coherent mode parameters
   float const snrthreshdb = 3;     // Loop lock threshold at +3 dB SNR
@@ -51,8 +46,8 @@ void *demod_linear(void *arg){
   // FFT bin indices for search limits. Squaring doubles frequency, so double the search range
   float const searchhigh = 300;    // FFT search limits, in Hz
   float const searchlow =  -300;
-  int   const lowlimit =  round((demod->opt.square ? 2 : 1) * searchlow / binsize);
-  int   const highlimit = round((demod->opt.square ? 2 : 1) * searchhigh / binsize);
+  int   const lowlimit =  round(searchlow / binsize);
+  int   const highlimit = round(searchhigh / binsize);
 
   // Second-order PLL loop filter (see Gardner)
   float const vcogain = 2*M_PI;                            // 1 Hz = 2pi radians/sec per "volt"
@@ -174,7 +169,8 @@ void *demod_linear(void *arg){
 	  // Search limited range of FFT buffer for peak energy
 	  int maxbin = 0;
 	  float maxenergy = 0;
-	  for(int n = lowlimit; n <= highlimit; n++){
+	  int sqterm = demod->opt.square ? 2 : 1;
+	  for(int n = sqterm * lowlimit; n <= sqterm * highlimit; n++){
 	    float const e = cnrmf(fftoutbuf[n < 0 ? n + fftsize : n]);
 	    if(e > maxenergy){
 	      maxenergy = e;
@@ -264,12 +260,12 @@ void *demod_linear(void *arg){
 	demod->agc.gain = demod->agc.headroom / amplitude; // Startup
       } else if(amplitude * demod->agc.gain > demod->agc.headroom){
 	demod->agc.gain = demod->agc.headroom / amplitude;
-	//	  demod->agc.gain *= attack_factor;
-	hangcount = hangmax;
+	//	  demod->agc.gain *= demod->agc.attack_rate;
+	hangcount = demod->agc.hangtime;
       } else if(hangcount != 0){
 	hangcount--;
       } else {
-	demod->agc.gain *= recovery_factor;
+	demod->agc.gain *= demod->agc.recovery_rate;
       }
       filter->output.c[n] *= demod->agc.gain;
     }
