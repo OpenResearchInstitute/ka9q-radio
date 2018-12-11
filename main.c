@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.131 2018/12/11 09:13:45 karn Exp karn $
+// $Id: main.c,v 1.132 2018/12/11 11:42:11 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -110,9 +110,7 @@ int main(int argc,char *argv[]){
   demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
   demod->filter.M = 4352+1;    // Length of filter impulse response
   demod->filter.kaiser_beta = 3.0; // Reasonable compromise
-  strlcpy(demod->input.dest_address_text,"iq.hf.mcast.local",sizeof(demod->input.dest_address_text));
   demod->agc.headroom = pow(10.,-15./20); // -15 dB
-  strlcpy(demod->output.dest_address_text,"pcm.hf.mcast.local",sizeof(demod->output.dest_address_text));
   demod->tune.step = 0;  // single digit hertz position
   demod->sdr.imbalance = 1; // 0 dB
   demod->filter.decimate = 1; // default to avoid division by zero
@@ -166,8 +164,11 @@ int main(int argc,char *argv[]){
     case 'q':
       Quiet++;  // Suppress display
       break;
-    case 'R':   // Set output target IP multicast address
-      strlcpy(demod->output.dest_address_text,optarg,sizeof(demod->output.dest_address_text));
+    case 'R':   // Set output target IP multicast address for metadata
+      strlcpy(demod->output.metadata_dest_address_text,optarg,sizeof(demod->output.metadata_dest_address_text));
+      break;
+    case 'D': // target multicast group for pcm data output
+      strlcpy(demod->output.data_dest_address_text,optarg,sizeof(demod->output.data_dest_address_text));      
       break;
     case 's':
       demod->tune.shift = strtod(optarg,NULL);
@@ -398,7 +399,8 @@ int savestate(struct demod *dp,char const *filename){
   fprintf(fp,"#KA9Q DSP Receiver State dump\n");
   fprintf(fp,"Locale %s\n",Locale);
   fprintf(fp,"Source %s\n",dp->input.dest_address_text);
-  fprintf(fp,"Output %s\n",dp->output.dest_address_text);
+  fprintf(fp,"Output %s\n",dp->output.data_dest_address_text);
+  fprintf(fp,"Control %s\n",dp->output.metadata_dest_address_text);
   fprintf(fp,"TTL %d\n",Mcast_ttl);
   fprintf(fp,"Blocksize %d\n",dp->filter.L);
   fprintf(fp,"Impulse len %d\n",dp->filter.M);
@@ -430,6 +432,8 @@ int loadstate(struct demod *dp,char const *filename){
     return -1;
   }
   char line[PATH_MAX];
+  int metadata_set = 0;
+
   while(fgets(line,sizeof(line),fp) != NULL){
     chomp(line);
     if(sscanf(line,"Frequency %lf",&dp->tune.freq) > 0){
@@ -444,12 +448,18 @@ int loadstate(struct demod *dp,char const *filename){
     } else if(sscanf(line,"Tunestep %d",&dp->tune.step) > 0){
     } else if(sscanf(line,"Source %256s",dp->input.dest_address_text) > 0){
       // Array sizes defined elsewhere!
-    } else if(sscanf(line,"Output %256s",dp->output.dest_address_text) > 0){
+    } else if(sscanf(line,"Output %256s",dp->output.data_dest_address_text) > 0){
+    } else if(sscanf(line,"Control %256s",dp->output.metadata_dest_address_text) > 0){
+      metadata_set = 1;
     } else if(sscanf(line,"TTL %d",&Mcast_ttl) > 0){
     } else if(sscanf(line,"Locale %256s",Locale)){
       setlocale(LC_ALL,Locale);
     }
   }
+  // Control defaults to Output if not specified
+  if(!metadata_set)
+    strncpy(dp->output.metadata_dest_address_text,dp->output.data_dest_address_text,sizeof(dp->output.metadata_dest_address_text));
+
   fclose(fp);
   return 0;
 }

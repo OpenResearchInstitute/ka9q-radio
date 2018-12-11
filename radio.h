@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.85 2018/12/11 08:13:15 karn Exp karn $
+// $Id: radio.h,v 1.86 2018/12/11 09:13:15 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -194,7 +194,8 @@ struct demod {
     // RTP network streaming
     int silent; // last packet was suppressed (used to generate RTP mark bit)
     struct rtp_state rtp;
-    char dest_address_text[256];
+    char data_dest_address_text[256];
+    char metadata_dest_address_text[256];
     struct sockaddr_storage metadata_source_address; // Source of SDR metadata
     struct sockaddr_storage metadata_dest_address;   // Dest of metadata (typically multicast)
     uint64_t metadata_packets;
