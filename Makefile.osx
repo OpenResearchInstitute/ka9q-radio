@@ -1,9 +1,9 @@
-# $Id: Makefile.osx,v 1.62 2018/12/11 08:13:15 karn Exp karn $
+# $Id: Makefile.osx,v 1.63 2018/12/11 09:13:15 karn Exp karn $
 CFLAGS=-g -O3 -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
-EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend pcmcat radio control
+EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend pcmcat radio control metadump
 AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)

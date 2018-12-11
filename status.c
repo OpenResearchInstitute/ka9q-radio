@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.11 2018/12/11 08:13:15 karn Exp karn $
+// $Id: status.c,v 1.12 2018/12/11 09:13:15 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -213,14 +213,14 @@ void dump_radio_status(unsigned char *buffer,int length){
     switch(type){
     case EOL: // Shouldn't get here
       goto done;
+    case GPS_TIME:
+      printf(" %s;",lltime((long long unsigned)decode_int(cp,optlen)));
+      break;
     case COMMAND_TAG:
       printf(" cmd tag %llx;",(long long unsigned)decode_int(cp,optlen));
       break;
     case COMMANDS:
       printf(" commands %'llu;",(long long unsigned)decode_int(cp,optlen));
-      break;
-    case GPS_TIME:
-      printf(" time %s;",lltime((long long unsigned)decode_int(cp,optlen)));
       break;
     case INPUT_DATA_SOURCE_SOCKET:
       decode_socket(host,port,cp,optlen);
@@ -283,22 +283,22 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" out metadata pkts %'llu;",(long long unsigned)decode_int(cp,optlen));
       break;
     case RADIO_FREQUENCY:
-      printf(" radio %lg Hz;",decode_double(cp,optlen));
+      printf(" RF %.3lf Hz;",decode_double(cp,optlen));
       break;
     case FIRST_LO_FREQUENCY:
-      printf(" first LO %lg Hz;",decode_double(cp,optlen));
+      printf(" first LO %.3lf Hz;",decode_double(cp,optlen));
       break;
     case SECOND_LO_FREQUENCY:
-      printf(" second LO %lg Hz;",decode_double(cp,optlen));
+      printf(" second LO %.3lf Hz;",decode_double(cp,optlen));
       break;
     case SHIFT_FREQUENCY:
-      printf(" shift %lg Hz;",decode_double(cp,optlen));
+      printf(" shift %.3lf Hz;",decode_double(cp,optlen));
       break;
     case DOPPLER_FREQUENCY:
-      printf(" doppler %lg Hz;",decode_double(cp,optlen));
+      printf(" doppler %.3lf Hz;",decode_double(cp,optlen));
       break;
     case DOPPLER_FREQUENCY_RATE:
-      printf(" doppler rate %lg Hz/s;",decode_double(cp,optlen));
+      printf(" doppler rate %.3lf Hz/s;",decode_double(cp,optlen));
       break;
     case LNA_GAIN:
       printf(" lna gain %'llu dB;",(long long unsigned)decode_int(cp,optlen));
@@ -316,7 +316,7 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" DC Q offset %g;",decode_float(cp,optlen));
       break;
     case IQ_IMBALANCE:
-      printf(" Gain imbal %.1f dB;",10*log10f(decode_float(cp,optlen)));
+      printf(" gain imbal %.1f dB;",10*log10f(decode_float(cp,optlen)));
       break;
     case IQ_PHASE:
       printf(" phase imbal %.1f deg;",(180./M_PI)*asinf(decode_float(cp,optlen)));
@@ -340,10 +340,10 @@ void dump_radio_status(unsigned char *buffer,int length){
       printf(" noise BW %g Hz;",decode_float(cp,optlen));
       break;
     case IF_POWER:
-      printf(" IF pwr %.1f dBFS;",10*log10f(decode_float(cp,optlen)));
+      printf(" IF pwr %.1f dB;",10*log10f(decode_float(cp,optlen)));
       break;
     case BASEBAND_POWER:
-      printf(" BB pwr %.1f dBFS;",10*log10f(decode_float(cp,optlen)));
+      printf(" BB pwr %.1f dB;",10*log10f(decode_float(cp,optlen)));
       break;
     case NOISE_DENSITY:
       printf(" N0 %.1f dB/Hz;",10*log10f(decode_float(cp,optlen)));

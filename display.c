@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.145 2018/12/10 11:53:31 karn Exp karn $
+// $Id: display.c,v 1.146 2018/12/11 08:13:15 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -356,7 +356,7 @@ void *display(void *arg){
 
   col = 0;
   row += 12;
-  WINDOW * const network = newwin(8,78,row,col); // Network status information
+  WINDOW * const network = newwin(9,78,row,col); // Network status information
   col = 0;
   row += 8;
   WINDOW * const debug = newwin(8,78,row,col); // Note: overlaps function keys
@@ -681,6 +681,14 @@ void *display(void *arg){
       wprintw(network," dupes %'llu",demod->input.rtp.dupes);
 
     mvwprintw(network,row++,col,"Time: %s",lltime(demod->sdr.status.timestamp));
+    update_sockcache(&output_metadata_source,(struct sockaddr *)&demod->output.metadata_source_address);
+    update_sockcache(&output_metadata_dest,(struct sockaddr *)&demod->output.metadata_dest_address);
+    mvwprintw(network,row++,col,"Output metadata: %s:%s -> %s:%s; pkts %'llu",
+	      output_metadata_source.host,output_metadata_source.port,
+	      output_metadata_dest.host,output_metadata_dest.port,
+	      demod->output.metadata_packets);
+
+
     update_sockcache(&output_data_source,(struct sockaddr *)&demod->output.data_source_address);
     update_sockcache(&output_data_dest,(struct sockaddr *)&demod->output.data_dest_address);
     mvwprintw(network,row++,col,"Output data: %s:%s -> %s:%s; ssrc %8x; TTL %d%s",

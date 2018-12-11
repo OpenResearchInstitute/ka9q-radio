@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.81 2018/12/10 11:53:31 karn Exp karn $
+// $Id: audio.c,v 1.82 2018/12/11 08:13:15 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -161,6 +161,9 @@ int setup_output(struct demod * const demod,int ttl){
   demod->output.rtcp_fd = setup_mcast(NULL,(struct sockaddr *)&demod->output.data_dest_address,1,ttl,1);
   if(demod->output.rtcp_fd == -1)
     return -1;
+
+  len = sizeof(demod->output.metadata_source_address);
+  getsockname(demod->output.metadata_fd,(struct sockaddr *)&demod->output.metadata_source_address,&len);  
 
   // These will eventually move to separate configured metadata output addresses
   demod->output.status_fd = setup_mcast(demod->output.dest_address_text,(struct sockaddr *)&demod->output.metadata_dest_address,1,ttl,2);
