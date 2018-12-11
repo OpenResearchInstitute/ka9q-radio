@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.61 2018/12/10 11:53:31 karn Exp karn $
+# $Id: Makefile.osx,v 1.62 2018/12/11 08:13:15 karn Exp karn $
 CFLAGS=-g -O3 -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -91,7 +91,7 @@ pcmcat.o: pcmcat.c multicast.h
 pcmsend.o: pcmsend.c misc.h multicast.h
 control.o: control.c radio.h osc.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h status.h
 hackrf.o: hackrf.c sdr.h misc.h multicast.h decimate.h status.h
-metadump.o: metadump.c multicast.h dsp.h status.h
+metadump.o: metadump.c multicast.h dsp.h status.h misc.h
 
 # Components of libfcd.a
 fcd.o: fcd.c fcd.h hidapi.h fcdhidcmd.h
@@ -107,7 +107,7 @@ knob.o: knob.c misc.h
 misc.o: misc.c misc.h 
 multicast.o: multicast.c multicast.h misc.h
 rtcp.o: rtcp.c multicast.h
-status.o: status.c status.h
+status.o: status.c status.h radio.h sdr.h osc.h filter.h
 touch.o: touch.c misc.h
 osc.o: osc.c  osc.h
 

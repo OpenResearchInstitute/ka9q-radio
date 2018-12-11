@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.64 2018/12/09 12:12:20 karn Exp karn $
+// $Id: funcube.c,v 1.65 2018/12/10 11:53:31 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -76,13 +76,15 @@ int Device = 0;
 char *Locale;
 int Daemonize;
 int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by default
-char *Dest;
+char *Metadata_dest;
+char *Data_dest;
 
 // Global variables
 struct rtp_state Rtp;
 int Rtp_sock;     // Socket handle for sending real time stream
 int Nctl_sock;    // Socket handle for incoming commands
 int Status_sock;  // Socket handle for outgoing status messages
+struct sockaddr_storage Output_metadata_dest_address; // Multicast output socket
 struct sockaddr_storage Output_data_dest_address; // Multicast output socket
 uint64_t Output_metadata_packets;
 
@@ -120,11 +122,14 @@ int main(int argc,char *argv[]){
   int c;
   int List_audio = 0;
 
-  while((c = getopt(argc,argv,"dc:vl:b:oR:T:LI:S:")) != -1){
+  while((c = getopt(argc,argv,"dc:vl:b:oR:T:LI:S:D:")) != -1){
     switch(c){
     case 'd':
       Daemonize++;
       Status = NULL;
+      break;
+    case 'D':
+      Data_dest = optarg;
       break;
     case 'L':
       List_audio++;
@@ -133,7 +138,7 @@ int main(int argc,char *argv[]){
       sdr->calibration = strtod(optarg,NULL) * 1e-6; // Calibration offset in ppm
       break;
     case 'R':
-      Dest = optarg;
+      Metadata_dest = optarg;
       break;
     case 'o':
       No_hold_open++; // Close USB control port between commands so fcdpp can be used
@@ -178,7 +183,7 @@ int main(int argc,char *argv[]){
     Pa_Terminate();
     exit(0);
   }
-  if(Dest == NULL){
+  if(Metadata_dest == NULL){
     errmsg("Must specify -R output_address\n");
     exit(1);
   }
@@ -260,7 +265,7 @@ int main(int argc,char *argv[]){
   }
   // Set up RTP output socket
   sleep(1);
-  Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(Data_dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s\n",strerror(errno));
     exit(1);
@@ -283,7 +288,7 @@ int main(int argc,char *argv[]){
     time(&tt);
     Rtp.ssrc = tt & 0xffffffff; // low 32 bits of clock time
   }
-  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,Dest,Blocksize,Rtp.ssrc,Status_filename);
+  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,Metadata_dest,Blocksize,Rtp.ssrc,Status_filename);
   // Gain and phase corrections. These will be updated every block
   float gain_q = 1;
   float gain_i = 1;
@@ -401,12 +406,12 @@ void *ncmd(void *arg){
   memset(State,0,sizeof(State));
 
   // Set up status socket on port 5006
-  Status_sock = setup_mcast(Dest,NULL,1,Mcast_ttl,2); // For output
+  Status_sock = setup_mcast(Metadata_dest,(struct sockaddr *)&Output_metadata_dest_address,1,Mcast_ttl,2); // For output
   if(Status_sock <= 0)
     return NULL;
 
   // Set up new control socket on port 5006
-  Nctl_sock = setup_mcast(Dest,NULL,0,Mcast_ttl,2); // For input
+  Nctl_sock = setup_mcast(NULL,(struct sockaddr *)&Output_metadata_dest_address,0,Mcast_ttl,2); // For input
   if(Nctl_sock <= 0){
     close(Status_sock);
     return NULL; // Nothing to do

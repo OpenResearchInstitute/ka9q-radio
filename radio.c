@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.108 2018/12/06 09:49:53 karn Exp karn $
+// $Id: radio.c,v 1.111 2018/12/10 11:54:45 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -266,8 +266,8 @@ double set_first_LO(struct demod * const demod,double first_LO){
   memset(packet,0,sizeof(packet));
   bp = packet;
   *bp++ = 1; // Command
-  demod->command_tag = random();
-  encode_int32(&bp,COMMAND_TAG,demod->command_tag);
+  demod->input.command_tag = random();
+  encode_int32(&bp,COMMAND_TAG,demod->input.command_tag);
   encode_double(&bp,RADIO_FREQUENCY,first_LO);
   encode_eol(&bp);
   int len = bp - packet;

@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.84 2018/12/10 11:55:07 karn Exp karn $
+// $Id: radio.h,v 1.85 2018/12/11 08:13:15 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -81,6 +81,7 @@ struct demod {
     pthread_cond_t qcond;
     pthread_mutex_t qmutex;
     struct packet *queue;
+    uint32_t command_tag;  // Our tag for pending command to front end
   } input;
 
   // Front end hardware information
@@ -207,7 +208,6 @@ struct demod {
     int channels;   // 1 = mono, 2 = stereo
     uint32_t command_tag; // Echoed in responses to commands
   } output;
-  uint32_t command_tag;
 };
 extern char Libdir[];
 extern int Tunestep;

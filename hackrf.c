@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.21 2018/12/09 12:12:20 karn Exp karn $
+// $Id: hackrf.c,v 1.22 2018/12/10 11:53:31 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -72,7 +72,9 @@ char *Locale;
 int Offset=1;     // Default to offset high by +Fs/4 downconvert in software to avoid DC
 int Daemonize = 0;
 int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by default
-char *Dest = "239.1.6.1"; // Default for testing
+char *Data_dest = "239.1.6.10";
+char *Metadata_dest = "239.1.6.1"; // Default for testing
+struct sockaddr_storage Output_metadata_dest_address;
 
 // Global variables
 struct rtp_state Rtp;
@@ -80,6 +82,9 @@ int Rtp_sock;     // Socket handle for sending real time stream
 int Nctl_sock;    // Socket handle for incoming commands
 int Status_sock;  // Socket handle for outgoing status messages
 struct sockaddr_storage Output_data_dest_address; // Multicast output socket
+struct sockaddr_storage Output_data_source_address; // Multicast output socket
+
+
 uint64_t Output_metadata_packets;
 
 struct sdrstate HackCD;
@@ -133,10 +138,10 @@ int main(int argc,char *argv[]){
       Out_samprate = strtol(optarg,NULL,0);
       break;
     case 'R':
-      Dest = optarg;
+      Metadata_dest = optarg;
       break;
     case 'D':
-      Decimate = strtol(optarg,NULL,0);
+      Data_dest = optarg;
       break;
     case 'I':
       Device = strtol(optarg,NULL,0);
@@ -220,7 +225,7 @@ int main(int argc,char *argv[]){
   Filter_atten = powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
 
   // Set up RTP output socket
-  Rtp_sock = setup_mcast(Dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
+  Rtp_sock = setup_mcast(Data_dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
   if(Rtp_sock == -1){
     errmsg("Can't create multicast socket: %s",strerror(errno));
     exit(1);
@@ -276,7 +281,7 @@ int main(int argc,char *argv[]){
   time(&tt);
   if(Rtp.ssrc == 0)
     Rtp.ssrc = tt & 0xffffffff; // low 32 bits of clock time
-  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,Dest,Blocksize,Rtp.ssrc,Status_filename);
+  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,Data_dest,Blocksize,Rtp.ssrc,Status_filename);
   errmsg("A/D sample rate %'d Hz; decimation ratio %d; output sample rate %'d Hz; Offset %'+d\n",
 	 ADC_samprate,Decimate,Out_samprate,Offset * ADC_samprate/4);
 
@@ -467,12 +472,13 @@ void *ncmd(void *arg){
   memset(State,0,sizeof(State));
 
   // Set up status socket on port 5006
-  Status_sock = setup_mcast(Dest,NULL,1,Mcast_ttl,2); // For output
+  Status_sock = setup_mcast(Metadata_dest,(struct sockaddr *)&Output_metadata_dest_address,1,Mcast_ttl,2); // For output
+
   if(Status_sock <= 0)
     return NULL; // Nothing to do
 
   // Set up new control socket on port 5006
-  Nctl_sock = setup_mcast(Dest,NULL,0,Mcast_ttl,2); // For input
+  Nctl_sock = setup_mcast(NULL,(struct sockaddr *)&Output_metadata_dest_address,0,0,0); // For input
   if(Nctl_sock <= 0){
     close(Status_sock);
     return NULL;
@@ -621,10 +627,36 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
   encode_int64(&bp,GPS_TIME,timestamp);
 
+  // Source address we're using to send data
+  {
+    struct sockaddr_in *sin;
+    struct sockaddr_in6 *sin6;
+    
+    switch(Output_data_source_address.ss_family){
+    case AF_INET:
+      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
+      sin = (struct sockaddr_in *)&Output_data_source_address;
+      *bp++ = 6;
+      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+      bp += 4;
+      memcpy(bp,&sin->sin_port,2);
+      bp += 2;
+      break;
+    case AF_INET6:
+      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
+      sin6 = (struct sockaddr_in6 *)&Output_data_source_address;
+      *bp++ = 10;
+      memcpy(bp,&sin6->sin6_addr,8);
+      bp += 8;
+      memcpy(bp,&sin6->sin6_port,2);
+      bp += 2;
+      break;
+    default:
+      break;
+    }
+  }
+
   // Where we're sending output
-  // Right now the metadata and data are both sent to Output_dest_address, but I may add
-  // the option to make them different. Then Output_dest_address will refer to the data stream
-  // ie., the users seeing this metadata stream will know where to look for the data stream
   {
     struct sockaddr_in *sin;
     struct sockaddr_in6 *sin6;
