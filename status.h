@@ -77,6 +77,12 @@ enum status_type {
   PLL_PHASE,      // Linear PLL
 
   OUTPUT_CHANNELS, // 1 or 2 in Linear, otherwise 1
+
+  // Settable gain parameters
+  HEADROOM,       // Audio level headroom
+  AGC_HANGTIME,   // AGC hang time
+  AGC_RECOVERY_RATE,
+  AGC_ATTACK_RATE,
 };
 
 

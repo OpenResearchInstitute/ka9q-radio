@@ -1,4 +1,4 @@
-// $Id$
+// $Id: dump.c,v 1.1 2018/12/12 08:38:28 karn Exp karn $
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
@@ -211,6 +211,18 @@ void dump_metadata(unsigned char *buffer,int length){
       break;
     case CALIBRATE:
       printf(" calibration %lg;",decode_double(cp,optlen));
+      break;
+    case HEADROOM:
+      printf(" headroom %lg dB;",decode_float(cp,optlen));
+      break;
+    case AGC_HANGTIME:
+      printf(" hangtime %lg s;",decode_float(cp,optlen));
+      break;
+    case AGC_RECOVERY_RATE:
+      printf(" recovery rate %lg dB/s;",decode_float(cp,optlen));
+      break;
+    case AGC_ATTACK_RATE:
+      printf(" attack rate %lg dB/s;",decode_float(cp,optlen));
       break;
     default:
       break;

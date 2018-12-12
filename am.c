@@ -1,4 +1,4 @@
-// $Id: am.c,v 1.40 2018/12/06 09:45:29 karn Exp karn $
+// $Id: am.c,v 1.42 2018/12/10 11:54:05 karn Exp karn $
 // AM envelope demodulator thread for 'radio'
 // Copyright Oct 9 2017, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -24,9 +24,12 @@ void *demod_am(void *arg){
   // I originally just kept the carrier at constant amplitude
   // but this fails when selective fading takes out the carrier, resulting in loud, distorted audio
   int hangcount = 0;
-  float const recovery_factor = dB2voltage(demod->agc.recovery_rate * samptime); // AGC ramp-up rate/sample
-  //  float const attack_factor = dB2voltage(demod->agc.attack_rate * samptime);      // AGC ramp-down rate/sample
-  int const hangmax = demod->agc.hangtime / samptime; // samples before AGC increase
+#if 0
+  float attack_rate_per_sample = dB2voltage(demod->agc.attack_rate * samptime);
+  float prev_attack_rate = demod->agc.attack_rate;
+#endif
+  float recovery_rate_per_sample = dB2voltage(demod->agc.recovery_rate * samptime);
+  float prev_recovery_rate = demod->agc.recovery_rate;
 
   // DC removal from envelope-detected AM and coherent AM
   float DC_filter = 0;
@@ -43,7 +46,19 @@ void *demod_am(void *arg){
       pthread_cond_wait(&demod->demod_cond,&demod->demod_mutex);
     pthread_mutex_unlock(&demod->demod_mutex);
 
-    // New samples
+    // Recompute AGC if it has changed
+#if 0
+    if(demod->agc.attack_rate != prev_attack_rate){
+      attack_rate_per_sample = dB2voltage(demod->agc.attack_rate * samptime);
+      prev_attack_rate = demod->agc.attack_rate;
+    }
+#endif
+    if(demod->agc.recovery_rate != prev_recovery_rate){
+      recovery_rate_per_sample = dB2voltage(demod->agc.recovery_rate * samptime);
+      prev_recovery_rate = demod->agc.recovery_rate;
+    }
+
+    // Wait for new samples
     execute_filter_output(filter);    
 
     // AM envelope detector
@@ -62,11 +77,11 @@ void *demod_am(void *arg){
 	demod->agc.gain = demod->agc.headroom / DC_filter;
       } else if(demod->agc.gain * DC_filter > demod->agc.headroom){
 	demod->agc.gain = demod->agc.headroom / DC_filter;
-	hangcount = hangmax;
+	hangcount = demod->agc.hangtime * demod->output.samprate;
       } else if(hangcount != 0){
 	hangcount--;
       } else {
-	demod->agc.gain *= recovery_factor;
+	demod->agc.gain *= recovery_rate_per_sample;
       }
       samples[n] = (samp - DC_filter) * demod->agc.gain;
     }

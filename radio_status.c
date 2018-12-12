@@ -324,7 +324,11 @@ void send_radio_status(struct demod *demod,int full){
       encode_float(&bp,DEMOD_SNR,demod->sig.snr);
       encode_byte(&bp,PLL_LOCK,demod->sig.pll_lock);
       encode_byte(&bp,PLL_SQUARE,demod->opt.square);
-      }
+    }
+    encode_float(&bp,HEADROOM,demod->agc.headroom);
+    encode_float(&bp,AGC_HANGTIME,demod->agc.hangtime);
+    encode_float(&bp,AGC_ATTACK_RATE,demod->agc.attack_rate);
+    encode_float(&bp,AGC_RECOVERY_RATE,demod->agc.attack_rate);    
     break;
   }
   encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
@@ -422,6 +426,18 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       break;
     case COMMAND_TAG:
       demod->output.command_tag = decode_int(cp,optlen);
+      break;
+    case HEADROOM:
+      demod->agc.headroom = decode_float(cp,optlen);
+      break;
+    case AGC_HANGTIME:
+      demod->agc.hangtime = decode_float(cp,optlen);
+      break;
+    case AGC_RECOVERY_RATE:
+      demod->agc.recovery_rate = decode_float(cp,optlen);
+      break;
+    case AGC_ATTACK_RATE:
+      demod->agc.attack_rate = decode_float(cp,optlen);
       break;
     default:
       break;
