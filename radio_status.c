@@ -359,12 +359,11 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       break;
     case DEMOD_TYPE:
       i = decode_int(cp,optlen);
-      // Kill current demod thread, if any, to cause clean exit
-      
       if(demod->demod_type != i){
+	// Notify demod threads of the change
 	pthread_mutex_lock(&demod->demod_mutex);
 	demod->demod_type = i;
-	pthread_cond_signal(&demod->demod_cond);
+	pthread_cond_broadcast(&demod->demod_cond);
 	pthread_mutex_unlock(&demod->demod_mutex);
       }
       break;

@@ -102,7 +102,8 @@ int compact_packet(struct state *s,unsigned char *pkt,int force);
 uint64_t decode_int(unsigned char *,int);
 float decode_float(unsigned char *,int);
 double decode_double(unsigned char *,int);
+int decode_socket(void *sock,unsigned char *,int);
 
-void dump_radio_status(unsigned char *buffer,int length);
+void dump_metadata(unsigned char *,int);
 
 #endif

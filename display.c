@@ -1,4 +1,4 @@
-// $Id: display.c,v 1.147 2018/12/11 10:57:10 karn Exp karn $
+// $Id: display.c,v 1.148 2018/12/11 11:09:56 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -308,6 +308,7 @@ void *display(void *arg){
   assert(arg != NULL);
   struct demod * const demod = arg;
 
+#if 0
 #ifdef linux
   extern void *knob(void *);
   pthread_t pthread_knob;
@@ -317,12 +318,10 @@ void *display(void *arg){
   pthread_t pthread_touch;
   pthread_create(&pthread_touch,NULL,touch,demod);   // Disable for now
 #endif
+#endif
 
   atexit(display_cleanup);
 
-#if FUNCTIONKEYS
-  slk_init(3);
-#endif
   // talk directly to the terminal
   Tty = fopen("/dev/tty","r+");
   Term = newterm(NULL,Tty,Tty);

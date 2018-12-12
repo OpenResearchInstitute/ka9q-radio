@@ -1,4 +1,4 @@
-// $Id$
+// $Id: metadump.c,v 1.1 2018/12/10 11:53:31 karn Exp karn $
 // Utility to trace multicast SDR metadata
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -32,8 +32,6 @@ int Verbose,Dump;
 
 char Locale[256] = "en_US.UTF-8";
 
-void dump_radio_status(unsigned char *buffer,int length);
-
 int main(int argc,char *argv[]){
   int c;
 
@@ -66,7 +64,7 @@ int main(int argc,char *argv[]){
     }
     int cr = buffer[0]; // Command/response byte
     printf("%s:",cr ? "CMD " : "STAT");
-    dump_radio_status(buffer+1,length-1);
+    dump_metadata(buffer+1,length-1);
   }
 }
 

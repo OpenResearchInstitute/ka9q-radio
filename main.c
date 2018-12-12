@@ -123,7 +123,7 @@ int main(int argc,char *argv[]){
   demod->input.metadata_source_address.ss_family = -1; // Set invalid
 
   // Find any file argument and load it
-  char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:";
+  char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:D:";
   while(getopt(argc,argv,optstring) != -1)
     ;
   if(argc > optind)
