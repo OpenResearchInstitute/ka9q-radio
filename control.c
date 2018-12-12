@@ -37,8 +37,6 @@ int DAC_samprate = 48000;
 // Touch screen position (Raspberry Pi display only - experimental)
 int touch_x,touch_y;
 
-int Update_interval = 100;
-
 // Screen location of field modification cursor
 int mod_x,mod_y;
 
@@ -48,7 +46,6 @@ char Libdir[] = "/usr/local/share/ka9q-radio";
 char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
 
-struct sockaddr_storage Radio_status_address;
 struct sockaddr_storage SDR_status_address;
 
 int SDR_status_fd = -1;
@@ -99,7 +96,7 @@ void popup(const char *filename){
   doupdate();
   timeout(-1); // blocking read - wait indefinitely
   (void)getch(); // Read and discard one character
-  timeout(Update_interval);
+  timeout(0);
   werase(pop);
   wrefresh(pop);
   delwin(pop);
@@ -119,7 +116,7 @@ void getentry(char const *prompt,char *response,int len){
   memset(response,0,len);
   wgetnstr(pwin,response,len);
   chomp(response);
-  timeout(Update_interval);
+  timeout(0);
   noecho();
   werase(pwin);
   wrefresh(pwin);
@@ -160,10 +157,10 @@ void adjust_item(struct demod *demod,int direction){
       demod->tune.freq += tunestep;
     break;
   case 2: // First LO
+    // this should ideally be sent directly to the front end, but that's work
     if(demod->tune.lock) // Tuner is locked, don't change it
       break;
-
-    // this should ideally be sent directly to the front end, but that's work
+    demod->sdr.status.frequency += tunestep;
     break;
   case 3: // IF
     demod->second_LO.freq -= tunestep;
@@ -249,8 +246,8 @@ int main(int argc,char *argv[]){
   struct demod * const demod = &Demod;
   fprintf(stderr,"Listening to %s\n",argv[optind]);
 
-  Status_fd = setup_mcast(argv[optind],(struct sockaddr *)&Radio_status_address,0,Mcast_ttl,2);
-  Ctl_fd = setup_mcast(NULL,(struct sockaddr *)&Radio_status_address,1,Mcast_ttl,2);
+  Status_fd = setup_mcast(argv[optind],(struct sockaddr *)&demod->output.metadata_dest_address,0,Mcast_ttl,2);
+  Ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->output.metadata_dest_address,1,Mcast_ttl,2);
 
   atexit(display_cleanup);
 
@@ -261,7 +258,7 @@ int main(int argc,char *argv[]){
   Term = newterm(NULL,Tty,Tty);
   set_term(Term);
   keypad(stdscr,TRUE);
-  timeout(Update_interval); // update interval when nothing is typed
+  timeout(0); // Don't block in getch()
   cbreak();
   noecho();
   // Set up display subwindows
@@ -288,14 +285,14 @@ int main(int argc,char *argv[]){
   
   col = 0;
   row += 12;
-  network = newwin(8,78,row,col); // Network status information
+  network = newwin(9,78,row,col); // Network status information
   col = 0;
-  row += 8;
+  row += 9;
   debug = newwin(8,78,row,col); // Note: overlaps function keys
   scrollok(debug,1);
   
   // A message from our sponsor...
-  wprintw(debug,"KA9Q SDR Receiver controller v1.0; Copyright 2017-2018 Phil Karn\n");
+  wprintw(debug,"KA9Q SDR Receiver controller v1.0; Copyright 2018 Phil Karn\n");
   wprintw(debug,"Compiled on %s at %s\n",__DATE__,__TIME__);
 
   struct sockcache input_data_source,input_data_dest;
@@ -325,7 +322,8 @@ int main(int argc,char *argv[]){
 
     fd_set fdset;
     FD_ZERO(&fdset);
-    FD_SET(SDR_status_fd,&fdset);
+    if(SDR_status_fd != -1)
+      FD_SET(SDR_status_fd,&fdset);
     FD_SET(Status_fd,&fdset);
     int n = max(SDR_status_fd,Status_fd) + 1;
     n = select(n,&fdset,NULL,NULL,&timeout);
@@ -333,7 +331,8 @@ int main(int argc,char *argv[]){
     if(FD_ISSET(Status_fd,&fdset)){
       unsigned char buffer[8192];
       memset(buffer,0,sizeof(buffer));
-      int length = recv(Status_fd,buffer,sizeof(buffer),0);
+      socklen_t ssize = sizeof(demod->output.metadata_source_address);
+      int length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->output.metadata_source_address,&ssize);
       if(length <= 0){
 	usleep(100000);
 	continue;
@@ -347,6 +346,8 @@ int main(int argc,char *argv[]){
       memcpy(&ndemod,demod,sizeof(ndemod));
       decode_radio_status(&ndemod,buffer+1,length-1);
       // Have important things changed?
+#if 0
+      // Do we really need to listen directly to the front end, or just get everything via radio?
       if(memcmp(&ndemod.input.metadata_dest_address,&demod->input.metadata_dest_address,sizeof(ndemod.input.metadata_dest_address)) != 0){
 	if(SDR_status_fd > 0){
 	  close(SDR_status_fd);
@@ -354,8 +355,10 @@ int main(int argc,char *argv[]){
 	}
 	SDR_status_fd = setup_mcast(NULL,(struct sockaddr *)&ndemod.input.metadata_dest_address,0,0,0);
       }
+#endif
       memcpy(demod,&ndemod,sizeof(*demod));
     }
+#if 0
     if(FD_ISSET(SDR_status_fd,&fdset)){
       unsigned char buffer[8192];
       memset(buffer,0,sizeof(buffer));
@@ -374,7 +377,8 @@ int main(int argc,char *argv[]){
       decode_sdr_status(&ndemod,buffer+1,length-1);
       // Copy only certain fields
     }
-
+#endif
+    
     // update display indefinitely, handle user commands
 
     // Tuning control window - these can be adjusted by the user
@@ -669,6 +673,14 @@ int main(int argc,char *argv[]){
       wprintw(network," dupes %'llu",demod->input.rtp.dupes);
 
     mvwprintw(network,row++,col,"Time: %s",lltime(demod->sdr.status.timestamp));
+    update_sockcache(&output_metadata_source,(struct sockaddr *)&demod->output.metadata_source_address);
+    update_sockcache(&output_metadata_dest,(struct sockaddr *)&demod->output.metadata_dest_address);
+    mvwprintw(network,row++,col,"Output metadata: %s:%s -> %s:%s; pkts %'llu",
+	      output_metadata_source.host,output_metadata_source.port,
+	      output_metadata_dest.host,output_metadata_dest.port,
+	      demod->output.metadata_packets);
+
+
     update_sockcache(&output_data_source,(struct sockaddr *)&demod->output.data_source_address);
     update_sockcache(&output_data_dest,(struct sockaddr *)&demod->output.data_dest_address);
     mvwprintw(network,row++,col,"Output data: %s:%s -> %s:%s; ssrc %8x; TTL %d%s",
@@ -864,24 +876,6 @@ int main(int argc,char *argv[]){
     case 'i':    // Recenter IF to +/- samprate/4
       demod->tune.freq += demod->input.samprate/4.;
       break;
-    case 'u':    // Set display update rate in milliseconds (minimum 50, i.e, 20 Hz)
-      {
-	char str[160],*ptr;
-	getentry("Enter update interval, ms [<=0 means no auto update]: ",str,sizeof(str));
-	int const u = strtol(str,&ptr,0);
-	if(ptr == str)
-	  break; // Nothing entered
-	
-	if(u > 50){
-	  Update_interval = u;
-	  timeout(Update_interval);
-	} else if(u <= 0){
-	  Update_interval = -1; // No automatic update
-	  timeout(Update_interval);
-	} else
-	  beep();
-      }
-      break;
     case 'k': // Kaiser window beta parameter
       {
 	char str[160],*ptr;
@@ -1024,6 +1018,9 @@ int main(int argc,char *argv[]){
       if(demod->tune.freq != old_demod.tune.freq)
 	encode_double(&bp,RADIO_FREQUENCY,demod->tune.freq);
 
+      if(demod->sdr.status.frequency != old_demod.sdr.status.frequency)
+	encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency);
+
       if(demod->second_LO.freq != old_demod.second_LO.freq)
 	encode_double(&bp,SECOND_LO_FREQUENCY,demod->second_LO.freq);
 
@@ -1039,9 +1036,6 @@ int main(int argc,char *argv[]){
       if(demod->filter.kaiser_beta != old_demod.filter.kaiser_beta)
 	encode_float(&bp,KAISER_BETA,demod->filter.kaiser_beta);
 
-      if(demod->tune.freq != old_demod.tune.freq)
-	encode_double(&bp,RADIO_FREQUENCY,demod->tune.freq);
-      
       if(demod->output.channels != old_demod.output.channels)
 	encode_int(&bp,OUTPUT_CHANNELS,demod->output.channels);
 

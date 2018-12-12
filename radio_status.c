@@ -200,6 +200,9 @@ void send_radio_status(struct demod *demod,int full){
   encode_int64(&bp,INPUT_METADATA_PACKETS,demod->input.metadata_packets);
   encode_int64(&bp,INPUT_DATA_PACKETS,demod->input.rtp.packets);
   encode_int64(&bp,INPUT_SAMPLES,demod->input.samples);
+  encode_int64(&bp,INPUT_DROPS,demod->input.rtp.drops);
+  encode_int64(&bp,INPUT_DUPES,demod->input.rtp.dupes);
+
   // Source address we're using to send data
   {
     struct sockaddr_in *sin;
@@ -260,11 +263,6 @@ void send_radio_status(struct demod *demod,int full){
   encode_int32(&bp,OUTPUT_SSRC,demod->output.rtp.ssrc);
   encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
   encode_int32(&bp,OUTPUT_SAMPRATE,demod->output.samprate);
-  encode_int64(&bp,INPUT_METADATA_PACKETS,demod->input.metadata_packets);
-  encode_int64(&bp,INPUT_DATA_PACKETS,demod->input.rtp.packets);
-  encode_int64(&bp,INPUT_SAMPLES,demod->input.samples);
-  encode_int64(&bp,INPUT_DROPS,demod->input.rtp.drops);
-  encode_int64(&bp,INPUT_DUPES,demod->input.rtp.dupes);
   encode_int64(&bp,OUTPUT_DATA_PACKETS,demod->output.rtp.packets);
   encode_int64(&bp,OUTPUT_METADATA_PACKETS,demod->output.metadata_packets);
   
@@ -350,7 +348,7 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
     if(cp - buffer + optlen >= length)
       break; // Invalid length
     
-    double samptime = 1./demod->input.samprate;
+    double samptime = 1./demod->output.samprate;
     double nval;
     int i;
 
@@ -376,7 +374,10 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       break;
     case FIRST_LO_FREQUENCY:
       nval = decode_double(cp,optlen);
-      set_first_LO(demod,nval); // Will automatically adjust second LO
+      double new_lo2 = nval - get_freq(demod);
+      if(LO2_in_range(demod,new_lo2,0))
+	set_freq(demod,get_freq(demod),new_lo2);
+
       break;
     case SECOND_LO_FREQUENCY:
       nval = decode_double(cp,optlen);
@@ -387,11 +388,11 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       }
       break;
     case LOW_EDGE:
-      demod->filter.low = decode_double(cp,optlen);
+      demod->filter.low = decode_float(cp,optlen);
       set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);
       break;
     case HIGH_EDGE:
-      demod->filter.high = decode_double(cp,optlen);
+      demod->filter.high = decode_float(cp,optlen);
       set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);      
       break;
     case SHIFT_FREQUENCY:
@@ -399,7 +400,7 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       set_shift(demod,demod->tune.shift);
       break;
     case KAISER_BETA:
-      demod->filter.kaiser_beta = decode_double(cp,optlen);
+      demod->filter.kaiser_beta = decode_float(cp,optlen);
       if(demod->filter.kaiser_beta < 0)
 	demod->filter.kaiser_beta = 0;
       set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);            
