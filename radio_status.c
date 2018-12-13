@@ -332,6 +332,9 @@ void send_radio_status(struct demod *demod,int full){
     break;
   }
   encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
+  if(strlen(demod->input.description) > 0)
+    encode_string(&bp,DESCRIPTION,demod->input.description,strlen(demod->input.description));
+  encode_byte(&bp,ENVELOPE,demod->opt.env);
   encode_eol(&bp);
   
   int len = compact_packet(&State[0],packet,full);
@@ -439,6 +442,9 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
     case AGC_ATTACK_RATE:
       demod->agc.attack_rate = decode_float(cp,optlen);
       break;
+    case ENVELOPE:
+      demod->opt.env = decode_int(cp,optlen);
+      break;
     default:
       break;
     }
@@ -503,6 +509,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     switch(type){
     case EOL: // Shouldn't get here since it's checked above
       goto done;
+    case DESCRIPTION:
+      decode_string(cp,optlen,&demod->input.description,sizeof(demod->input.description));
+      break;
     case OUTPUT_DATA_DEST_SOCKET:
       // SDR data destination address (usually multicast)
       // Becomes our data input socket

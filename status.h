@@ -83,6 +83,8 @@ enum status_type {
   AGC_HANGTIME,   // AGC hang time
   AGC_RECOVERY_RATE,
   AGC_ATTACK_RATE,
+  DESCRIPTION,
+  ENVELOPE,       // Envelope detection in linear mode
 };
 
 
@@ -109,6 +111,7 @@ uint64_t decode_int(unsigned char *,int);
 float decode_float(unsigned char *,int);
 double decode_double(unsigned char *,int);
 int decode_socket(void *sock,unsigned char *,int);
+char *decode_string(unsigned char *,int,void *,int);
 
 void dump_metadata(unsigned char *,int);
 

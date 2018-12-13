@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.35 2018/12/11 11:42:11 karn Exp karn $
+// $Id: linear.c,v 1.36 2018/12/12 13:45:40 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -252,10 +252,11 @@ void *demod_linear(void *arg){
     float signal = 0;
     float noise = 0;
     
+    float samples[filter->olen]; // for mono output
     for(int n=0; n<filter->olen; n++){
       // Assume signal on I channel, so only noise on Q channel
       // True only in coherent modes when locked, but we'll need total power anyway
-      complex float s = filter->output.c[n];
+      complex float s = filter->output.c[n] * step_osc(&demod->shift);
       float rp = crealf(s) * crealf(s);
       float ip = cimagf(s) * cimagf(s);
       signal += rp;
@@ -282,26 +283,18 @@ void *demod_linear(void *arg){
 	demod->agc.gain *= recovery_rate_per_sample;
       }
       filter->output.c[n] *= demod->agc.gain;
-    }
-    // Optional frequency shift *after* demodulation and AGC
-    if(demod->shift.freq != 0){
-      pthread_mutex_lock(&demod->shift.mutex);
-      for(int n=0; n < filter->olen; n++){
-	filter->output.c[n] *= step_osc(&demod->shift);
-      }
-      pthread_mutex_unlock(&demod->shift.mutex);
-    }
-    
-    if(demod->output.channels == 1) {
-      // Send only I channel as mono
-      float samples[filter->olen];
-      for(int n=0; n<filter->olen; n++)
+      if(demod->opt.env){
+	// AM envelope detection
+	samples[n] = cabsf(filter->output.c[n]);
+      } else if(demod->output.channels == 1) {
 	samples[n] = crealf(filter->output.c[n]);
-      send_mono_output(demod,samples,filter->olen);
-    } else {
-      // I on left, Q on right
-      send_stereo_output(demod,(float *)filter->output.c,filter->olen);
+      }
     }
+    if(demod->opt.env || demod->output.channels == 1)
+      send_mono_output(demod,samples,filter->olen);
+    else      // I on left, Q on right
+      send_stereo_output(demod,(float *)filter->output.c,filter->olen);
+
     // Total baseband power (I+Q), scaled to each sample
     demod->sig.bb_power = (signal + noise) / filter->olen;
     // PLL loop SNR, if used

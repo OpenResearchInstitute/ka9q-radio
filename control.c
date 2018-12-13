@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.24 2018/12/12 10:30:30 karn Exp karn $
+// $Id: control.c,v 1.25 2018/12/12 13:45:40 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -251,7 +251,7 @@ int main(int argc,char *argv[]){
 
   atexit(display_cleanup);
 
-  WINDOW *tuning,*sig,*info,*filtering,*demodulator,*options,*sdr,*modes,*network,*debug;
+  WINDOW *tuning,*sig,*info,*filtering,*demodulator,*options,*sdr,*modes,*debug,*input,*output;
 
   // talk directly to the terminal
   Tty = fopen("/dev/tty","r+");
@@ -262,6 +262,8 @@ int main(int argc,char *argv[]){
   cbreak();
   noecho();
   // Set up display subwindows
+
+  // First row
   int row = 0;
   int col = 0;
   tuning = newwin(8,35,row,col);    // Frequency information
@@ -269,6 +271,11 @@ int main(int argc,char *argv[]){
   sig = newwin(8,25,row,col); // Signal information
   col += 25;
   info = newwin(8,42,row,col);     // Band information
+  col += 42;
+  modes = newwin(Nmodes+2,7,row,col);
+  col += 7;
+
+  // Second row
   row += 8;
   col = 0;
   filtering = newwin(12,22,row,col);
@@ -280,15 +287,16 @@ int main(int argc,char *argv[]){
   sdr = newwin(12,25,row,col); // SDR information
   col += 25;
   
-  modes = newwin(Nmodes+2,7,row,col);
-  col += Nmodes+2;
-  
+  // Third row
   col = 0;
   row += 12;
-  network = newwin(9,78,row,col); // Network status information
+  input = newwin(5,109,row,col); // Network status information
   col = 0;
-  row += 9;
-  debug = newwin(8,78,row,col); // Note: overlaps function keys
+  row += 5;
+  output = newwin(4,109,row,col);
+  col = 0;
+  row += 4;
+  debug = newwin(8,109,row,col); // Note: overlaps function keys
   scrollok(debug,1);
   
   // A message from our sponsor...
@@ -428,8 +436,10 @@ int main(int argc,char *argv[]){
     // Lines are variable length, so clear window before starting
     wclrtobot(info);  // Output 
     row = 1;
+    col = 1;
+    mvwprintw(info,row++,col,"%s",demod->input.description);
     if(demod->doppler_command)
-      mvwprintw(info,row++,1,"Doppler: %s",demod->doppler_command);
+      mvwprintw(info,row++,col,"Doppler: %s",demod->doppler_command);
 
     struct bandplan const *bp_low,*bp_high;
     bp_low = lookup_frequency(demod->tune.freq + demod->filter.low);
@@ -443,10 +453,10 @@ int main(int argc,char *argv[]){
       r.classes = bp_low->classes & bp_high->classes;
       r.modes = bp_low->modes & bp_high->modes;
 
-      mvwprintw(info,row++,1,"Band: %s",bp_low->name);
+      mvwprintw(info,row++,col,"Band: %s",bp_low->name);
 
       if(r.modes){
-	mvwaddstr(info,row++,1,"Emissions: ");
+	mvwaddstr(info,row++,col,"Emissions: ");
 	if(r.modes & VOICE)
 	  waddstr(info,"Voice ");
 	if(r.modes & IMAGE)
@@ -457,7 +467,7 @@ int main(int argc,char *argv[]){
 	  waddstr(info,"CW "); // Last since it's permitted almost everywhere
       }
       if(r.classes){
-	mvwaddstr(info,row++,1,"Privs: ");
+	mvwaddstr(info,row++,col,"Privs: ");
 	if(r.classes & EXTRA_CLASS)
 	  waddstr(info,"Extra ");
 	if(r.classes & ADVANCED_CLASS)
@@ -629,8 +639,12 @@ int main(int argc,char *argv[]){
 	wattron(options,A_UNDERLINE);
       mvwprintw(options,row++,col,"Stereo");    
       wattroff(options,A_UNDERLINE);
+
+      if(demod->opt.env)
+	wattron(options,A_UNDERLINE);	
+      mvwprintw(options,row++,col,"Envel");    
+      wattroff(options,A_UNDERLINE);
     }
-    
     box(options,0,0);
     mvwaddstr(options,0,2,"Options");
 
@@ -647,35 +661,37 @@ int main(int argc,char *argv[]){
 
     row = 1;
     col = 1;
-    wmove(network,0,0);
-    wclrtobot(network);
+    wmove(input,0,0);
+    wclrtobot(input);
     update_sockcache(&input_metadata_source,(struct sockaddr *)&demod->input.metadata_source_address);
     update_sockcache(&input_metadata_dest,(struct sockaddr *)&demod->input.metadata_dest_address);
-    mvwprintw(network,row++,col,"Input metadata: %s:%s -> %s:%s; pkts %'llu",
+    mvwprintw(input,row++,col,"metadata %s:%s -> %s:%s pkts %'llu",
 	      input_metadata_source.host,input_metadata_source.port,
 	      input_metadata_dest.host,input_metadata_dest.port,
 	      demod->input.metadata_packets);
-    
 
     update_sockcache(&input_data_source,(struct sockaddr *)&demod->input.data_source_address);
     update_sockcache(&input_data_dest,(struct sockaddr *)&demod->input.data_dest_address);
-    mvwprintw(network,row++,col,"Input data: %s:%s -> %s:%s; ssrc %0lx",
+    mvwprintw(input,row++,col,"data %s:%s -> %s:%s ssrc %0lx pkts %'llu samples %'llu",
 	      input_data_source.host,input_data_source.port,
 	      input_data_dest.host,input_data_dest.port,
-	      demod->input.rtp.ssrc);
-
-    mvwprintw(network,row++,col,"  pkts %'llu samples %'llu",
+	      demod->input.rtp.ssrc,
 	      demod->input.rtp.packets,demod->input.samples);
 
     if(demod->input.rtp.drops)
-      wprintw(network," drops %'llu",demod->input.rtp.drops);
+      wprintw(input," drops %'llu",demod->input.rtp.drops);
     if(demod->input.rtp.dupes)
-      wprintw(network," dupes %'llu",demod->input.rtp.dupes);
+      wprintw(input," dupes %'llu",demod->input.rtp.dupes);
 
-    mvwprintw(network,row++,col,"Time: %s",lltime(demod->sdr.status.timestamp));
+    mvwprintw(input,row++,col,"%s",lltime(demod->sdr.status.timestamp));
+    box(input,0,0);
+    mvwaddstr(input,0,40,"Input");
+
+    row = 1; col = 1;
+    wmove(output,0,0);
     update_sockcache(&output_metadata_source,(struct sockaddr *)&demod->output.metadata_source_address);
     update_sockcache(&output_metadata_dest,(struct sockaddr *)&demod->output.metadata_dest_address);
-    mvwprintw(network,row++,col,"Output metadata: %s:%s -> %s:%s; pkts %'llu",
+    mvwprintw(output,row++,col,"metadata %s:%s -> %s:%s pkts %'llu",
 	      output_metadata_source.host,output_metadata_source.port,
 	      output_metadata_dest.host,output_metadata_dest.port,
 	      demod->output.metadata_packets);
@@ -683,14 +699,14 @@ int main(int argc,char *argv[]){
 
     update_sockcache(&output_data_source,(struct sockaddr *)&demod->output.data_source_address);
     update_sockcache(&output_data_dest,(struct sockaddr *)&demod->output.data_dest_address);
-    mvwprintw(network,row++,col,"Output data: %s:%s -> %s:%s; ssrc %8x; TTL %d%s",
+    mvwprintw(output,row++,col,"data %s:%s -> %s:%s ssrc %8x TTL %d%s",
 	      output_data_source.host,output_data_source.port,
 	      output_data_dest.host,output_data_dest.port,
 	      demod->output.rtp.ssrc,Mcast_ttl,Mcast_ttl == 0 ? " (Local host only)":"");
-    mvwprintw(network,row++,col,"PCM %'d Hz; pkts %'llu",demod->output.samprate,demod->output.rtp.packets);
+    wprintw(output," pkts %'llu",demod->output.rtp.packets);
 
-    box(network,0,0);
-    mvwaddstr(network,0,35,"I/O");
+    box(output,0,0);
+    mvwaddstr(output,0,40,"Output");
 
     touchwin(debug); // since we're not redrawing it every cycle
 
@@ -736,7 +752,8 @@ int main(int argc,char *argv[]){
     wnoutrefresh(sdr);
     wnoutrefresh(options);
     wnoutrefresh(modes);
-    wnoutrefresh(network);
+    wnoutrefresh(input);
+    wnoutrefresh(output);
     doupdate();      // Update the screen right before we pause
     
     // Scan and process keyboard commands
@@ -1001,6 +1018,9 @@ int main(int argc,char *argv[]){
 	  case 5:
 	    demod->output.channels = 2;
 	    break;
+	  case 6:
+	    demod->opt.env = !demod->opt.env;
+	    break;
 	  }
 	}
       }
@@ -1062,6 +1082,9 @@ int main(int argc,char *argv[]){
 
       if(demod->agc.recovery_rate != old_demod.agc.recovery_rate)
 	encode_float(&bp,AGC_RECOVERY_RATE,demod->agc.recovery_rate);
+
+      if(demod->opt.env != old_demod.opt.env)
+	encode_byte(&bp,ENVELOPE,demod->opt.env);
 
       demod->output.command_tag = random();
       encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
@@ -1158,6 +1181,9 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     switch(type){
     case EOL: // Shouldn't get here
       goto done;
+    case DESCRIPTION:
+      decode_string(cp,optlen,&demod->input.description,sizeof(demod->input.description));
+      break;
     case GPS_TIME:
       demod->sdr.status.timestamp = decode_int(cp,optlen);
       break;

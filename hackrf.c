@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.22 2018/12/10 11:53:31 karn Exp karn $
+// $Id: hackrf.c,v 1.24 2018/12/11 09:46:57 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -83,9 +83,8 @@ int Nctl_sock;    // Socket handle for incoming commands
 int Status_sock;  // Socket handle for outgoing status messages
 struct sockaddr_storage Output_data_dest_address; // Multicast output socket
 struct sockaddr_storage Output_data_source_address; // Multicast output socket
-
-
 uint64_t Output_metadata_packets;
+char *Description;
 
 struct sdrstate HackCD;
 pthread_t Display_thread;
@@ -168,6 +167,7 @@ int main(int argc,char *argv[]){
       break;
     }
   }
+  Description = argv[optind];
   setlocale(LC_ALL,Locale);
   if(Daemonize){
     openlog("hackrf",LOG_PID,LOG_DAEMON);
@@ -712,6 +712,8 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   
   encode_byte(&bp,DEMOD_TYPE,0); // actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
+  if(Description)
+    encode_string(&bp,DESCRIPTION,Description,strlen(Description));
 
   encode_eol(&bp);
   

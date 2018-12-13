@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.13 2018/12/11 10:57:10 karn Exp karn $
+// $Id: status.c,v 1.14 2018/12/12 08:38:42 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -96,11 +96,9 @@ int encode_string(unsigned char **bp,enum status_type type,void *buf,int buflen)
 
 
 // Decode byte string without byte swapping
-void *decode_string(unsigned char **bp,void *buf,int buflen){
-  unsigned char *cp = *bp;
-  int len = *cp++;
-  memcpy(buf,cp,min(len,buflen));
-  *bp = cp + len;
+char *decode_string(unsigned char *cp,int optlen,void *buf,int buflen){
+  int n = min(optlen,buflen);
+  memcpy(buf,cp,n);
   return buf;
 }
 

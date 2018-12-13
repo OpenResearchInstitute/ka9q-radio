@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.30 2018/12/11 11:42:11 karn Exp karn $
+// $Id: modes.c,v 1.31 2018/12/12 13:45:40 karn Exp karn $
 // Load and search mode definition table in /usr/local/share/ka9q-radio/modes.txt
 
 // Copyright 2018, Phil Karn, KA9Q
@@ -115,6 +115,8 @@ int readmodes(char *file){
 	mtp->channels = 1;  // E.g., if you don't want the hilbert transform of SSB on the right channel
       } else if(strcasecmp(option,"stereo") == 0){
 	mtp->channels = 2; // actually the default
+      } else if(strcasecmp(option,"env") == 0){
+	mtp->envelope = 1; // Envelope detection for AM
       }
     }    
     Nmodes++;

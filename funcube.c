@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.65 2018/12/10 11:53:31 karn Exp karn $
+// $Id: funcube.c,v 1.66 2018/12/11 09:13:15 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -88,6 +88,7 @@ struct sockaddr_storage Output_metadata_dest_address; // Multicast output socket
 struct sockaddr_storage Output_data_dest_address; // Multicast output socket
 uint64_t Output_metadata_packets;
 
+char *Description;
 
 struct sdrstate FCD;
 pthread_t Display_thread;
@@ -169,6 +170,8 @@ int main(int argc,char *argv[]){
       break;
     }
   }
+  Description = argv[optind];
+
   setlocale(LC_ALL,Locale);
 
   if(List_audio){
@@ -638,6 +641,8 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   encode_byte(&bp,DEMOD_TYPE,0); // Actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
   encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
+  if(Description)
+    encode_string(&bp,DESCRIPTION,Description,strlen(Description));
   encode_eol(&bp);
   
   int len = compact_packet(&State[0],packet,full);

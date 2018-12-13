@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.111 2018/12/10 11:54:45 karn Exp karn $
+// $Id: radio.c,v 1.112 2018/12/11 09:13:15 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -352,6 +352,7 @@ int preset_mode(struct demod * const demod,const char * const mode){
   demod->opt.flat = mp->flat;
   demod->filter.isb = mp->isb;
   demod->output.channels = mp->channels;
+  demod->opt.env = mp->envelope;
   demod->opt.pll = mp->pll;
   demod->opt.square = mp->square;
   demod->agc.attack_rate = mp->attack_rate;

@@ -1,4 +1,4 @@
-// $Id: dump.c,v 1.1 2018/12/12 08:38:28 karn Exp karn $
+// $Id: dump.c,v 1.2 2018/12/12 13:45:40 karn Exp karn $
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
@@ -24,6 +24,7 @@ void dump_metadata(unsigned char *buffer,int length){
   char host[NI_MAXHOST];
   char port[NI_MAXSERV];
   int i;
+  char sbuf[256];
 
   while(cp - buffer < length){
     enum status_type type = *cp++; // increment cp to length field
@@ -223,6 +224,9 @@ void dump_metadata(unsigned char *buffer,int length){
       break;
     case AGC_ATTACK_RATE:
       printf(" attack rate %lg dB/s;",decode_float(cp,optlen));
+      break;
+    case DESCRIPTION:
+      printf(" %s;",decode_string(cp,optlen,sbuf,sizeof(sbuf)));
       break;
     default:
       break;

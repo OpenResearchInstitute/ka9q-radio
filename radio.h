@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.86 2018/12/11 09:13:15 karn Exp karn $
+// $Id: radio.h,v 1.87 2018/12/11 13:45:15 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -40,6 +40,7 @@ struct modetab {
   int channels;     // 1 or 2
   int isb;
   int flat;
+  int envelope;
   float shift;      // Audio frequency shift (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
   float low;        // Lower edge of IF passband
@@ -63,6 +64,7 @@ struct packet {
 // Demodulator state block
 struct demod {
   struct {
+    char description[256]; // Free-form text
     int data_fd;       // Socket for raw incoming I/Q data
     int ctl_fd;   // Socket for commands to front end
     int status_fd; // Socket for status from front end
@@ -158,6 +160,7 @@ struct demod {
 
   struct {
     int flat;    // Flat FM frequency response
+    int env;     // Envelope detection in linear mode
     int pll;     // Linear mode PLL tracking of carrier
     int square;  // Squarer on PLL input
     float loop_bw;    // Loop bw (coherent modes)
