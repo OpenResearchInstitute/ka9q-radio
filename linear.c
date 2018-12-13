@@ -282,13 +282,14 @@ void *demod_linear(void *arg){
       } else {
 	demod->agc.gain *= recovery_rate_per_sample;
       }
-      filter->output.c[n] *= demod->agc.gain;
+
       if(demod->opt.env){
-	// AM envelope detection
-	samples[n] = cabsf(filter->output.c[n]);
+	// AM envelope detection -- should re-add DC removal
+	samples[n] = amplitude * demod->agc.gain;
       } else if(demod->output.channels == 1) {
-	samples[n] = crealf(filter->output.c[n]);
-      }
+	samples[n] = crealf(s) * demod->agc.gain;
+      } else
+	filter->output.c[n] = s * demod->agc.gain;
     }
     if(demod->opt.env || demod->output.channels == 1)
       send_mono_output(demod,samples,filter->olen);
