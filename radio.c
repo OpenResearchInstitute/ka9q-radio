@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.112 2018/12/11 09:13:15 karn Exp karn $
+// $Id: radio.c,v 1.113 2018/12/13 09:47:57 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -94,7 +94,6 @@ void *proc_samples(void *arg){
 	if(in_cnt == demod->filter.in->ilen){
 	  // Run filter but freeze everything else?
 	  demod->filter.out->out_type = demod->filter.isb ? CROSS_CONJ : COMPLEX;
-
 	  execute_filter_input(demod->filter.in);
 	  in_cnt = 0;
 	}
@@ -141,6 +140,7 @@ void *proc_samples(void *arg){
       demod->filter.in->input.c[in_cnt++] = samp;
       if(in_cnt == demod->filter.in->ilen){
 	// Filter buffer is full, execute it
+	demod->filter.out->out_type = demod->filter.isb ? CROSS_CONJ : COMPLEX;
 	execute_filter_input(demod->filter.in);
 	// Compute IF power and noise spectral density
 	demod->sig.if_power = block_energy / in_cnt;
