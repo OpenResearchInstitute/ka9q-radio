@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.25 2018/12/12 13:45:40 karn Exp karn $
+// $Id: control.c,v 1.26 2018/12/13 09:47:57 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -438,8 +438,6 @@ int main(int argc,char *argv[]){
     row = 1;
     col = 1;
     mvwprintw(info,row++,col,"%s",demod->input.description);
-    if(demod->doppler_command)
-      mvwprintw(info,row++,col,"Doppler: %s",demod->doppler_command);
 
     struct bandplan const *bp_low,*bp_high;
     bp_low = lookup_frequency(demod->tune.freq + demod->filter.low);
@@ -526,11 +524,11 @@ int main(int argc,char *argv[]){
     mvwaddstr(sig,row++,col,"Baseband");
     mvwprintw(sig,row,col,"%15.1f dB/Hz",power2dB(demod->sig.n0));
     mvwaddstr(sig,row++,col,"N0");
-    mvwprintw(sig,row,col,"%15.1f dBHz",10*log10f(sn0));
+    mvwprintw(sig,row,col,"%15.1f dBHz",power2dB(sn0));
     mvwaddstr(sig,row++,col,"S/N0");
-    mvwprintw(sig,row,col,"%15.1f dBHz",10*log10f(bw));
+    mvwprintw(sig,row,col,"%15.1f dBHz",power2dB(bw));
     mvwaddstr(sig,row++,col,"NBW");
-    mvwprintw(sig,row,col,"%15.1f dB",10*log10f(sn0/bw));
+    mvwprintw(sig,row,col,"%15.1f dB",power2dB(sn0/bw));
     mvwaddstr(sig,row++,col,"SNR");
     box(sig,0,0);
     mvwaddstr(sig,0,9,"Signal");
@@ -544,10 +542,6 @@ int main(int argc,char *argv[]){
     int lcol = 1;
     // Display only if used by current mode
     switch(demod->demod_type){
-    case AM_DEMOD:
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",voltage2dB(demod->agc.gain));
-      mvwaddstr(demodulator,row++,lcol,"AF Gain");
-      break;
     case FM_DEMOD:
       mvwprintw(demodulator,row,rcol,"%11.1f dB",power2dB(demod->sig.snr));
       mvwaddstr(demodulator,row++,lcol,"Input SNR");
@@ -561,6 +555,13 @@ int main(int argc,char *argv[]){
     case LINEAR_DEMOD:
       mvwprintw(demodulator,row,rcol,"%11.1f dB",voltage2dB(demod->agc.gain));
       mvwaddstr(demodulator,row++,lcol,"AF Gain");
+      mvwprintw(demodulator,row,rcol,"%9.1f dB/s",voltage2dB(demod->agc.recovery_rate) * demod->output.samprate);
+      mvwaddstr(demodulator,row++,lcol,"Recovery rate");
+      mvwprintw(demodulator,row,rcol,"%11.1f  s",demod->agc.hangtime * demod->output.samprate);
+      mvwaddstr(demodulator,row++,lcol,"Hang time");
+      mvwprintw(demodulator,row,rcol,"%11.1f dB",voltage2dB(demod->agc.headroom));
+      mvwaddstr(demodulator,row++,lcol,"Headroom");
+
       if(demod->opt.pll){
 	mvwprintw(demodulator,row,rcol,"%11.1f dB",power2dB(demod->sig.snr));
 	mvwaddstr(demodulator,row++,lcol,"PLL SNR");
@@ -609,7 +610,7 @@ int main(int argc,char *argv[]){
     row = 1;
     col = 1;
     wclrtobot(options);
-    if(demod->demod_type == 2){ // FM from status.h
+    if(demod->demod_type == 1){ // FM from status.h
       if(demod->opt.flat)
 	wattron(options,A_UNDERLINE);
       mvwprintw(options,row++,col,"FLAT");
@@ -1109,58 +1110,6 @@ int main(int argc,char *argv[]){
 void touchitem(void *arg,int x,int y,int ev){
   touch_x = x /8;
   touch_y = y / 16;
-}
-
-// Parse a frequency entry in the form
-// 12345 (12345 Hz)
-// 12k345 (12.345 kHz)
-// 12m345 (12.345 MHz)
-// 12g345 (12.345 GHz)
-// If no g/m/k and number is too small, make a heuristic guess
-// NB! This assumes radio covers 100 kHz - 2 GHz; should make more general
-double const parse_frequency(const char *s){
-  char * const ss = alloca(strlen(s));
-
-  int i;
-  for(i=0;i<strlen(s);i++)
-    ss[i] = tolower(s[i]);
-
-  ss[i] = '\0';
-  
-  // k, m or g in place of decimal point indicates scaling by 1k, 1M or 1G
-  char *sp;
-  double mult;
-  if((sp = strchr(ss,'g')) != NULL){
-    mult = 1e9;
-    *sp = '.';
-  } else if((sp = strchr(ss,'m')) != NULL){
-    mult = 1e6;
-    *sp = '.';
-  } else if((sp = strchr(ss,'k')) != NULL){
-    mult = 1e3;
-    *sp = '.';
-  } else
-    mult = 1;
-
-  char *endptr = NULL;
-  double f = strtod(ss,&endptr);
-  if(endptr == ss || f == 0)
-    return 0; // Empty entry, or nothing decipherable
-  
-  if(mult != 1 || f >= 1e5) // If multiplier given, or frequency >= 100 kHz (lower limit), return as-is
-    return f * mult;
-    
-  // If frequency would be out of range, guess kHz or MHz
-  if(f < 100)
-    f *= 1e6;              // 0.1 - 99.999 Only MHz can be valid
-  else if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
-    f *= 1e6;
-  else if(f < 2000)        // Could be kHz or MHz, arbitarily assume kHz
-    f *= 1e3;
-  else if(f < 100000)      // Can only be kHz
-    f *= 1e3;
-
-  return f;
 }
 
 

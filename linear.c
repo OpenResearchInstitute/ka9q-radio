@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.36 2018/12/12 13:45:40 karn Exp karn $
+// $Id: linear.c,v 1.38 2018/12/13 10:03:46 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -60,11 +60,6 @@ void *demod_linear(void *arg){
   //  float const ramprate = demod->opt.loop_bw * blocktime / integrator_gain;   // sweep at one loop bw/sec
   float const ramprate = 0; // temp disable
 
-  float attack_rate_per_sample = dB2voltage(demod->agc.attack_rate * samptime);
-  float prev_attack_rate = demod->agc.attack_rate;
-  float recovery_rate_per_sample = dB2voltage(demod->agc.recovery_rate * samptime);
-  float prev_recovery_rate = demod->agc.recovery_rate;
-  
 
 #if 0
   // DC removal from envelope-detected AM and coherent AM
@@ -114,16 +109,6 @@ void *demod_linear(void *arg){
     while(demod->demod_type != LINEAR_DEMOD)
       pthread_cond_wait(&demod->demod_cond,&demod->demod_mutex);
     pthread_mutex_unlock(&demod->demod_mutex);
-
-    // Recompute AGC if it has changed
-    if(demod->agc.attack_rate != prev_attack_rate){
-      attack_rate_per_sample = dB2voltage(demod->agc.attack_rate * samptime);
-      prev_attack_rate = demod->agc.attack_rate;
-    }
-    if(demod->agc.recovery_rate != prev_recovery_rate){
-      recovery_rate_per_sample = dB2voltage(demod->agc.recovery_rate * samptime);
-      prev_recovery_rate = demod->agc.recovery_rate;
-    }
 
     // Wait for new samples
     execute_filter_output(filter);    
@@ -271,16 +256,13 @@ void *demod_linear(void *arg){
       // slow you get an annoying "pumping" effect.
       // But if it's too fast, brief spikes can deafen you for some time
       // What to do?
-      if(isnan(demod->agc.gain)){
+      if(isnan(demod->agc.gain) || amplitude * demod->agc.gain > demod->agc.headroom){
 	demod->agc.gain = demod->agc.headroom / amplitude; // Startup
-      } else if(amplitude * demod->agc.gain > demod->agc.headroom){
-	demod->agc.gain = demod->agc.headroom / amplitude;
-	//	  demod->agc.gain *= agc.attack_rate_per_sample;
-	hangcount = demod->agc.hangtime * demod->output.samprate;
-      } else if(hangcount != 0){
+	hangcount = demod->agc.hangtime;
+      } else if(hangcount > 0){
 	hangcount--;
       } else {
-	demod->agc.gain *= recovery_rate_per_sample;
+	demod->agc.gain *= demod->agc.recovery_rate;
       }
 
       if(demod->opt.env){

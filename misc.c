@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.26 2018/07/06 06:08:45 karn Exp karn $
+// $Id: misc.c,v 1.27 2018/08/04 22:18:49 karn Exp karn $
 // Miscellaneous low-level routines, mostly time-related
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <stdlib.h>
+#include <ctype.h>
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -70,6 +72,60 @@ char *lltime(long long t){
   return result;
 
 }
+// Parse a frequency entry in the form
+// 12345 (12345 Hz)
+// 12k345 (12.345 kHz)
+// 12m345 (12.345 MHz)
+// 12g345 (12.345 GHz)
+// If no g/m/k and number is too small, make a heuristic guess
+// NB! This assumes radio covers 100 kHz - 2 GHz; should make more general
+double const parse_frequency(const char *s){
+  char * const ss = alloca(strlen(s));
+
+  int i;
+  for(i=0;i<strlen(s);i++)
+    ss[i] = tolower(s[i]);
+
+  ss[i] = '\0';
+  
+  // k, m or g in place of decimal point indicates scaling by 1k, 1M or 1G
+  char *sp;
+  double mult;
+  if((sp = strchr(ss,'g')) != NULL){
+    mult = 1e9;
+    *sp = '.';
+  } else if((sp = strchr(ss,'m')) != NULL){
+    mult = 1e6;
+    *sp = '.';
+  } else if((sp = strchr(ss,'k')) != NULL){
+    mult = 1e3;
+    *sp = '.';
+  } else
+    mult = 1;
+
+  char *endptr = NULL;
+  double f = strtod(ss,&endptr);
+  if(endptr == ss || f == 0)
+    return 0; // Empty entry, or nothing decipherable
+  
+  if(mult != 1 || f >= 1e5) // If multiplier given, or frequency >= 100 kHz (lower limit), return as-is
+    return f * mult;
+    
+  // If frequency would be out of range, guess kHz or MHz
+  if(f < 100)
+    f *= 1e6;              // 0.1 - 99.999 Only MHz can be valid
+  else if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
+    f *= 1e6;
+  else if(f < 2000)        // Could be kHz or MHz, arbitarily assume kHz
+    f *= 1e3;
+  else if(f < 100000)      // Can only be kHz
+    f *= 1e3;
+
+  return f;
+}
+
+
+
 #if __APPLE__
 
 // OSX doesn't have pthread_barrier_*

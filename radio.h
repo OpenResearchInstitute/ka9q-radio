@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.87 2018/12/11 13:45:15 karn Exp karn $
+// $Id: radio.h,v 1.88 2018/12/13 09:47:57 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -19,7 +19,6 @@
 
 enum demod_type {
   LINEAR_DEMOD = 0,     // Linear demodulation, i.e., everything else: SSB, CW, DSB, CAM, IQ
-  AM_DEMOD,             // AM envelope demodulation
   FM_DEMOD,             // Frequency demodulation
 };
 
@@ -41,13 +40,14 @@ struct modetab {
   int isb;
   int flat;
   int envelope;
-  float shift;      // Audio frequency shift (mainly for CW/RTTY)
+  double shift;      // Audio frequency shift, Hz (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
-  float low;        // Lower edge of IF passband
-  float high;       // Upper edge of IF passband
-  float attack_rate;
-  float recovery_rate;
-  float hangtime;
+  float low;        // Lower edge of IF passband, Hz
+  float high;       // Upper edge of IF passband, Hz
+  float attack_rate; // dB/sec
+  float recovery_rate; // dB/sec
+  float hangtime;    // sec
+  float headroom;    // dB
 };
 
 #define PKTSIZE 16384
@@ -117,8 +117,6 @@ struct demod {
     int item;       // Tuning entry index
   } tune;
 
-  pthread_t doppler_thread;          // Thread that reads file and sets doppler (optional)
-  char *doppler_command;             // Command to execute for tracking
   struct osc doppler;
   struct osc second_LO;
   struct osc shift;
@@ -184,7 +182,7 @@ struct demod {
     float foffset;    // Frequency offset (FM, coherent AM, dsb)
     float pdeviation; // Peak frequency deviation (FM)
     float cphase;     // Carrier phase change (DSB/PSK)
-    float plfreq;     // PL tone frequency (FM);
+    float plfreq;     // PL tone frequency (FM)
     float lock_timer; // PLL lock timer
     int pll_lock;
   } sig;

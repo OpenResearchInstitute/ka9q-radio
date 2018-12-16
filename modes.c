@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.31 2018/12/12 13:45:40 karn Exp karn $
+// $Id: modes.c,v 1.32 2018/12/13 09:47:57 karn Exp karn $
 // Load and search mode definition table in /usr/local/share/ka9q-radio/modes.txt
 
 // Copyright 2018, Phil Karn, KA9Q
@@ -25,7 +25,6 @@ extern char Libdir[];
 
 struct demodtab Demodtab[] = {
       {LINEAR_DEMOD, "Linear", demod_linear}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
-      {AM_DEMOD,     "AM",     demod_am},     // AM evelope detection
       {FM_DEMOD,     "FM",     demod_fm},     // NBFM and noncoherent PM
 };
 int Ndemod = sizeof(Demodtab)/sizeof(struct demodtab);
@@ -76,9 +75,9 @@ int readmodes(char *file){
     mtp->demod_type = dtp - &Demodtab[0];
     strlcpy(mtp->name, mode_name, sizeof(mtp->name));
 
-    double low,high;
-    low = strtod(stringp,&stringp);
-    high = strtod(stringp,&stringp);
+    float low,high;
+    low = strtof(stringp,&stringp);
+    high = strtof(stringp,&stringp);
     if(high < low){ // Ensure high > low
       mtp->low = high;
       mtp->high = low;
@@ -87,13 +86,16 @@ int readmodes(char *file){
       mtp->high = high;
     }
     mtp->shift = strtod(stringp,&stringp);
-    mtp->attack_rate = -fabs(strtod(stringp,&stringp));
-    mtp->recovery_rate = fabs(strtod(stringp,&stringp));
-    mtp->hangtime = fabs(strtod(stringp,&stringp));
-    mtp->channels = 2;
+    mtp->attack_rate = -fabsf(strtof(stringp,&stringp));
+    mtp->recovery_rate = fabsf(strtof(stringp,&stringp));
+    mtp->hangtime = fabsf(strtof(stringp,&stringp));
+    mtp->headroom = -fabsf(strtof(stringp,&stringp));
+
+    // Defaults changed by flags
+    mtp->channels = 1;
+    mtp->isb = mtp->flat = mtp->square = mtp->pll = mtp->envelope = 0; // defaults
 
     // Process options
-    mtp->channels = 2;
     for(int i=0;i<8;i++){
       char *option;
       // Skip leading space
@@ -111,10 +113,10 @@ int readmodes(char *file){
 	mtp->square = mtp->pll = 1; // Square implies PLL
       } else if(strcasecmp(option,"coherent") == 0 || strcasecmp(option,"pll") == 0){
 	mtp->pll = 1;
-      } else if(strcasecmp(option,"mono") == 0){
-	mtp->channels = 1;  // E.g., if you don't want the hilbert transform of SSB on the right channel
       } else if(strcasecmp(option,"stereo") == 0){
-	mtp->channels = 2; // actually the default
+	mtp->channels = 2;  // E.g., if you don't want the hilbert transform of SSB on the right channel
+      } else if(strcasecmp(option,"mono") == 0){
+	mtp->channels = 1; // actually the default
       } else if(strcasecmp(option,"env") == 0){
 	mtp->envelope = 1; // Envelope detection for AM
       }

@@ -301,12 +301,8 @@ void send_radio_status(struct demod *demod,int full){
   encode_float(&bp,NOISE_DENSITY,demod->sig.n0);
   
   // Demodulation mode
-  enum demod_type demod_type = Demodtab[demod->demod_type].demod_type;
-  encode_byte(&bp,DEMOD_TYPE,demod_type);
-  switch(demod_type){
-  case AM_DEMOD:
-    encode_float(&bp,DEMOD_GAIN,demod->agc.gain);
-    break;
+  encode_byte(&bp,DEMOD_TYPE,demod->demod_type);
+  switch(demod->demod_type){
   case FM_DEMOD:
     encode_float(&bp,PEAK_DEVIATION,demod->sig.pdeviation);
     encode_float(&bp,PL_TONE,demod->sig.plfreq);

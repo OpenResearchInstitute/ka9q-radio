@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.132 2018/12/11 11:42:11 karn Exp karn $
+// $Id: main.c,v 1.134 2018/12/12 08:39:00 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -21,6 +21,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <signal.h>
+#include <getopt.h>
 
 #include "misc.h"
 #include "dsp.h"
@@ -38,7 +39,6 @@ int DAC_samprate = 48000;
 // Command line Parameters with default values
 int Nthreads = 1;
 int Quiet = 0;
-int Verbose = 0;
 char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
 int Update_interval = 100;  // 100 ms between screen updates
@@ -60,6 +60,37 @@ void cleanup(void);
 void closedown(int);
 void *recv_sdr_status(void *);
 void *send_status(void *);
+
+struct option Options[] =
+  {
+   {"out-data", required_argument, NULL, 'D'},
+   {"flat",no_argument, NULL, 'F'},
+   {"agc-hangtime", required_argument, NULL, 'H'},
+   {"in-meta", required_argument, NULL, 'I'},
+   {"blocksize", required_argument, NULL, 'L'},
+   {"filter-length", required_argument, NULL, 'M'},
+   {"out-meta", required_argument, NULL, 'R'},
+   {"ssrc", required_argument, NULL, 'S'},
+   {"ttl", required_argument, NULL, 'T'},
+   {"agc-recover", required_argument, NULL, 'a'},
+   {"channels", required_argument, NULL, 'c'},
+   {"env",no_argument, NULL, 'e'},
+   {"frequency", required_argument, NULL, 'f'},
+   {"filter-high", required_argument, NULL, 'h'},
+   {"isb",no_argument, NULL, 'i'},
+   {"kaiser-beta", required_argument, NULL, 'k'},
+   {"filter-low", required_argument, NULL, 'l'},
+   {"mode", required_argument, NULL, 'm'},
+   {"pll",no_argument, NULL, 'p'},
+   {"square",no_argument, NULL, 'q'},
+   {"headroom", required_argument, NULL, 'r'},
+   {"shift", required_argument, NULL, 's'},
+   {"fft-threads", required_argument, NULL, 't'},
+   {NULL, 0, NULL, 0},
+  };
+
+char Optstring[] = "D:FI:L:M:R:S:T:a:c:e:f:h:ik:l:m:pqr:s:t:";
+
 
 // The main program sets up the demodulator parameter defaults,
 // overwrites them with command-line arguments and/or state file settings,
@@ -90,14 +121,9 @@ int main(int argc,char *argv[]){
     }
   }
   setlocale(LC_ALL,Locale); // Set either the hardwired default or the value of $LANG if it exists
-  snprintf(Statepath,sizeof(Statepath),"%s/%s",getenv("HOME"),".radiostate");
-  Statepath[sizeof(Statepath)-1] = '\0';
-
-  if(readmodes("modes.txt") != 0){
-    fprintf(stderr,"Can't read mode table\n");
-    exit(1);
-  }
-
+  fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
+  fprintf(stderr,"Copyright 2017 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
+  
   // Must do this before first filter is created, otherwise a segfault can occur
   fftwf_import_system_wisdom();
   fftwf_make_planner_thread_safe();
@@ -105,101 +131,9 @@ int main(int argc,char *argv[]){
   struct demod * const demod = &Demod; // Only one demodulator per program for now
   memset(demod,0,sizeof(*demod)); // Just in case it's ever dynamic
 
-  // Set program defaults, can be overridden by state file and command line args, in that order
   demod->output.samprate = DAC_samprate; // currently 48 kHz, hard to change
-  demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
-  demod->filter.M = 4352+1;    // Length of filter impulse response
-  demod->filter.kaiser_beta = 3.0; // Reasonable compromise
-  demod->agc.headroom = pow(10.,-15./20); // -15 dB
-  demod->tune.step = 0;  // single digit hertz position
-  demod->sdr.imbalance = 1; // 0 dB
-  demod->filter.decimate = 1; // default to avoid division by zero
   demod->filter.interpolate = 1;
-  preset_mode(demod,"FM");
-  demod->tune.freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
-  demod->agc.gain = dB2voltage(80.); // Empirical starting point
 
-  // set invalid to start
-  demod->input.metadata_source_address.ss_family = -1; // Set invalid
-
-  // Find any file argument and load it
-  char optstring[] = "d:f:I:k:l:L:m:M:r:R:qs:t:T:u:vS:D:";
-  while(getopt(argc,argv,optstring) != -1)
-    ;
-  if(argc > optind)
-    loadstate(demod,argv[optind]);
-  else
-    loadstate(demod,"default");
-  
-  // Go back and re-read args for real this time, possibly overwriting loaded parameters
-  optind = 1;
-  int c;
-  while((c = getopt(argc,argv,optstring)) != EOF){
-    switch(c){
-    case 'd':
-      demod->doppler_command = optarg;
-      break;
-    case 'f':   // Initial RF tuning frequency
-      demod->tune.freq = parse_frequency(optarg);
-      break;
-    case 'I':   // Multicast address to listen to for receiver metadata
-      strlcpy(demod->input.dest_address_text,optarg,sizeof(demod->input.dest_address_text));
-      break;
-    case 'k':   // Kaiser window shape parameter; 0 = rectangular
-      demod->filter.kaiser_beta = strtod(optarg,NULL);
-      break;
-    case 'l':   // Locale, mainly for numerical output format
-      strlcpy(Locale,optarg,sizeof(Locale));
-      setlocale(LC_ALL,Locale);
-      break;
-    case 'L':   // Pre-detection filter block size
-      demod->filter.L = strtol(optarg,NULL,0);
-      break;
-    case 'm':   // preset receiver mode (AM/FM, etc)
-      preset_mode(demod,optarg);
-      break;
-    case 'M':   // Pre-detection filter impulse length
-      demod->filter.M = strtol(optarg,NULL,0);
-      break;
-    case 'q':
-      Quiet++;  // Suppress display
-      break;
-    case 'R':   // Set output target IP multicast address for metadata
-      strlcpy(demod->output.metadata_dest_address_text,optarg,sizeof(demod->output.metadata_dest_address_text));
-      break;
-    case 'D': // target multicast group for pcm data output
-      strlcpy(demod->output.data_dest_address_text,optarg,sizeof(demod->output.data_dest_address_text));      
-      break;
-    case 's':
-      demod->tune.shift = strtod(optarg,NULL);
-      break;
-    case 'T': // TTL on output packets
-      Mcast_ttl = strtol(optarg,NULL,0);
-      break;
-    case 't':   // # of threads to use in FFTW3
-      Nthreads = strtol(optarg,NULL,0);
-      fftwf_init_threads();
-      fftwf_plan_with_nthreads(Nthreads);
-      fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
-      break;
-    case 'u':   // Display update rate
-      Update_interval = strtol(optarg,NULL,0);
-      break;
-    case 'v':   // Extra debugging
-      Verbose++;
-      break;
-    case 'S':   // Set SSRC on output stream
-      demod->output.rtp.ssrc = strtol(optarg,NULL,0);
-      break;
-    default:
-      fprintf(stderr,"Usage: %s [-d doppler_command] [-f frequency] [-I iq multicast address] [-k kaiser_beta] [-l locale] [-L blocksize] [-m mode] [-M FIRlength] [-q] [-R Output multicast address] [-s shift offset] [-t threads] [-u update_ms] [-v]\n",argv[0]);
-      exit(1);
-      break;
-    }
-  }
-  fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
-  fprintf(stderr,"Copyright 2017 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
-  
   pthread_mutex_init(&demod->sdr.status_mutex,NULL);
   pthread_cond_init(&demod->sdr.status_cond,NULL);
   pthread_mutex_init(&demod->doppler.mutex,NULL);
@@ -210,6 +144,30 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&demod->demod_mutex,NULL);
   pthread_cond_init(&demod->demod_cond,NULL);
 
+  // First pass over options to pick up I/O config
+  // Acquire SDR metadata from -I option and get sample rate
+  int c;
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
+    switch(c){
+    case 'T': // TTL on output packets
+      Mcast_ttl = strtol(optarg,NULL,0);
+      break;
+    case 'I':   // Multicast address to listen to for receiver metadata
+      strlcpy(demod->input.dest_address_text,optarg,sizeof(demod->input.dest_address_text));
+      break;
+    case 'R':   // Set output target IP multicast address for metadata
+      strlcpy(demod->output.metadata_dest_address_text,optarg,sizeof(demod->output.metadata_dest_address_text));
+      break;
+    case 'D': // target multicast group for pcm data output
+      strlcpy(demod->output.data_dest_address_text,optarg,sizeof(demod->output.data_dest_address_text));      
+      break;
+    case 'S':   // Set SSRC on output stream
+      demod->output.rtp.ssrc = strtol(optarg,NULL,0);
+      break;
+    default: // Ignore others for now
+      break;
+    }
+  }
   // Output socket for commands to SDR
   demod->input.ctl_fd = setup_mcast(demod->input.dest_address_text,(struct sockaddr *)&demod->input.metadata_dest_address,1,Mcast_ttl,2);
   if(demod->input.ctl_fd == -1){
@@ -226,7 +184,7 @@ int main(int argc,char *argv[]){
   pthread_t recv_sdr_status_thread;
   pthread_create(&recv_sdr_status_thread,NULL,recv_sdr_status,demod);
 
-  // Wait for metadata from the SDR
+  // Wait for sample rate, mainly
   fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
   pthread_mutex_lock(&demod->sdr.status_mutex);
   while(demod->sdr.status.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
@@ -234,6 +192,97 @@ int main(int argc,char *argv[]){
   pthread_mutex_unlock(&demod->sdr.status_mutex);
   fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
 
+  // Set receiver defaults, can be overridden by command line args
+
+  demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
+  demod->filter.M = 4352+1;    // Length of filter impulse response
+  demod->filter.kaiser_beta = 3.0; // Reasonable compromise
+  demod->agc.headroom = pow(10.,-15./20); // -15 dB
+  demod->sdr.imbalance = 1; // 0 dB
+  demod->demod_type = 1; // FM
+  demod->agc.gain = dB2voltage(80.); // Empirical starting point
+  demod->agc.recovery_rate = powf(10.,6/20./demod->output.samprate);
+  demod->output.channels = 1;
+  demod->tune.freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
+  demod->filter.high = 8000;
+  demod->filter.low = -8000;
+
+
+  // Go back and re-read args
+  optind = 1;
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
+    switch(c){
+    case 'T':
+    case 'I':
+    case 'R':
+    case 'D':
+    case 'S':
+      break; // Already processed
+    case 'a': // AGC recovery rate, dB/s
+      // Convert to ratio per sample
+      demod->agc.recovery_rate = fabs(strtof(optarg,NULL)) / demod->output.samprate;
+      demod->agc.recovery_rate = powf(10.,demod->agc.recovery_rate/20.);
+      break;
+    case 'c': // Output channels
+      demod->output.channels = strtol(optarg,NULL,0);
+      break;
+    case 'e':
+      demod->opt.env = 1;
+      break;
+    case 'f':   // Initial RF tuning frequency
+      demod->tune.freq = parse_frequency(optarg);
+      break;
+    case 'h':
+      demod->filter.high = strtof(optarg,NULL);
+      break;
+    case 'i':
+      demod->filter.isb = 1;
+      break;
+    case 'k':   // Kaiser window shape parameter; 0 = rectangular
+      demod->filter.kaiser_beta = strtof(optarg,NULL);
+      break;
+    case 'l':
+      demod->filter.low = strtof(optarg,NULL);
+      break;
+    case 'm':
+      demod->demod_type = strtol(optarg,NULL,0); // change this to string
+      break;
+    case 'p':
+      demod->opt.pll = 1;
+      break;
+    case 'q':
+      demod->opt.square = 1;
+      break;
+    case 'r':
+      demod->agc.headroom = -fabs(strtof(optarg,NULL));
+      demod->agc.headroom = powf(10.,demod->agc.headroom/10.);
+      break;
+    case 's':
+      demod->tune.shift = strtod(optarg,NULL);
+      break;
+    case 't':   // # of threads to use in FFTW3
+      Nthreads = strtol(optarg,NULL,0);
+      fftwf_init_threads();
+      fftwf_plan_with_nthreads(Nthreads);
+      fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
+      break;
+    case 'F':
+      demod->opt.flat = 1;
+      break;
+    case 'H':
+      demod->agc.hangtime = strtod(optarg,NULL) * demod->output.samprate;
+      break;
+    case 'L':
+      demod->filter.L = strtol(optarg,NULL,0);
+      break;
+    case 'M':
+      demod->filter.M = strtol(optarg,NULL,0);
+      break;
+    default:
+      fprintf(stderr,"option %c unknown\n",c);
+      break;
+    }
+  }
   // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
   demod->input.data_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
   if(demod->input.data_fd == -1){
@@ -268,10 +317,6 @@ int main(int argc,char *argv[]){
   pthread_create(&rtp_recv_thread,NULL,rtp_recv,demod);
   pthread_create(&proc_samples_thread,NULL,proc_samples,demod);
 
-  // Optional doppler correction
-  if(demod->doppler_command)
-    pthread_create(&demod->doppler_thread,NULL,doppler,demod);
-
   // Graceful signal catch
   signal(SIGPIPE,closedown);
   signal(SIGINT,closedown);
@@ -280,20 +325,15 @@ int main(int argc,char *argv[]){
   signal(SIGTERM,closedown);        
   signal(SIGPIPE,SIG_IGN);
 
+  set_shift(demod,demod->tune.shift);
   set_freq(demod,demod->tune.freq,NAN);
   // Start demodulators
-  pthread_create(&demod->am_demod_thread,NULL,demod_am,demod);
   pthread_create(&demod->fm_demod_thread,NULL,demod_fm,demod);  
   pthread_create(&demod->linear_demod_thread,NULL,demod_linear,demod);
 
-  // Start the display thread unless quiet; then just twiddle our thumbs
-  pthread_t display_thread;
-  if(!Quiet)
-    pthread_create(&display_thread,NULL,display,demod);
-
-  while(1)
+  while(1){
     usleep(1000000); // probably get rid of this
-
+  }
   exit(0);
 }
 
@@ -381,88 +421,6 @@ void *rtp_recv(void *arg){
   return NULL;
 }
 
-
-// Save receiver state to file
-// Path is Statepath[] = $HOME/.radiostate
-int savestate(struct demod *dp,char const *filename){
-  FILE *fp;
-  char pathname[PATH_MAX];
-  if(filename[0] == '/')
-    strlcpy(pathname,filename,sizeof(pathname));    // Absolute path
-  else
-    snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,filename);
-
-  if((fp = fopen(pathname,"w")) == NULL){
-    fprintf(stderr,"Can't write state file %s\n",pathname);
-    return -1;
-  }
-  fprintf(fp,"#KA9Q DSP Receiver State dump\n");
-  fprintf(fp,"Locale %s\n",Locale);
-  fprintf(fp,"Source %s\n",dp->input.dest_address_text);
-  fprintf(fp,"Output %s\n",dp->output.data_dest_address_text);
-  fprintf(fp,"Control %s\n",dp->output.metadata_dest_address_text);
-  fprintf(fp,"TTL %d\n",Mcast_ttl);
-  fprintf(fp,"Blocksize %d\n",dp->filter.L);
-  fprintf(fp,"Impulse len %d\n",dp->filter.M);
-  fprintf(fp,"Frequency %.3f Hz\n",dp->tune.freq);
-  fprintf(fp,"Demod %s\n",Demodtab[dp->demod_type].name);
-  fprintf(fp,"Shift %.3f Hz\n",dp->tune.shift);
-  fprintf(fp,"Filter low %.3f Hz\n",dp->filter.low);
-  fprintf(fp,"Filter high %.3f Hz\n",dp->filter.high);
-  fprintf(fp,"Tunestep %d\n",dp->tune.step);
-  fclose(fp);
-  return 0;
-}
-// Load receiver state from file
-// Some of these are problematic since they're overwritten from the mode
-// table when the mode is actually set on the first A/D packet:
-// shift, filter low, filter high, tuning step (not currently set)
-// 
-int loadstate(struct demod *dp,char const *filename){
-  FILE *fp;
-
-  char pathname[PATH_MAX];
-  if(filename[0] == '/')
-    strlcpy(pathname,filename,sizeof(pathname));
-  else
-    snprintf(pathname,sizeof(pathname),"%s/%s",Statepath,filename);
-
-  if((fp = fopen(pathname,"r")) == NULL){
-    fprintf(stderr,"Can't read state file %s\n",pathname);
-    return -1;
-  }
-  char line[PATH_MAX];
-  int metadata_set = 0;
-
-  while(fgets(line,sizeof(line),fp) != NULL){
-    chomp(line);
-    if(sscanf(line,"Frequency %lf",&dp->tune.freq) > 0){
-    } else if(strncmp(line,"Mode ",5) == 0){
-      preset_mode(dp,&line[5]);
-    } else if(sscanf(line,"Shift %lf",&dp->tune.shift) > 0){
-    } else if(sscanf(line,"Filter low %f",&dp->filter.low) > 0){
-    } else if(sscanf(line,"Filter high %f",&dp->filter.high) > 0){
-    } else if(sscanf(line,"Kaiser Beta %f",&dp->filter.kaiser_beta) > 0){
-    } else if(sscanf(line,"Blocksize %d",&dp->filter.L) > 0){
-    } else if(sscanf(line,"Impulse len %d",&dp->filter.M) > 0){
-    } else if(sscanf(line,"Tunestep %d",&dp->tune.step) > 0){
-    } else if(sscanf(line,"Source %256s",dp->input.dest_address_text) > 0){
-      // Array sizes defined elsewhere!
-    } else if(sscanf(line,"Output %256s",dp->output.data_dest_address_text) > 0){
-    } else if(sscanf(line,"Control %256s",dp->output.metadata_dest_address_text) > 0){
-      metadata_set = 1;
-    } else if(sscanf(line,"TTL %d",&Mcast_ttl) > 0){
-    } else if(sscanf(line,"Locale %256s",Locale)){
-      setlocale(LC_ALL,Locale);
-    }
-  }
-  // Control defaults to Output if not specified
-  if(!metadata_set)
-    strncpy(dp->output.metadata_dest_address_text,dp->output.data_dest_address_text,sizeof(dp->output.metadata_dest_address_text));
-
-  fclose(fp);
-  return 0;
-}
 
 // RTP control protocol sender task
 void *rtcp_send(void *arg){

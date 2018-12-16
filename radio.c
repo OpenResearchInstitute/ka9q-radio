@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.113 2018/12/13 09:47:57 karn Exp karn $
+// $Id: radio.c,v 1.114 2018/12/14 05:52:38 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -326,51 +326,6 @@ double get_shift(struct demod * const demod){
 }
 
 
-// Load mode table entry presets without actually engaging
-// Return nonzero if demod has changed and must be engaged
-int preset_mode(struct demod * const demod,const char * const mode){
-  assert(demod != NULL);
-  if(demod == NULL)
-    return -1;
-
-  struct modetab *mp;
-  for(mp = &Modes[0]; mp < &Modes[Nmodes]; mp++){
-    if(strcasecmp(mode,mp->name) == 0)
-      break;
-  }
-  if(mp == &Modes[Nmodes])
-    return -1; // Unregistered mode
-
-  if(mp->low > mp->high){
-    demod->filter.low = mp->high;
-    demod->filter.high = mp->low;
-  } else {
-    demod->filter.low = mp->low;
-    demod->filter.high = mp->high;
-  }
-  demod->tune.shift = mp->shift;
-  demod->opt.flat = mp->flat;
-  demod->filter.isb = mp->isb;
-  demod->output.channels = mp->channels;
-  demod->opt.env = mp->envelope;
-  demod->opt.pll = mp->pll;
-  demod->opt.square = mp->square;
-  demod->agc.attack_rate = mp->attack_rate;
-  demod->agc.recovery_rate = mp->recovery_rate;
-  demod->agc.hangtime = mp->hangtime;
-  if(demod->demod_type != mp->demod_type){
-    pthread_mutex_lock(&demod->demod_mutex);
-    demod->demod_type = mp->demod_type;
-    pthread_cond_broadcast(&demod->demod_cond);
-    pthread_mutex_unlock(&demod->demod_mutex);
-  }
-  set_shift(demod,demod->tune.shift);
-  set_filter(demod->filter.out,
-	     demod->filter.low/demod->output.samprate,
-	     demod->filter.high/demod->output.samprate,
-	     demod->filter.kaiser_beta);
-  return 0;
-}      
 
 // Compute noise spectral density - experimental, my algorithm
 // The problem is telling signal from noise
