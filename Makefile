@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.130 2018/12/12 08:38:42 karn Exp karn $
+# $Id: Makefile,v 1.131 2018/12/16 04:30:05 karn Exp karn $
 #COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -67,7 +67,7 @@ pcmcat: pcmcat.o libradio.a
 pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lbsd
 
-radio: main.o audio.o fm.o linear.o radio.o radio_status.o status.o libradio.a
+radio: main.o audio.o fm.o linear.o modes.o radio.o radio_status.o status.o libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lbsd -lpthread -lm
 
 # Binary libraries

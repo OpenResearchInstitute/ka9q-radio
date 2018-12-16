@@ -78,10 +78,10 @@ void send_radio_status(struct demod *demod,int full){
   *bp++ = 0; // Response (not a command);
   
   encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
-  encode_int64(&bp,COMMANDS,Commands);
+  encode_int64(&bp,COMMANDS,Commands); // integer
 
   // Echo timestamp from source
-  encode_int64(&bp,GPS_TIME,demod->sdr.status.timestamp);
+  encode_int64(&bp,GPS_TIME,demod->sdr.status.timestamp); // integer
 
   // Who's sending us I/Q data
   {
@@ -196,8 +196,8 @@ void send_radio_status(struct demod *demod,int full){
     }
   }
   encode_int32(&bp,INPUT_SSRC,demod->input.rtp.ssrc);
-  encode_int32(&bp,INPUT_SAMPRATE,demod->sdr.status.samprate);
-  encode_int64(&bp,INPUT_METADATA_PACKETS,demod->input.metadata_packets);
+  encode_int32(&bp,INPUT_SAMPRATE,demod->sdr.status.samprate); // integer
+  encode_int64(&bp,INPUT_METADATA_PACKETS,demod->input.metadata_packets); // integer
   encode_int64(&bp,INPUT_DATA_PACKETS,demod->input.rtp.packets);
   encode_int64(&bp,INPUT_SAMPLES,demod->input.samples);
   encode_int64(&bp,INPUT_DROPS,demod->input.rtp.drops);
@@ -267,20 +267,20 @@ void send_radio_status(struct demod *demod,int full){
   encode_int64(&bp,OUTPUT_METADATA_PACKETS,demod->output.metadata_packets);
   
   // Tuning
-  encode_double(&bp,RADIO_FREQUENCY,get_freq(demod));
-  encode_double(&bp,SECOND_LO_FREQUENCY,get_second_LO(demod));
-  encode_double(&bp,SHIFT_FREQUENCY,demod->shift.freq);
+  encode_double(&bp,RADIO_FREQUENCY,get_freq(demod)); // Hz
+  encode_double(&bp,SECOND_LO_FREQUENCY,get_second_LO(demod)); // Hz
+  encode_double(&bp,SHIFT_FREQUENCY,demod->shift.freq); // Hz
   
   // Front end
-  encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency);
-  encode_byte(&bp,LNA_GAIN,demod->sdr.status.lna_gain);
-  encode_byte(&bp,MIXER_GAIN,demod->sdr.status.mixer_gain);
-  encode_byte(&bp,IF_GAIN,demod->sdr.status.if_gain);
-  encode_float(&bp,DC_I_OFFSET,demod->sdr.DC_i);
-  encode_float(&bp,DC_Q_OFFSET,demod->sdr.DC_q);
-  encode_float(&bp,IQ_IMBALANCE,demod->sdr.imbalance);
-  encode_float(&bp,IQ_PHASE,demod->sdr.sinphi);
-  encode_double(&bp,CALIBRATE,demod->sdr.calibration);
+  encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency); // Hz
+  encode_byte(&bp,LNA_GAIN,demod->sdr.status.lna_gain); // dB
+  encode_byte(&bp,MIXER_GAIN,demod->sdr.status.mixer_gain); // dB
+  encode_byte(&bp,IF_GAIN,demod->sdr.status.if_gain); // dB
+  encode_float(&bp,DC_I_OFFSET,demod->sdr.DC_i); // relative 1
+  encode_float(&bp,DC_Q_OFFSET,demod->sdr.DC_q); // relative 1
+  encode_float(&bp,IQ_IMBALANCE,demod->sdr.imbalance); // amplitude ?
+  encode_float(&bp,IQ_PHASE,demod->sdr.sinphi); // sine - dimensionless
+  encode_double(&bp,CALIBRATE,demod->sdr.calibration); // dimensionless
   
   // Doppler info
   encode_double(&bp,DOPPLER_FREQUENCY,get_doppler(demod));
@@ -293,12 +293,12 @@ void send_radio_status(struct demod *demod,int full){
   encode_int32(&bp,FILTER_BLOCKSIZE,demod->filter.L);
   encode_int32(&bp,FILTER_FIR_LENGTH,demod->filter.M);
   if(demod->filter.out)
-    encode_float(&bp,NOISE_BANDWIDTH,demod->input.samprate * demod->filter.out->noise_gain);
+    encode_float(&bp,NOISE_BANDWIDTH,demod->input.samprate * demod->filter.out->noise_gain); // Hz
   
   // Signals - these ALWAYS change
-  encode_float(&bp,IF_POWER,demod->sig.if_power);
-  encode_float(&bp,BASEBAND_POWER,demod->sig.bb_power);
-  encode_float(&bp,NOISE_DENSITY,demod->sig.n0);
+  encode_float(&bp,IF_POWER,power2dB(demod->sig.if_power));
+  encode_float(&bp,BASEBAND_POWER,power2dB(demod->sig.bb_power));
+  encode_float(&bp,NOISE_DENSITY,power2dB(demod->sig.n0));
   
   // Demodulation mode
   encode_byte(&bp,DEMOD_TYPE,demod->demod_type);
@@ -307,24 +307,24 @@ void send_radio_status(struct demod *demod,int full){
     encode_float(&bp,PEAK_DEVIATION,demod->sig.pdeviation);
     encode_float(&bp,PL_TONE,demod->sig.plfreq);
     encode_float(&bp,FREQ_OFFSET,demod->sig.foffset);
-    encode_float(&bp,DEMOD_SNR,demod->sig.snr);
+    encode_float(&bp,DEMOD_SNR,power2dB(demod->sig.snr));
     encode_byte(&bp,FM_FLAT,demod->opt.flat);
     break;
   case LINEAR_DEMOD:
-    encode_float(&bp,DEMOD_GAIN,demod->agc.gain);
-    encode_int32(&bp,INDEPENDENT_SIDEBAND,demod->filter.isb);
+    encode_float(&bp,DEMOD_GAIN,voltage2dB(demod->agc.gain));
+    encode_byte(&bp,INDEPENDENT_SIDEBAND,demod->filter.isb);
     encode_byte(&bp,PLL_ENABLE,demod->opt.pll);
     if(demod->opt.pll){
       encode_float(&bp,FREQ_OFFSET,demod->sig.foffset);
-      encode_float(&bp,PLL_PHASE,demod->sig.cphase);
-      encode_float(&bp,DEMOD_SNR,demod->sig.snr);
+      encode_float(&bp,PLL_PHASE,demod->sig.cphase); // radians
+      encode_float(&bp,DEMOD_SNR,power2dB(demod->sig.snr));
       encode_byte(&bp,PLL_LOCK,demod->sig.pll_lock);
       encode_byte(&bp,PLL_SQUARE,demod->opt.square);
     }
-    encode_float(&bp,HEADROOM,demod->agc.headroom);
-    encode_float(&bp,AGC_HANGTIME,demod->agc.hangtime);
-    encode_float(&bp,AGC_ATTACK_RATE,demod->agc.attack_rate);
-    encode_float(&bp,AGC_RECOVERY_RATE,demod->agc.attack_rate);    
+    encode_float(&bp,HEADROOM,voltage2dB(demod->agc.headroom));
+    encode_float(&bp,AGC_HANGTIME,demod->agc.hangtime / demod->output.samprate); // samples -> sec
+    encode_float(&bp,AGC_ATTACK_RATE,voltage2dB(demod->agc.attack_rate) * demod->output.samprate); // amplitude/sample -> dB/s
+    encode_float(&bp,AGC_RECOVERY_RATE,voltage2dB(demod->agc.recovery_rate) * demod->output.samprate);
     break;
   }
   encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
@@ -340,6 +340,10 @@ void send_radio_status(struct demod *demod,int full){
 
 void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
+  int fset = 0;
+  double nrf = NAN;
+  double nlo2 = NAN;
+  double nlo1 = NAN;
 
   while(cp - buffer < length){
     enum status_type type = *cp++; // increment cp to length field
@@ -351,8 +355,7 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
     if(cp - buffer + optlen >= length)
       break; // Invalid length
     
-    double samptime = 1./demod->output.samprate;
-    double nval;
+
     int i;
 
     switch(type){
@@ -369,82 +372,87 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       }
       break;
     case CALIBRATE:
-      demod->sdr.calibration = decode_double(cp,optlen);
+      demod->sdr.calibration = decode_double(cp,optlen); // dimensionless
       break;
-    case RADIO_FREQUENCY:
-      demod->tune.freq = decode_double(cp,optlen);
-      set_freq(demod,demod->tune.freq,NAN);
+    case RADIO_FREQUENCY:  // Hz
+      nrf = decode_double(cp,optlen);
       break;
-    case FIRST_LO_FREQUENCY:
-      nval = decode_double(cp,optlen);
-      double new_lo2 = nval - get_freq(demod);
-      if(LO2_in_range(demod,new_lo2,0))
-	set_freq(demod,get_freq(demod),new_lo2);
-
+    case FIRST_LO_FREQUENCY:  // Hz
+      nlo1 = decode_double(cp,optlen);
       break;
-    case SECOND_LO_FREQUENCY:
-      nval = decode_double(cp,optlen);
-      if(LO2_in_range(demod,nval,0)){
-	// Only if valid
-	demod->tune.freq += nval - get_second_LO(demod);
-	set_freq(demod,demod->tune.freq,nval);
-      }
+    case SECOND_LO_FREQUENCY:  // Hz
+      nlo2 = decode_double(cp,optlen);
       break;
-    case LOW_EDGE:
+    case LOW_EDGE:  // Hz
       demod->filter.low = decode_float(cp,optlen);
-      set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);
+      fset++;
       break;
-    case HIGH_EDGE:
+    case HIGH_EDGE: // Hz
       demod->filter.high = decode_float(cp,optlen);
-      set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);      
+      fset++;
       break;
-    case SHIFT_FREQUENCY:
+    case SHIFT_FREQUENCY: // Hz
       demod->tune.shift = decode_double(cp,optlen);
       set_shift(demod,demod->tune.shift);
       break;
-    case KAISER_BETA:
+    case KAISER_BETA: // dimensionless
       demod->filter.kaiser_beta = decode_float(cp,optlen);
       if(demod->filter.kaiser_beta < 0)
 	demod->filter.kaiser_beta = 0;
-      set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);            
+      fset++;
       break;
-    case INDEPENDENT_SIDEBAND:
+    case INDEPENDENT_SIDEBAND: // boolean
       demod->filter.isb = decode_int(cp,optlen);
       break;
-    case PLL_ENABLE:
+    case PLL_ENABLE: // boolean
       demod->opt.pll = decode_int(cp,optlen);
       break;
-    case PLL_SQUARE:
+    case PLL_SQUARE: // boolean
       demod->opt.square = decode_int(cp,optlen);
       break;
-    case FM_FLAT:
+    case FM_FLAT:  // boolean
       demod->opt.flat = decode_int(cp,optlen);
       break;
-    case OUTPUT_CHANNELS:
+    case OUTPUT_CHANNELS: // integer (1 or 2)
       demod->output.channels = decode_int(cp,optlen);
       break;
-    case COMMAND_TAG:
+    case COMMAND_TAG:     // dimensionless, opaque integer
       demod->output.command_tag = decode_int(cp,optlen);
       break;
-    case HEADROOM:
-      demod->agc.headroom = decode_float(cp,optlen);
+    case HEADROOM:        // dB -> amplitude ratio < 1
+      demod->agc.headroom = powf(10.,-fabsf(decode_float(cp,optlen))/20.);
       break;
-    case AGC_HANGTIME:
-      demod->agc.hangtime = decode_float(cp,optlen);
+    case AGC_HANGTIME:    // sec -> samples
+      demod->agc.hangtime = fabsf(decode_float(cp,optlen)) * demod->output.samprate;
       break;
-    case AGC_RECOVERY_RATE:
-      demod->agc.recovery_rate = decode_float(cp,optlen);
+    case AGC_RECOVERY_RATE: // dB/sec -> amplitude ratio/sample > 1
+      demod->agc.recovery_rate = powf(10., fabs(decode_float(cp,optlen) / 20. / demod->output.samprate));
       break;
-    case AGC_ATTACK_RATE:
-      demod->agc.attack_rate = decode_float(cp,optlen);
+    case AGC_ATTACK_RATE:   // dB/sec -> amplitude ratio/sample < 1
+      demod->agc.attack_rate = powf(10., -fabs(decode_float(cp,optlen) / 20. / demod->output.samprate));
       break;
-    case ENVELOPE:
+    case ENVELOPE:  // boolean
       demod->opt.env = decode_int(cp,optlen);
       break;
     default:
       break;
     }
     cp += optlen;
+  }
+  if(fset){
+    double samptime = 1./demod->output.samprate;
+    set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);
+  }
+  // Tuning changed?
+  if(!isnan(nrf)) // Specific RF frequency always takes precedence, nlo2 used if possible
+    set_freq(demod,nrf,nlo2);
+  else if(!isnan(nlo2) && LO2_in_range(demod,nlo2,0)){
+    // Tune around with fixed LO1
+    nrf = get_freq(demod) - (nlo2 - get_second_LO(demod));
+    set_freq(demod,nrf,nlo2);
+  } else if(!isnan(nlo1)){
+    // Will automatically change LO2 when LO1 actually changes
+    set_first_LO(demod,nlo1);
   }
 }
 

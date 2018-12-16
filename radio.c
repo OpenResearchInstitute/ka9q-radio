@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.114 2018/12/14 05:52:38 karn Exp karn $
+// $Id: radio.c,v 1.115 2018/12/16 04:30:05 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -271,8 +271,7 @@ double set_first_LO(struct demod * const demod,double first_LO){
   encode_double(&bp,RADIO_FREQUENCY,first_LO);
   encode_eol(&bp);
   int len = bp - packet;
-  int i = send(demod->input.ctl_fd,packet,len,0);
-  assert(i>0);
+  send(demod->input.ctl_fd,packet,len,0);
   return first_LO;
 }  
 // If avoid_alias is true, return 1 if specified carrier frequency is in range of LO2 given
@@ -316,7 +315,7 @@ double set_shift(struct demod * const demod,double const shift){
   if(shift == 0)
     set_osc(&demod->shift, 0.0, 0.0);
   else 
-    set_osc(&demod->shift,shift * demod->filter.decimate / (double)demod->input.samprate, 0.0);
+    set_osc(&demod->shift,shift / (double)demod->output.samprate, 0.0);
   return shift;
 }
 
@@ -324,6 +323,54 @@ double get_shift(struct demod * const demod){
   assert(demod != NULL);
   return demod->tune.shift;
 }
+
+// Load mode table entry presets without actually engaging
+// Return nonzero if demod has changed and must be engaged
+int preset_mode(struct demod * const demod,const char * const mode){
+  assert(demod != NULL);
+  if(demod == NULL)
+    return -1;
+
+  struct modetab *mp;
+  for(mp = &Modes[0]; mp < &Modes[Nmodes]; mp++){
+    if(strcasecmp(mode,mp->name) == 0)
+      break;
+  }
+  if(mp == &Modes[Nmodes])
+    return -1; // Unregistered mode
+
+  if(mp->low > mp->high){
+    demod->filter.low = mp->high;
+    demod->filter.high = mp->low;
+  } else {
+    demod->filter.low = mp->low;
+    demod->filter.high = mp->high;
+  }
+  demod->tune.shift = mp->shift;
+  demod->opt.flat = mp->flat;
+  demod->filter.isb = mp->isb;
+  demod->output.channels = mp->channels;
+  demod->opt.env = mp->env;
+  demod->opt.pll = mp->pll;
+  demod->opt.square = mp->square;
+  // dB/sec -> voltage ratio/sample
+  demod->agc.attack_rate = dB2voltage(mp->attack_rate / demod->output.samprate);
+  demod->agc.recovery_rate = dB2voltage(mp->recovery_rate / demod->output.samprate);
+  // time in seconds -> samples
+  demod->agc.hangtime = mp->hangtime * demod->output.samprate;
+  if(demod->demod_type != mp->demod_type){
+    pthread_mutex_lock(&demod->demod_mutex);
+    demod->demod_type = mp->demod_type;
+    pthread_cond_broadcast(&demod->demod_cond);
+    pthread_mutex_unlock(&demod->demod_mutex);
+  }
+  set_shift(demod,demod->tune.shift);
+  set_filter(demod->filter.out,
+	     demod->filter.low/demod->output.samprate,
+	     demod->filter.high/demod->output.samprate,
+	     demod->filter.kaiser_beta);
+  return 0;
+}      
 
 
 

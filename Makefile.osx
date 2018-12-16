@@ -64,7 +64,7 @@ pcmcat: pcmcat.o libradio.a
 pcmsend: pcmsend.o libradio.a
 	$(CC) -g -o $@ $^ -lportaudio -lm -lpthread
 
-radio: main.o audio.o fm.o linear.o  radio.o radio_status.o  libradio.a
+radio: main.o audio.o fm.o linear.o  modes.o radio.o radio_status.o  libradio.a
 	$(CC) -g -o $@ $^ -lfftw3f_threads -lfftw3f -lncurses -lm -lpthread
 
 # Binary libraries

@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.32 2018/12/13 09:47:57 karn Exp karn $
+// $Id: modes.c,v 1.33 2018/12/16 04:30:05 karn Exp karn $
 // Load and search mode definition table in /usr/local/share/ka9q-radio/modes.txt
 
 // Copyright 2018, Phil Karn, KA9Q
@@ -86,14 +86,18 @@ int readmodes(char *file){
       mtp->high = high;
     }
     mtp->shift = strtod(stringp,&stringp);
-    mtp->attack_rate = -fabsf(strtof(stringp,&stringp));
-    mtp->recovery_rate = fabsf(strtof(stringp,&stringp));
-    mtp->hangtime = fabsf(strtof(stringp,&stringp));
-    mtp->headroom = -fabsf(strtof(stringp,&stringp));
+    mtp->attack_rate = strtof(stringp,&stringp);
+    mtp->attack_rate = -fabsf(mtp->attack_rate);
+    mtp->recovery_rate = strtof(stringp,&stringp);
+    mtp->recovery_rate = fabsf(mtp->recovery_rate);
+    mtp->hangtime = strtof(stringp,&stringp);
+    mtp->hangtime = fabsf(mtp->hangtime);
+    mtp->headroom = strtof(stringp,&stringp);
+    mtp->headroom = -fabsf(mtp->headroom);
 
     // Defaults changed by flags
     mtp->channels = 1;
-    mtp->isb = mtp->flat = mtp->square = mtp->pll = mtp->envelope = 0; // defaults
+    mtp->isb = mtp->flat = mtp->square = mtp->pll = mtp->env = 0; // defaults
 
     // Process options
     for(int i=0;i<8;i++){
@@ -118,7 +122,7 @@ int readmodes(char *file){
       } else if(strcasecmp(option,"mono") == 0){
 	mtp->channels = 1; // actually the default
       } else if(strcasecmp(option,"env") == 0){
-	mtp->envelope = 1; // Envelope detection for AM
+	mtp->env = 1; // Envelope detection for AM
       }
     }    
     Nmodes++;

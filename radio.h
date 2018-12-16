@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.88 2018/12/13 09:47:57 karn Exp karn $
+// $Id: radio.h,v 1.89 2018/12/16 04:30:05 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -39,7 +39,7 @@ struct modetab {
   int channels;     // 1 or 2
   int isb;
   int flat;
-  int envelope;
+  int env;
   double shift;      // Audio frequency shift, Hz (mainly for CW/RTTY)
   float tunestep;   // Default tuning step
   float low;        // Lower edge of IF passband, Hz
@@ -166,23 +166,23 @@ struct demod {
 
   // AGC (AM and linear modes)
   struct {
-    float headroom;   // Audio level headroom
-    float hangtime;   // Linear AGC hang time, seconds
-    float recovery_rate; // Linear AGC recovery rate, dB/sec (must be positive)
-    float attack_rate;   // Linear AGC attack rate, dB/sec (must be negative)
-    float gain;       // Audio gain
+    float headroom;   // Audio level headroom, amplitude ratio
+    float hangtime;   // AGC hang time, samples
+    float recovery_rate; // AGC recovery rate, amplitude ratio/sample 
+    float attack_rate;   // AGC attack rate, amplitude ratio/sample
+    float gain;       // Audio gain, amplitude ratio
   } agc;
 
   // Signal levels & status
   struct {
-    float if_power;   // Input level, unity == 0dBFS
-    float bb_power;   // Average power of signal after filter
-    float n0;         // Noise spectral density esimate (experimemtal)
-    float snr;        // Estimated signal-to-noise ratio (only some demodulators)
-    float foffset;    // Frequency offset (FM, coherent AM, dsb)
-    float pdeviation; // Peak frequency deviation (FM)
-    float cphase;     // Carrier phase change (DSB/PSK)
-    float plfreq;     // PL tone frequency (FM)
+    float if_power;   // Input level, unity == 0dBFS, power ratio
+    float bb_power;   // Average power of signal after filter, power ratio
+    float n0;         // Noise spectral density esimate (experimemtal), power/Hz ratio
+    float snr;        // Estimated signal-to-noise ratio (only some demodulators), power ratio
+    float foffset;    // Frequency offset Hz (FM, coherent AM, dsb)
+    float pdeviation; // Peak frequency deviation Hz (FM)
+    float cphase;     // Carrier phase change radians (DSB/PSK)
+    float plfreq;     // PL tone frequency Hz (FM)
     float lock_timer; // PLL lock timer
     int pll_lock;
   } sig;

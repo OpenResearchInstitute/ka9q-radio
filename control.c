@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.26 2018/12/13 09:47:57 karn Exp karn $
+// $Id: control.c,v 1.27 2018/12/16 04:30:05 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -173,6 +173,7 @@ void adjust_item(struct demod *demod,int direction){
     break;
   case 6: // Post-detection audio frequency shift
     demod->tune.shift += tunestep;
+    demod->tune.freq += tunestep;
     break;
   case 7: // Kaiser window beta parameter for filter
     demod->filter.kaiser_beta += tunestep;
@@ -280,8 +281,8 @@ int main(int argc,char *argv[]){
   col = 0;
   filtering = newwin(12,22,row,col);
   col += 22;
-  demodulator = newwin(12,25,row,col);
-  col += 25;
+  demodulator = newwin(12,26,row,col);
+  col += 26;
   options = newwin(12,12,row,col); // Demod options
   col += 12;
   sdr = newwin(12,25,row,col); // SDR information
@@ -512,23 +513,26 @@ int main(int argc,char *argv[]){
 
 
     // Signal data window
-    float bw = Noise_bandwidth;
-    float sn0 = demod->sig.bb_power / demod->sig.n0 - bw;
-    sn0 = max(sn0,0.0f); // Can go negative due to inconsistent smoothed values; clip it at zero
+    float sig_power = dB2power(demod->sig.bb_power) - Noise_bandwidth * dB2power(demod->sig.n0);
+    if(sig_power < 0)
+      sig_power = 0;
+    float bw = power2dB(Noise_bandwidth);
+
+    float sn0 = power2dB(sig_power) - demod->sig.n0;
 
     row = 1;
     col = 1;
-    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->sig.if_power));
+    mvwprintw(sig,row,col,"%15.1f dB",demod->sig.if_power);
     mvwaddstr(sig,row++,col,"IF");
-    mvwprintw(sig,row,col,"%15.1f dB",power2dB(demod->sig.bb_power));
+    mvwprintw(sig,row,col,"%15.1f dB",demod->sig.bb_power);
     mvwaddstr(sig,row++,col,"Baseband");
-    mvwprintw(sig,row,col,"%15.1f dB/Hz",power2dB(demod->sig.n0));
+    mvwprintw(sig,row,col,"%15.1f dB/Hz",demod->sig.n0);
     mvwaddstr(sig,row++,col,"N0");
-    mvwprintw(sig,row,col,"%15.1f dBHz",power2dB(sn0));
+    mvwprintw(sig,row,col,"%15.1f dBHz",sn0);
     mvwaddstr(sig,row++,col,"S/N0");
-    mvwprintw(sig,row,col,"%15.1f dBHz",power2dB(bw));
+    mvwprintw(sig,row,col,"%15.1f dBHz",bw);
     mvwaddstr(sig,row++,col,"NBW");
-    mvwprintw(sig,row,col,"%15.1f dB",power2dB(sn0/bw));
+    mvwprintw(sig,row,col,"%15.1f dB",sn0 - bw);
     mvwaddstr(sig,row++,col,"SNR");
     box(sig,0,0);
     mvwaddstr(sig,0,9,"Signal");
@@ -543,7 +547,7 @@ int main(int argc,char *argv[]){
     // Display only if used by current mode
     switch(demod->demod_type){
     case FM_DEMOD:
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",power2dB(demod->sig.snr));
+      mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->sig.snr);
       mvwaddstr(demodulator,row++,lcol,"Input SNR");
       mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->sig.foffset);
       mvwaddstr(demodulator,row++,lcol,"Offset");
@@ -553,17 +557,17 @@ int main(int argc,char *argv[]){
       mvwaddstr(demodulator,row++,lcol,"PL Tone");
       break;
     case LINEAR_DEMOD:
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",voltage2dB(demod->agc.gain));
+      mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->agc.gain);
       mvwaddstr(demodulator,row++,lcol,"AF Gain");
-      mvwprintw(demodulator,row,rcol,"%9.1f dB/s",voltage2dB(demod->agc.recovery_rate) * demod->output.samprate);
+      mvwprintw(demodulator,row,rcol,"%11.1f dB/s",demod->agc.recovery_rate);
       mvwaddstr(demodulator,row++,lcol,"Recovery rate");
-      mvwprintw(demodulator,row,rcol,"%11.1f  s",demod->agc.hangtime * demod->output.samprate);
+      mvwprintw(demodulator,row,rcol,"%11.1f  s",demod->agc.hangtime);
       mvwaddstr(demodulator,row++,lcol,"Hang time");
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",voltage2dB(demod->agc.headroom));
+      mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->agc.headroom);
       mvwaddstr(demodulator,row++,lcol,"Headroom");
 
       if(demod->opt.pll){
-	mvwprintw(demodulator,row,rcol,"%11.1f dB",power2dB(demod->sig.snr));
+	mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->sig.snr);
 	mvwaddstr(demodulator,row++,lcol,"PLL SNR");
 	mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->sig.foffset);
 	mvwaddstr(demodulator,row++,lcol,"Offset");
@@ -583,7 +587,7 @@ int main(int argc,char *argv[]){
     mvwprintw(sdr,row,col,"%'18d Hz",demod->sdr.status.samprate); // Nominal
     mvwaddstr(sdr,row++,col,"Samprate");
     mvwprintw(sdr,row,col,"%'18.1f dBFS",
-	      power2dB(demod->sig.if_power) + demod->sdr.status.lna_gain + demod->sdr.status.mixer_gain + demod->sdr.status.if_gain);
+	      demod->sig.if_power + demod->sdr.status.lna_gain + demod->sdr.status.mixer_gain + demod->sdr.status.if_gain);
     mvwprintw(sdr,row++,col,"A/D Level");
     mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.lna_gain);   // SDR dependent
     mvwaddstr(sdr,row++,col,"LNA gain");
@@ -1076,7 +1080,7 @@ int main(int argc,char *argv[]){
 	encode_float(&bp,HEADROOM,demod->agc.headroom);
 
       if(demod->agc.hangtime != old_demod.agc.hangtime)
-	encode_float(&bp,AGC_HANGTIME,demod->agc.headroom);
+	encode_float(&bp,AGC_HANGTIME,demod->agc.hangtime);
 	
       if(demod->agc.attack_rate != old_demod.agc.attack_rate)
 	encode_float(&bp,AGC_ATTACK_RATE,demod->agc.attack_rate);
@@ -1270,6 +1274,18 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case DEMOD_GAIN:
       demod->agc.gain = decode_float(cp,optlen);
       break;
+    case HEADROOM:
+      demod->agc.headroom = decode_float(cp,optlen);
+      break;
+    case AGC_HANGTIME:
+      demod->agc.hangtime = decode_float(cp,optlen);
+      break;
+    case AGC_RECOVERY_RATE:
+      demod->agc.recovery_rate = decode_float(cp,optlen);
+      break;
+    case AGC_ATTACK_RATE:
+      demod->agc.attack_rate = decode_float(cp,optlen);
+      break;
     case FREQ_OFFSET:
       demod->sig.foffset = decode_float(cp,optlen);
       break;
@@ -1326,6 +1342,7 @@ int preset_mode(struct demod * const demod,const char * const mode){
     demod->filter.low = mp->low;
     demod->filter.high = mp->high; 
   }
+  demod->tune.freq += mp->shift - demod->tune.shift; // Keep audio pitch the same
   demod->tune.shift = mp->shift;
   demod->opt.flat = mp->flat;
   demod->filter.isb = mp->isb;
@@ -1335,6 +1352,7 @@ int preset_mode(struct demod * const demod,const char * const mode){
   demod->agc.attack_rate = mp->attack_rate;
   demod->agc.recovery_rate = mp->recovery_rate;
   demod->agc.hangtime = mp->hangtime;
+  demod->opt.env = mp->env;
   demod->demod_type = mp->demod_type;
   return 0;
 }      

@@ -1,4 +1,4 @@
-// $Id: dump.c,v 1.2 2018/12/12 13:45:40 karn Exp karn $
+// $Id: dump.c,v 1.3 2018/12/13 09:47:57 karn Exp karn $
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
@@ -165,13 +165,13 @@ void dump_metadata(unsigned char *buffer,int length){
       printf(" noise BW %g Hz;",decode_float(cp,optlen));
       break;
     case IF_POWER:
-      printf(" IF pwr %.1f dB;",10*log10f(decode_float(cp,optlen)));
+      printf(" IF pwr %.1f dB;",decode_float(cp,optlen));
       break;
     case BASEBAND_POWER:
-      printf(" BB pwr %.1f dB;",10*log10f(decode_float(cp,optlen)));
+      printf(" BB pwr %.1f dB;",decode_float(cp,optlen));
       break;
     case NOISE_DENSITY:
-      printf(" N0 %.1f dB/Hz;",10*log10f(decode_float(cp,optlen)));
+      printf(" N0 %.1f dB/Hz;",decode_float(cp,optlen));
       break;
     case DEMOD_TYPE:
       i = (long long unsigned)decode_int(cp,optlen); // ????
@@ -181,10 +181,10 @@ void dump_metadata(unsigned char *buffer,int length){
       printf(" ISB %'llu;",(long long unsigned)decode_int(cp,optlen));
       break;
     case DEMOD_SNR:
-      printf(" Demod SNR %.1f dB;",10*log10f(decode_float(cp,optlen)));
+      printf(" Demod SNR %.1f dB;",decode_float(cp,optlen));
       break;
     case DEMOD_GAIN:
-      printf(" AGC gain %.1f dB;",10*log10(decode_float(cp,optlen)));
+      printf(" AGC gain %.1f dB;",decode_float(cp,optlen));
       break;
     case FREQ_OFFSET:
       printf(" freq offset %g Hz;",decode_float(cp,optlen));

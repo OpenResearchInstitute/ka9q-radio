@@ -38,10 +38,7 @@ int DAC_samprate = 48000;
 
 // Command line Parameters with default values
 int Nthreads = 1;
-int Quiet = 0;
-char Statepath[PATH_MAX];
 char Locale[256] = "en_US.UTF-8";
-int Update_interval = 100;  // 100 ms between screen updates
 int Mcast_ttl = 1;
 
 // Primary control blocks for downconvert/filter/demodulate and output
@@ -64,7 +61,7 @@ void *send_status(void *);
 struct option Options[] =
   {
    {"out-data", required_argument, NULL, 'D'},
-   {"flat",no_argument, NULL, 'F'},
+   {"flat", no_argument, NULL, 'F'},
    {"agc-hangtime", required_argument, NULL, 'H'},
    {"in-meta", required_argument, NULL, 'I'},
    {"blocksize", required_argument, NULL, 'L'},
@@ -74,15 +71,15 @@ struct option Options[] =
    {"ttl", required_argument, NULL, 'T'},
    {"agc-recover", required_argument, NULL, 'a'},
    {"channels", required_argument, NULL, 'c'},
-   {"env",no_argument, NULL, 'e'},
+   {"env", no_argument, NULL, 'e'},
    {"frequency", required_argument, NULL, 'f'},
    {"filter-high", required_argument, NULL, 'h'},
-   {"isb",no_argument, NULL, 'i'},
+   {"isb", no_argument, NULL, 'i'},
    {"kaiser-beta", required_argument, NULL, 'k'},
    {"filter-low", required_argument, NULL, 'l'},
    {"mode", required_argument, NULL, 'm'},
-   {"pll",no_argument, NULL, 'p'},
-   {"square",no_argument, NULL, 'q'},
+   {"pll", no_argument, NULL, 'p'},
+   {"square", no_argument, NULL, 'q'},
    {"headroom", required_argument, NULL, 'r'},
    {"shift", required_argument, NULL, 's'},
    {"fft-threads", required_argument, NULL, 't'},
@@ -110,8 +107,10 @@ int main(int argc,char *argv[]){
   if(seteuid(getuid()) != 0)
     perror("seteuid");
 
+  gettimeofday(&Starttime,NULL);
+
   // Set up program defaults
-  // Some can be overridden by state file or command line args
+  // Some can be overridden by command line args
   {
     // The display thread assumes en_US.UTF-8, or anything with a thousands grouping character
     // Otherwise the cursor movements will be wrong
@@ -121,8 +120,11 @@ int main(int argc,char *argv[]){
     }
   }
   setlocale(LC_ALL,Locale); // Set either the hardwired default or the value of $LANG if it exists
-  fprintf(stderr,"General coverage receiver for the Funcube Pro and Pro+\n");
-  fprintf(stderr,"Copyright 2017 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
+  fprintf(stderr,"General coverage software receiver\n");
+  fprintf(stderr,"Copyright 2018 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
+  if(readmodes("modes.txt") != 0){
+    fprintf(stderr,"Warning: can't read mode table; --modes won't work\n");
+  }
   
   // Must do this before first filter is created, otherwise a segfault can occur
   fftwf_import_system_wisdom();
@@ -144,47 +146,40 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&demod->demod_mutex,NULL);
   pthread_cond_init(&demod->demod_cond,NULL);
 
-  // First pass over options to pick up I/O config
-  // Acquire SDR metadata from -I option and get sample rate
+  demod->input.status_fd = -1;
+  
+  // First pass over options to pick up SDR metadata
   int c;
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
-    case 'T': // TTL on output packets
-      Mcast_ttl = strtol(optarg,NULL,0);
-      break;
     case 'I':   // Multicast address to listen to for receiver metadata
-      strlcpy(demod->input.dest_address_text,optarg,sizeof(demod->input.dest_address_text));
-      break;
-    case 'R':   // Set output target IP multicast address for metadata
-      strlcpy(demod->output.metadata_dest_address_text,optarg,sizeof(demod->output.metadata_dest_address_text));
-      break;
-    case 'D': // target multicast group for pcm data output
-      strlcpy(demod->output.data_dest_address_text,optarg,sizeof(demod->output.data_dest_address_text));      
-      break;
-    case 'S':   // Set SSRC on output stream
-      demod->output.rtp.ssrc = strtol(optarg,NULL,0);
+      // Input socket for status from SDR
+      demod->input.status_fd = setup_mcast(optarg,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,2);
+      if(demod->input.status_fd == -1){
+	fprintf(stderr,"Can't set up SDR status socket\n");
+	exit(1);
+      }
       break;
     default: // Ignore others for now
       break;
     }
   }
-  // Output socket for commands to SDR
-  demod->input.ctl_fd = setup_mcast(demod->input.dest_address_text,(struct sockaddr *)&demod->input.metadata_dest_address,1,Mcast_ttl,2);
+  if(demod->input.status_fd == -1){
+    fprintf(stderr,"No valid SDR metadata address given with -I\n");
+    exit(1);
+  }
+
+  // Output socket for commands to SDR - same group as metadata input
+  demod->input.ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,1,Mcast_ttl,0);
   if(demod->input.ctl_fd == -1){
     fprintf(stderr,"Can't set up SDR control socket\n");
     exit(1);
   }
-  // Input socket for status from SDR
-  demod->input.status_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,0);
-  if(demod->input.status_fd == -1){
-    fprintf(stderr,"Can't set up SDR status socket\n");
-    exit(1);
-  }
-  
+
+  // Start listening to SDR metadata, wait for it
   pthread_t recv_sdr_status_thread;
   pthread_create(&recv_sdr_status_thread,NULL,recv_sdr_status,demod);
 
-  // Wait for sample rate, mainly
   fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
   pthread_mutex_lock(&demod->sdr.status_mutex);
   while(demod->sdr.status.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
@@ -192,8 +187,14 @@ int main(int argc,char *argv[]){
   pthread_mutex_unlock(&demod->sdr.status_mutex);
   fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
 
-  // Set receiver defaults, can be overridden by command line args
+  // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
+  demod->input.data_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
+  if(demod->input.data_fd == -1){
+    fprintf(stderr,"Can't set up I/Q input\n");
+    exit(1);
+  }
 
+  // Set receiver defaults, can be overridden by command line args
   demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
   demod->filter.M = 4352+1;    // Length of filter impulse response
   demod->filter.kaiser_beta = 3.0; // Reasonable compromise
@@ -206,18 +207,50 @@ int main(int argc,char *argv[]){
   demod->tune.freq = 147.435e6;  // LA "animal house" repeater, active all night for testing
   demod->filter.high = 8000;
   demod->filter.low = -8000;
+  demod->output.rtp.ssrc = Starttime.tv_sec & 0xffffffff;
+  demod->output.status_fd = demod->output.ctl_fd = demod->output.data_fd = demod->output.rtcp_fd = -1;
 
-
-  // Go back and re-read args
+  // Go back and re-read rest of args
+  // -T must be specified ahead of argument it modifies
   optind = 1;
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
-    case 'T':
+    case 'R':   // Set output target IP multicast address for metadata
+      demod->output.status_fd = setup_mcast(optarg,(struct sockaddr *)&demod->output.metadata_dest_address,1,Mcast_ttl,2); // RTP port + 2
+      if(demod->output.status_fd == -1){
+	fprintf(stderr,"Can't send status to %s\n",optarg);
+      } else {
+	socklen_t len = sizeof(demod->output.metadata_source_address);
+	getsockname(demod->output.status_fd,(struct sockaddr *)&demod->output.metadata_source_address,&len);  
+	// Same remote socket as status
+	demod->output.ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->output.metadata_dest_address,0,Mcast_ttl,2);
+	if(demod->output.ctl_fd == -1){
+	  fprintf(stderr,"Can't listen for commands!\n");
+	}
+      }
+      break;
+    case 'D': // target multicast group for pcm data output
+      demod->output.data_fd = setup_mcast(optarg,(struct sockaddr *)&demod->output.data_dest_address,1,Mcast_ttl,0);
+      if(demod->output.data_fd == -1){
+	fprintf(stderr,"Can't set up PCM output\n");
+	exit(1);
+      }
+      {
+	socklen_t len = sizeof(demod->output.data_source_address);
+	getsockname(demod->output.data_fd,(struct sockaddr *)&demod->output.data_source_address,&len);
+      }
+      demod->output.rtcp_fd = setup_mcast(optarg,NULL,1,Mcast_ttl,1); // RTP port number + 1
+      if(demod->output.rtcp_fd == -1)
+	fprintf(stderr,"Can't set up RTCP output\n");
+      break;
+    case 'S':   // Set SSRC on output stream
+      demod->output.rtp.ssrc = strtol(optarg,NULL,0);
+      break;
     case 'I':
-    case 'R':
-    case 'D':
-    case 'S':
       break; // Already processed
+    case 'T': // TTL on output packets
+      Mcast_ttl = strtol(optarg,NULL,0);
+      break;
     case 'a': // AGC recovery rate, dB/s
       // Convert to ratio per sample
       demod->agc.recovery_rate = fabs(strtof(optarg,NULL)) / demod->output.samprate;
@@ -245,7 +278,7 @@ int main(int argc,char *argv[]){
       demod->filter.low = strtof(optarg,NULL);
       break;
     case 'm':
-      demod->demod_type = strtol(optarg,NULL,0); // change this to string
+      preset_mode(demod,optarg);
       break;
     case 'p':
       demod->opt.pll = 1;
@@ -283,28 +316,16 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-  // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
-  demod->input.data_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
-  if(demod->input.data_fd == -1){
-    fprintf(stderr,"Can't set up I/Q input\n");
-    exit(1);
-  }
-
-  gettimeofday(&Starttime,NULL);
-
-  if(setup_output(demod,Mcast_ttl) != 0){
-    fprintf(stderr,"Output setup failed\n");
-    exit(1);
-  }
+  // Start emitting status and RTCP
   pthread_t status_thread;
-  pthread_create(&status_thread,NULL,send_status,demod);
+  if(demod->output.status_fd != -1)
+    pthread_create(&status_thread,NULL,send_status,demod);
 
   pthread_t rtcp_thread;
-  pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
+  if(demod->output.rtcp_fd != -1)
+    pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
 
-  // Create filter now that we know the input sample rate and the decimate ratio
-  // Must be done before the demodulator starts or it will fail an assert
-  // If done in proc_samples(), will be a race condition
+  // Create filter now that we know the parameters
   // Blocksize really should be computed from demod->filter.L and decimate
   demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
   demod->filter.out = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,demod->filter.isb ? CROSS_CONJ : COMPLEX);
@@ -313,6 +334,7 @@ int main(int argc,char *argv[]){
 	     demod->filter.high/demod->output.samprate,
 	     demod->filter.kaiser_beta);
 
+  // Start processing I/Q data stream
   pthread_t rtp_recv_thread,proc_samples_thread;
   pthread_create(&rtp_recv_thread,NULL,rtp_recv,demod);
   pthread_create(&proc_samples_thread,NULL,proc_samples,demod);
@@ -496,7 +518,6 @@ void *rtcp_send(void *arg){
   }
 }
 void closedown(int a){
-  if(!Quiet)
-    fprintf(stderr,"Signal %d\n",a);
+  fprintf(stderr,"Signal %d\n",a);
   exit(1);
 }

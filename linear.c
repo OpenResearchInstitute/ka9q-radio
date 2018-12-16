@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.38 2018/12/13 10:03:46 karn Exp karn $
+// $Id: linear.c,v 1.39 2018/12/16 04:30:05 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -193,17 +193,23 @@ void *demod_linear(void *arg){
       } else { // !pll_lock
 	ramp = 0;
       }
-      // Apply coarse and fine offsets, gather DC phase information
+      // Apply coarse and fine offsets, estimate SNR, gather DC phase information
+      float signal = 0;
+      float noise = 0;
       complex float accum = 0;
       assert(coarse.phasor == coarse.phasor && fine.phasor == fine.phasor);
       for(int n=0;n<filter->olen;n++){
-	filter->output.c[n] *= step_osc(&coarse) * step_osc(&fine);
-
-	complex float ss = filter->output.c[n];
-	if(demod->opt.square)
-	  ss *= ss;
+	complex float s;
+	s = filter->output.c[n] *= step_osc(&coarse) * step_osc(&fine);
 	
-	accum += ss;
+	float rp = crealf(s) * crealf(s);
+	float ip = cimagf(s) * cimagf(s);
+	signal += rp;
+	noise += ip;
+	if(demod->opt.square)
+	  accum += s*s;
+	else
+	  accum += s;
       }
       demod->sig.cphase = cargf(accum);
       if(isnan(demod->sig.cphase))
@@ -232,22 +238,21 @@ void *demod_linear(void *arg){
 	demod->sig.foffset = feedback + delta_f;
       else
 	demod->sig.foffset += 0.001 * (feedback + delta_f - demod->sig.foffset);
+      if(noise != 0){
+	demod->sig.snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
+	if(demod->sig.snr < 0)
+	  demod->sig.snr = 0; // Clamp to 0 so it'll show as -Inf dB
+      } else
+	demod->sig.snr = NAN;
     }
     // Demodulation
-    float signal = 0;
-    float noise = 0;
-    
     float samples[filter->olen]; // for mono output
+    float energy = 0;
     for(int n=0; n<filter->olen; n++){
-      // Assume signal on I channel, so only noise on Q channel
-      // True only in coherent modes when locked, but we'll need total power anyway
       complex float s = filter->output.c[n] * step_osc(&demod->shift);
-      float rp = crealf(s) * crealf(s);
-      float ip = cimagf(s) * cimagf(s);
-      signal += rp;
-      noise += ip;
-
-      float amplitude = sqrtf(rp + ip);
+      float norm = cnrmf(s);
+      energy += norm;
+      float amplitude = sqrtf(norm);
       
       // AGC
       // Lots of people seem to have strong opinions how AGCs should work
@@ -279,14 +284,6 @@ void *demod_linear(void *arg){
       send_stereo_output(demod,(float *)filter->output.c,filter->olen);
 
     // Total baseband power (I+Q), scaled to each sample
-    demod->sig.bb_power = (signal + noise) / filter->olen;
-    // PLL loop SNR, if used
-    if(noise != 0 && demod->opt.pll){
-      demod->sig.snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
-      if(demod->sig.snr < 0)
-	demod->sig.snr = 0; // Clamp to 0 so it'll show as -Inf dB
-    } else
-      demod->sig.snr = NAN;
-
+    demod->sig.bb_power = energy / filter->olen;
   }
 }
