@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.134 2018/12/12 08:39:00 karn Exp karn $
+// $Id: main.c,v 1.136 2018/12/16 10:59:32 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -60,13 +60,13 @@ void *send_status(void *);
 
 struct option Options[] =
   {
-   {"out-data", required_argument, NULL, 'D'},
+   {"pcm-out", required_argument, NULL, 'D'},
    {"flat", no_argument, NULL, 'F'},
    {"agc-hangtime", required_argument, NULL, 'H'},
-   {"in-meta", required_argument, NULL, 'I'},
+   {"status-in", required_argument, NULL, 'I'},
    {"blocksize", required_argument, NULL, 'L'},
    {"filter-length", required_argument, NULL, 'M'},
-   {"out-meta", required_argument, NULL, 'R'},
+   {"status-out", required_argument, NULL, 'R'},
    {"ssrc", required_argument, NULL, 'S'},
    {"ttl", required_argument, NULL, 'T'},
    {"agc-recover", required_argument, NULL, 'a'},
