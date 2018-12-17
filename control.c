@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.27 2018/12/16 04:30:05 karn Exp karn $
+// $Id: control.c,v 1.28 2018/12/16 10:59:00 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -245,9 +245,11 @@ int main(int argc,char *argv[]){
   }
 
   struct demod * const demod = &Demod;
-  fprintf(stderr,"Listening to %s\n",argv[optind]);
-
   Status_fd = setup_mcast(argv[optind],(struct sockaddr *)&demod->output.metadata_dest_address,0,Mcast_ttl,2);
+  if(Status_fd == -1){
+    fprintf(stderr,"Can't listen to %s\n",argv[optind]);
+    exit(1);
+  }
   Ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->output.metadata_dest_address,1,Mcast_ttl,2);
 
   atexit(display_cleanup);
@@ -614,7 +616,7 @@ int main(int argc,char *argv[]){
     row = 1;
     col = 1;
     wclrtobot(options);
-    if(demod->demod_type == 1){ // FM from status.h
+    if(demod->demod_type == FM_DEMOD){ // FM from status.h
       if(demod->opt.flat)
 	wattron(options,A_UNDERLINE);
       mvwprintw(options,row++,col,"FLAT");
@@ -670,7 +672,7 @@ int main(int argc,char *argv[]){
     wclrtobot(input);
     update_sockcache(&input_metadata_source,(struct sockaddr *)&demod->input.metadata_source_address);
     update_sockcache(&input_metadata_dest,(struct sockaddr *)&demod->input.metadata_dest_address);
-    mvwprintw(input,row++,col,"metadata %s:%s -> %s:%s pkts %'llu",
+    mvwprintw(input,row++,col,"stat %s:%s -> %s:%s pkts %'llu",
 	      input_metadata_source.host,input_metadata_source.port,
 	      input_metadata_dest.host,input_metadata_dest.port,
 	      demod->input.metadata_packets);
@@ -696,7 +698,7 @@ int main(int argc,char *argv[]){
     wmove(output,0,0);
     update_sockcache(&output_metadata_source,(struct sockaddr *)&demod->output.metadata_source_address);
     update_sockcache(&output_metadata_dest,(struct sockaddr *)&demod->output.metadata_dest_address);
-    mvwprintw(output,row++,col,"metadata %s:%s -> %s:%s pkts %'llu",
+    mvwprintw(output,row++,col,"stat %s:%s -> %s:%s pkts %'llu",
 	      output_metadata_source.host,output_metadata_source.port,
 	      output_metadata_dest.host,output_metadata_dest.port,
 	      demod->output.metadata_packets);
