@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.14 2018/12/12 08:38:42 karn Exp karn $
+// $Id: status.c,v 1.15 2018/12/13 09:47:57 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -70,6 +70,9 @@ int encode_int(unsigned char **buf,enum status_type type,int x){
 
 
 int encode_float(unsigned char **buf,enum status_type type,float x){
+  if(isnan(x))
+    return 0; // Never encode a NAN
+
   uint32_t data;
 
   memcpy(&data,&x,sizeof(data));
@@ -77,6 +80,9 @@ int encode_float(unsigned char **buf,enum status_type type,float x){
 }
 
 int encode_double(unsigned char **buf,enum status_type type,double x){
+  if(isnan(x))
+    return 0; // Never encode a NAN
+
   uint64_t data;
   memcpy(&data,&x,sizeof(data));
   return encode_int64(buf,type,data);
@@ -162,6 +168,39 @@ int compact_packet(struct state *s,unsigned char *pkt,int force){
 }
 
 // The Linux/UNIX socket data structures are a real mess...
+int encode_socket(unsigned char **buf,enum status_type type,void *sock){
+  struct sockaddr_in *sin = sock;
+  struct sockaddr_in6 *sin6 = sock;
+  unsigned char *bp = *buf;
+  int optlen = 0;
+
+  switch(sin->sin_family){
+  case AF_INET:
+    optlen = 6;
+    *bp++ = type;
+    *bp++ = optlen;
+    memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
+    bp += 4;
+    memcpy(bp,&sin->sin_port,2);
+    bp += 2;
+    break;
+  case AF_INET6:
+    optlen = 10;
+    *bp++ = type;
+    *bp++ = optlen;
+    memcpy(bp,&sin6->sin6_addr,8);
+    bp += 8;
+    memcpy(bp,&sin6->sin6_port,2);
+    bp += 2;
+    break;
+  default:
+    return 0; // Invalid, don't encode anything
+  }
+  *buf = bp;
+  return optlen;
+}
+
+
 int decode_socket(void *sock,unsigned char *val,int optlen){
   struct sockaddr_in *sin = (struct sockaddr_in *)sock;
   struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sock;

@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.24 2018/12/11 09:46:57 karn Exp karn $
+// $Id: hackrf.c,v 1.25 2018/12/13 09:47:57 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -30,6 +30,7 @@
 #include "multicast.h"
 #include "decimate.h"
 #include "status.h"
+#include "dsp.h"
 
 struct sdrstate {
   hackrf_device *device;    // Opaque pointer
@@ -230,6 +231,8 @@ int main(int argc,char *argv[]){
     errmsg("Can't create multicast socket: %s",strerror(errno));
     exit(1);
   }
+  socklen_t len = sizeof(Output_data_source_address);
+  getsockname(Rtp_sock,(struct sockaddr *)&Output_data_source_address,&len);
     
   int ret;
   if((ret = hackrf_init()) != HACKRF_SUCCESS){
@@ -628,64 +631,12 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   encode_int64(&bp,GPS_TIME,timestamp);
 
   // Source address we're using to send data
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-    
-    switch(Output_data_source_address.ss_family){
-    case AF_INET:
-      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
-      sin = (struct sockaddr_in *)&Output_data_source_address;
-      *bp++ = 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&Output_data_source_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
-
+  encode_socket(&bp,OUTPUT_DATA_SOURCE_SOCKET,&Output_data_source_address);
   // Where we're sending output
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-
-    switch(Output_data_dest_address.ss_family){
-    case AF_INET:
-      *bp++ = OUTPUT_DATA_DEST_SOCKET;
-      sin = (struct sockaddr_in *)&Output_data_dest_address;
-      *bp++ = 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = OUTPUT_DATA_DEST_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&Output_data_dest_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
+  encode_socket(&bp,OUTPUT_DATA_DEST_SOCKET,&Output_data_dest_address);
   encode_int32(&bp,OUTPUT_SSRC,Rtp.ssrc);
   encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
+  encode_int32(&bp,INPUT_SAMPRATE,Out_samprate);  // This should be the actual A/D sample rate, which will be higher
   encode_int32(&bp,OUTPUT_SAMPRATE,Out_samprate);
   encode_int64(&bp,OUTPUT_DATA_PACKETS,Rtp.packets);
   encode_int64(&bp,OUTPUT_METADATA_PACKETS,Output_metadata_packets);
@@ -708,7 +659,8 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   encode_float(&bp,HIGH_EDGE,+90e3);
   
   // Signals - these ALWAYS change
-  encode_float(&bp,BASEBAND_POWER,sdr->in_power);
+  encode_float(&bp,BASEBAND_POWER,power2dB(sdr->in_power));
+  encode_float(&bp,IF_POWER,power2dB(sdr->in_power));   // Same, since there's no filtering
   
   encode_byte(&bp,DEMOD_TYPE,0); // actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
@@ -716,6 +668,7 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
     encode_string(&bp,DESCRIPTION,Description,strlen(Description));
 
   encode_eol(&bp);
+  assert(bp - packet < sizeof(packet));
   
   int len = compact_packet(&State[0],packet,full);
   send(Status_sock,packet,len,0);

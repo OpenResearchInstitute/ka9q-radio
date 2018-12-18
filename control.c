@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.29 2018/12/17 00:11:20 karn Exp karn $
+// $Id: control.c,v 1.30 2018/12/18 12:37:48 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -529,7 +529,7 @@ int main(int argc,char *argv[]){
       mvwprintw(filtering,row,col,"%'17d",demod->filter.M);
       mvwaddstr(filtering,row++,col,"FIR");
     }
-    if(!isnan(demod->input.samprate) && N > 0){
+    if(demod->input.samprate > 0 && N > 0){
       mvwprintw(filtering,row,col,"%'17.3f Hz",(float)demod->input.samprate / N);
       mvwaddstr(filtering,row++,col,"Freq bin");
       mvwprintw(filtering,row,col,"%'17.3f ms",1000.0*(N - (demod->filter.M - 1)/2)/demod->input.samprate); // Is this correct?

@@ -104,6 +104,7 @@ int encode_int32(unsigned char **buf,enum status_type type,uint32_t x);
 int encode_int64(unsigned char **buf,enum status_type type,uint64_t x);
 int encode_float(unsigned char **buf,enum status_type type,float x);
 int encode_double(unsigned char **buf,enum status_type type,double x);
+int encode_socket(unsigned char **buf,enum status_type type,void *sock);
 
 int compact_packet(struct state *s,unsigned char *pkt,int force);
 

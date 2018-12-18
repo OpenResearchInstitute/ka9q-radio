@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.136 2018/12/16 10:59:32 karn Exp karn $
+// $Id: main.c,v 1.137 2018/12/17 00:16:38 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -182,7 +182,7 @@ int main(int argc,char *argv[]){
 
   fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
   pthread_mutex_lock(&demod->sdr.status_mutex);
-  while(demod->sdr.status.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
+  while(demod->input.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
     pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
   pthread_mutex_unlock(&demod->sdr.status_mutex);
   fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);

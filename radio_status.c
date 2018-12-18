@@ -82,121 +82,16 @@ void send_radio_status(struct demod *demod,int full){
 
   // Echo timestamp from source
   encode_int64(&bp,GPS_TIME,demod->sdr.status.timestamp); // integer
-
   // Who's sending us I/Q data
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-    
-    switch(demod->input.data_source_address.ss_family){
-    case AF_INET:
-      *bp++ = INPUT_DATA_SOURCE_SOCKET;
-      sin = (struct sockaddr_in *)&demod->input.data_source_address;
-      *bp++= 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = INPUT_DATA_SOURCE_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&demod->input.data_source_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
+  encode_socket(&bp,INPUT_DATA_SOURCE_SOCKET,&demod->input.data_source_address);
   // Destination address for I/Q data
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-
-    switch(demod->input.data_dest_address.ss_family){
-    case AF_INET:
-      *bp++ = INPUT_DATA_DEST_SOCKET;
-      sin = (struct sockaddr_in *)&demod->input.data_dest_address;
-      *bp++ = 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = INPUT_DATA_DEST_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&demod->input.data_dest_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
+  encode_socket(&bp,INPUT_DATA_DEST_SOCKET,&demod->input.data_dest_address);
   // Source of metadata
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-
-    switch(demod->input.metadata_source_address.ss_family){
-    case AF_INET:
-      *bp++ = INPUT_METADATA_SOURCE_SOCKET;
-      sin = (struct sockaddr_in *)&demod->input.metadata_source_address;
-      *bp++= 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = INPUT_METADATA_SOURCE_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&demod->input.metadata_source_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
+  encode_socket(&bp,INPUT_METADATA_SOURCE_SOCKET,&demod->input.metadata_source_address);
   // Destination address (usually multicast) and port on which we're getting metadata
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-
-    switch(demod->input.metadata_dest_address.ss_family){
-    case AF_INET:
-      *bp++ = INPUT_METADATA_DEST_SOCKET;
-      sin = (struct sockaddr_in *)&demod->input.metadata_dest_address;
-      *bp++ = 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = INPUT_METADATA_DEST_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&demod->input.metadata_dest_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
+  encode_socket(&bp,INPUT_METADATA_DEST_SOCKET,&demod->input.metadata_dest_address);
   encode_int32(&bp,INPUT_SSRC,demod->input.rtp.ssrc);
-  encode_int32(&bp,INPUT_SAMPRATE,demod->sdr.status.samprate); // integer
+  encode_int32(&bp,INPUT_SAMPRATE,demod->input.samprate); // integer
   encode_int64(&bp,INPUT_METADATA_PACKETS,demod->input.metadata_packets); // integer
   encode_int64(&bp,INPUT_DATA_PACKETS,demod->input.rtp.packets);
   encode_int64(&bp,INPUT_SAMPLES,demod->input.samples);
@@ -204,61 +99,9 @@ void send_radio_status(struct demod *demod,int full){
   encode_int64(&bp,INPUT_DUPES,demod->input.rtp.dupes);
 
   // Source address we're using to send data
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-    
-    switch(demod->output.data_source_address.ss_family){
-    case AF_INET:
-      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
-      sin = (struct sockaddr_in *)&demod->output.data_source_address;
-      *bp++ = 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = OUTPUT_DATA_SOURCE_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&demod->output.data_source_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
+  encode_socket(&bp,OUTPUT_DATA_SOURCE_SOCKET,&demod->output.data_source_address);
   // Where we're sending PCM output
-  {
-    struct sockaddr_in *sin;
-    struct sockaddr_in6 *sin6;
-
-    switch(demod->output.data_dest_address.ss_family){
-    case AF_INET:
-      *bp++ = OUTPUT_DATA_DEST_SOCKET;
-      sin = (struct sockaddr_in *)&demod->output.data_dest_address;
-      *bp++ = 6;
-      memcpy(bp,&sin->sin_addr.s_addr,4); // Already in network order
-      bp += 4;
-      memcpy(bp,&sin->sin_port,2);
-      bp += 2;
-      break;
-    case AF_INET6:
-      *bp++ = OUTPUT_DATA_DEST_SOCKET;
-      sin6 = (struct sockaddr_in6 *)&demod->output.data_dest_address;
-      *bp++ = 10;
-      memcpy(bp,&sin6->sin6_addr,8);
-      bp += 8;
-      memcpy(bp,&sin6->sin6_port,2);
-      bp += 2;
-      break;
-    default:
-      break;
-    }
-  }
+  encode_socket(&bp,OUTPUT_DATA_DEST_SOCKET,&demod->output.data_dest_address);
 
   encode_int32(&bp,OUTPUT_SSRC,demod->output.rtp.ssrc);
   encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
@@ -269,16 +112,16 @@ void send_radio_status(struct demod *demod,int full){
   // Tuning
   encode_double(&bp,RADIO_FREQUENCY,get_freq(demod)); // Hz
   encode_double(&bp,SECOND_LO_FREQUENCY,get_second_LO(demod)); // Hz
-  encode_double(&bp,SHIFT_FREQUENCY,demod->shift.freq); // Hz
+  encode_double(&bp,SHIFT_FREQUENCY,demod->tune.shift); // Hz
   
-  // Front end
+  // Front end - passed through from SDR metadata
   encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency); // Hz
   encode_byte(&bp,LNA_GAIN,demod->sdr.status.lna_gain); // dB
   encode_byte(&bp,MIXER_GAIN,demod->sdr.status.mixer_gain); // dB
   encode_byte(&bp,IF_GAIN,demod->sdr.status.if_gain); // dB
   encode_float(&bp,DC_I_OFFSET,demod->sdr.DC_i); // relative 1
   encode_float(&bp,DC_Q_OFFSET,demod->sdr.DC_q); // relative 1
-  encode_float(&bp,IQ_IMBALANCE,demod->sdr.imbalance); // amplitude ?
+  encode_float(&bp,IQ_IMBALANCE,voltage2dB(demod->sdr.imbalance)); // amplitude ?
   encode_float(&bp,IQ_PHASE,demod->sdr.sinphi); // sine - dimensionless
   encode_double(&bp,CALIBRATE,demod->sdr.calibration); // dimensionless
   
@@ -357,6 +200,8 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
     
 
     int i;
+    float f;
+    double d;
 
     switch(type){
     case EOL: // Shouldn't get here
@@ -372,7 +217,9 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       }
       break;
     case CALIBRATE:
-      demod->sdr.calibration = decode_double(cp,optlen); // dimensionless
+      d = decode_double(cp,optlen); // dimensionless
+      if(!isnan(d))
+	demod->sdr.calibration = d;
       break;
     case RADIO_FREQUENCY:  // Hz
       nrf = decode_double(cp,optlen);
@@ -384,22 +231,30 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       nlo2 = decode_double(cp,optlen);
       break;
     case LOW_EDGE:  // Hz
-      demod->filter.low = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->filter.low = f;
       fset++;
       break;
     case HIGH_EDGE: // Hz
-      demod->filter.high = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->filter.high = f;
       fset++;
       break;
     case SHIFT_FREQUENCY: // Hz
-      demod->tune.shift = decode_double(cp,optlen);
-      set_shift(demod,demod->tune.shift);
+      d = decode_double(cp,optlen);
+      if(!isnan(d)){
+	demod->tune.shift = d;
+	set_shift(demod,demod->tune.shift);
+      }
       break;
     case KAISER_BETA: // dimensionless
-      demod->filter.kaiser_beta = decode_float(cp,optlen);
-      if(demod->filter.kaiser_beta < 0)
-	demod->filter.kaiser_beta = 0;
-      fset++;
+      f = decode_float(cp,optlen);
+      if(!isnan(f)){
+	demod->filter.kaiser_beta = f < 0 ? 0 : f;
+	fset++;
+      }
       break;
     case INDEPENDENT_SIDEBAND: // boolean
       demod->filter.isb = decode_int(cp,optlen);
@@ -420,16 +275,26 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       demod->output.command_tag = decode_int(cp,optlen);
       break;
     case HEADROOM:        // dB -> amplitude ratio < 1
-      demod->agc.headroom = powf(10.,-fabsf(decode_float(cp,optlen))/20.);
+      f = decode_float(cp,optlen);
+      if(!isnan(f)){
+	demod->agc.headroom = powf(10.,-fabs(f/20.));
+      }
       break;
     case AGC_HANGTIME:    // sec -> samples
-      demod->agc.hangtime = fabsf(decode_float(cp,optlen)) * demod->output.samprate;
+      f = decode_float(cp,optlen);
+      if(!isnan(f)){
+	demod->agc.hangtime = fabsf(f) * demod->output.samprate;
+      }
       break;
     case AGC_RECOVERY_RATE: // dB/sec -> amplitude ratio/sample > 1
-      demod->agc.recovery_rate = powf(10., fabs(decode_float(cp,optlen) / 20. / demod->output.samprate));
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->agc.recovery_rate = powf(10., fabs(f / 20. / demod->output.samprate));
       break;
     case AGC_ATTACK_RATE:   // dB/sec -> amplitude ratio/sample < 1
-      demod->agc.attack_rate = powf(10., -fabs(decode_float(cp,optlen) / 20. / demod->output.samprate));
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->agc.attack_rate = powf(10., -fabs(f / 20. / demod->output.samprate));
       break;
     case ENVELOPE:  // boolean
       demod->opt.env = decode_int(cp,optlen);
@@ -507,6 +372,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     if(type == EOL)
       break; // End of list
 
+    double d;
+    float f;
+    
     unsigned int optlen = *cp++;
     if(cp - buffer + optlen >= length)
       break; // Invalid length
@@ -519,28 +387,19 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     case OUTPUT_DATA_DEST_SOCKET:
       // SDR data destination address (usually multicast)
       // Becomes our data input socket
-      if(optlen == 6){
-	struct sockaddr_in *sin;
-	sin = (struct sockaddr_in *)&demod->input.data_dest_address;
-	sin->sin_family = AF_INET;
-	memcpy(&sin->sin_addr.s_addr,cp,4);
-	memcpy(&sin->sin_port,cp+4,2);
-      } else if(optlen == 10){
-	struct sockaddr_in6 *sin6;
-	sin6 = (struct sockaddr_in6 *)&demod->input.data_dest_address;
-	sin6->sin6_family = AF_INET6;
-	memcpy(&sin6->sin6_addr,cp,8);
-	memcpy(&sin6->sin6_port,cp+8,2);
-      }
+      decode_socket(&demod->input.data_dest_address,cp,optlen);
       break;
     case RADIO_FREQUENCY:
       nfreq = decode_double(cp,optlen);
       break;
+    case INPUT_SAMPRATE:
+      demod->sdr.status.samprate = decode_int(cp,optlen);
+      break;
     case OUTPUT_SAMPRATE:
       nsamprate = decode_int(cp,optlen);
-      if(nsamprate != demod->sdr.status.samprate){
-	demod->input.samprate = demod->sdr.status.samprate = nsamprate;
-	demod->filter.decimate = demod->sdr.status.samprate / demod->output.samprate;
+      if(nsamprate != demod->input.samprate){
+	demod->input.samprate = nsamprate;
+	demod->filter.decimate = demod->input.samprate / demod->output.samprate;
 	if(demod->filter.out)
 	  set_filter(demod->filter.out,
 		     demod->filter.low/demod->output.samprate,
@@ -552,10 +411,14 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       demod->sdr.status.timestamp = decode_int(cp,optlen);
       break;
     case LOW_EDGE:
-      demod->sdr.min_IF = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->sdr.min_IF = f;
       break;
     case HIGH_EDGE:
-      demod->sdr.max_IF = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->sdr.max_IF = f;
       break;
     case LNA_GAIN:
       demod->sdr.status.lna_gain = decode_int(cp,optlen);
@@ -570,19 +433,29 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       gainchange++;
       break;
     case DC_I_OFFSET:
-      demod->sdr.DC_i = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->sdr.DC_i = f;
       break;
     case DC_Q_OFFSET:
-      demod->sdr.DC_q = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->sdr.DC_q = f;
       break;
     case IQ_IMBALANCE:
-      demod->sdr.imbalance = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->sdr.imbalance = f;
       break;
     case IQ_PHASE:
-      demod->sdr.sinphi = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->sdr.sinphi = f;
       break;
     case CALIBRATE:
-      demod->sdr.calibration = decode_double(cp,optlen);
+      d = decode_float(cp,optlen);
+      if(!isnan(d))
+	demod->sdr.calibration = d;
       break;
     default:
       break;
@@ -591,7 +464,7 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
   }
   if(gainchange)
     demod->sdr.gain_factor = powf(10.,-0.05*(demod->sdr.status.lna_gain + demod->sdr.status.if_gain + demod->sdr.status.mixer_gain));
-  if(!isnan(nfreq) && demod->sdr.status.frequency != nfreq && demod->sdr.status.samprate != 0){
+  if(!isnan(nfreq) && demod->sdr.status.frequency != nfreq && demod->input.samprate != 0){
     // Recalculate LO2
     demod->sdr.status.frequency = nfreq;
     double new_LO2 = -(demod->tune.freq - get_first_LO(demod));
