@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.28 2018/12/16 10:59:00 karn Exp karn $
+// $Id: control.c,v 1.29 2018/12/17 00:11:20 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -207,7 +207,7 @@ void toggle_lock(void *arg){
 
 struct demod Demod;
 
-float Noise_bandwidth;
+float Noise_bandwidth = NAN;
 
 void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length);
 
@@ -245,6 +245,18 @@ int main(int argc,char *argv[]){
   }
 
   struct demod * const demod = &Demod;
+  // Set all floating point fields to NAN so they won't be displayed unless set at least once
+  demod->sdr.calibration = demod->sdr.status.frequency = demod->sdr.DC_i = demod->sdr.DC_q =
+    demod->sdr.sinphi = demod->sdr.imbalance = demod->sdr.min_IF = demod->sdr.max_IF = demod->sdr.gain_factor = NAN;
+
+  demod->tune.freq = demod->tune.shift = NAN;
+  demod->second_LO.freq = NAN;
+  demod->filter.low = demod->filter.high = demod->filter.kaiser_beta = demod->filter.noise_bandwidth = NAN;
+  demod->agc.headroom = demod->agc.hangtime = demod->agc.recovery_rate = demod->agc.attack_rate = demod->agc.gain = NAN;
+  demod->sig.if_power = demod->sig.bb_power = demod->sig.n0 = demod->sig.snr = demod->sig.foffset = NAN;
+  demod->sig.pdeviation = demod->sig.cphase = demod->sig.plfreq = demod->sig.lock_timer = NAN;
+  
+
   Status_fd = setup_mcast(argv[optind],(struct sockaddr *)&demod->output.metadata_dest_address,0,Mcast_ttl,2);
   if(Status_fd == -1){
     fprintf(stderr,"Can't listen to %s\n",argv[optind]);
@@ -397,32 +409,36 @@ int main(int argc,char *argv[]){
     wmove(tuning,0,0);
     int row = 1;
     int col = 1;
-    if(Frequency_lock)
-      wattron(tuning,A_UNDERLINE); // Underscore means the frequency is locked
-    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->tune.freq); // RF carrier frequency
-    mvwaddstr(tuning,row,col,"Carrier");
-    row++;
-
-    // Center of passband
-    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->tune.freq + (demod->filter.high + demod->filter.low)/2);
-    mvwaddstr(tuning,row++,col,"Center");
-
-    wattroff(tuning,A_UNDERLINE);
-    if(demod->tune.lock)
-      wattron(tuning,A_UNDERLINE);    
-
+    if(!isnan(demod->tune.freq)){
+      if(Frequency_lock)
+	wattron(tuning,A_UNDERLINE); // Underscore means the frequency is locked
+      mvwprintw(tuning,row,col,"%'28.3f Hz",demod->tune.freq); // RF carrier frequency
+      mvwaddstr(tuning,row,col,"Carrier");
+      row++;
+      // Center of passband
+      if(!isnan(demod->filter.high) && !isnan(demod->filter.low)){
+	mvwprintw(tuning,row,col,"%'28.3f Hz",demod->tune.freq + (demod->filter.high + demod->filter.low)/2);
+	mvwaddstr(tuning,row++,col,"Center");
+	wattroff(tuning,A_UNDERLINE);
+	if(demod->tune.lock)
+	  wattron(tuning,A_UNDERLINE);    
+      }
+    }      
     // second LO frequency is negative of IF, i.e., a signal at +48 kHz
     // needs a second LO frequency of -48 kHz to bring it to zero
-    mvwprintw(tuning,row,col,"%'28.3f Hz",demod->sdr.status.frequency);
-    mvwaddstr(tuning,row++,col,"First LO");
-    wattroff(tuning,A_UNDERLINE);
-
-    mvwprintw(tuning,row,col,"%'28.3f Hz",-demod->second_LO.freq);
-    mvwaddstr(tuning,row++,col,"IF");
+    if(!isnan(demod->sdr.status.frequency)){
+      mvwprintw(tuning,row,col,"%'28.3f Hz",demod->sdr.status.frequency);
+      mvwaddstr(tuning,row++,col,"First LO");
+      wattroff(tuning,A_UNDERLINE);
+    }
+    if(!isnan(demod->second_LO.freq)){
+      mvwprintw(tuning,row,col,"%'28.3f Hz",-demod->second_LO.freq);
+      mvwaddstr(tuning,row++,col,"IF");
+    }
 
     // Doppler info displayed only if active
     double dopp = demod->doppler.freq;
-    if(dopp != 0){
+    if(!isnan(dopp) && dopp != 0){
       mvwprintw(tuning,row,col,"%'28.3f Hz",dopp);
       mvwaddstr(tuning,row++,col,"Doppler");
       mvwprintw(tuning,row,col,"%'28.3f Hz/s",demod->doppler.rate);
@@ -489,27 +505,44 @@ int main(int argc,char *argv[]){
     // Filter window values
     row = 1;
     col = 1;
-    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->filter.low);
-    mvwaddstr(filtering,row++,col,"Low");
-    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->filter.high);
-    mvwaddstr(filtering,row++,col,"High");    
-    mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->tune.shift);
-    mvwaddstr(filtering,row++,col,"Shift");
-    mvwprintw(filtering,row,col,"%'17.3f",demod->filter.kaiser_beta);
-    mvwaddstr(filtering,row++,col,"Beta");    
-    mvwprintw(filtering,row,col,"%'17d",demod->filter.L);
-    mvwaddstr(filtering,row++,col,"Blocksize");
-    mvwprintw(filtering,row,col,"%'17d",demod->filter.M);
-    mvwaddstr(filtering,row++,col,"FIR");
-    mvwprintw(filtering,row,col,"%'17.3f Hz",(float)demod->input.samprate / N);
-    mvwaddstr(filtering,row++,col,"Freq bin");
-    mvwprintw(filtering,row,col,"%'17.3f ms",1000.0*(N - (demod->filter.M - 1)/2)/demod->input.samprate); // Is this correct?
-    mvwaddstr(filtering,row++,col,"Delay");
+    if(!isnan(demod->filter.low)){
+      mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->filter.low);
+      mvwaddstr(filtering,row++,col,"Low");
+    }
+    if(!isnan(demod->filter.high)){
+      mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->filter.high);
+      mvwaddstr(filtering,row++,col,"High");    
+    }
+    if(!isnan(demod->tune.shift)){
+      mvwprintw(filtering,row,col,"%'+17.3f Hz",demod->tune.shift);
+      mvwaddstr(filtering,row++,col,"Shift");
+    }
+    if(!isnan(demod->filter.kaiser_beta)){
+      mvwprintw(filtering,row,col,"%'17.3f",demod->filter.kaiser_beta);
+      mvwaddstr(filtering,row++,col,"Beta");    
+    }
+    if(demod->filter.L > 0){
+      mvwprintw(filtering,row,col,"%'17d",demod->filter.L);
+      mvwaddstr(filtering,row++,col,"Blocksize");
+    }
+    if(demod->filter.M > 0){
+      mvwprintw(filtering,row,col,"%'17d",demod->filter.M);
+      mvwaddstr(filtering,row++,col,"FIR");
+    }
+    if(!isnan(demod->input.samprate) && N > 0){
+      mvwprintw(filtering,row,col,"%'17.3f Hz",(float)demod->input.samprate / N);
+      mvwaddstr(filtering,row++,col,"Freq bin");
+      mvwprintw(filtering,row,col,"%'17.3f ms",1000.0*(N - (demod->filter.M - 1)/2)/demod->input.samprate); // Is this correct?
+      mvwaddstr(filtering,row++,col,"Delay");
+    }
+#if 0
     mvwprintw(filtering,row,col,"%17d",demod->filter.interpolate);
     mvwaddstr(filtering,row++,col,"Interpolate");
-    mvwprintw(filtering,row,col,"%17d",demod->filter.decimate);
-    mvwaddstr(filtering,row++,col,"Decimate");
-
+#endif
+    if(demod->filter.decimate > 1){
+      mvwprintw(filtering,row,col,"%17d",demod->filter.decimate);
+      mvwaddstr(filtering,row++,col,"Decimate");
+    }
     box(filtering,0,0);
     mvwaddstr(filtering,0,6,"Filtering");
 
@@ -524,18 +557,30 @@ int main(int argc,char *argv[]){
 
     row = 1;
     col = 1;
-    mvwprintw(sig,row,col,"%15.1f dB",demod->sig.if_power);
-    mvwaddstr(sig,row++,col,"IF");
-    mvwprintw(sig,row,col,"%15.1f dB",demod->sig.bb_power);
-    mvwaddstr(sig,row++,col,"Baseband");
-    mvwprintw(sig,row,col,"%15.1f dB/Hz",demod->sig.n0);
-    mvwaddstr(sig,row++,col,"N0");
-    mvwprintw(sig,row,col,"%15.1f dBHz",sn0);
-    mvwaddstr(sig,row++,col,"S/N0");
-    mvwprintw(sig,row,col,"%15.1f dBHz",bw);
-    mvwaddstr(sig,row++,col,"NBW");
-    mvwprintw(sig,row,col,"%15.1f dB",sn0 - bw);
-    mvwaddstr(sig,row++,col,"SNR");
+    if(!isnan(demod->sig.if_power)){
+      mvwprintw(sig,row,col,"%15.1f dB",demod->sig.if_power);
+      mvwaddstr(sig,row++,col,"IF");
+    }
+    if(!isnan(demod->sig.bb_power)){
+      mvwprintw(sig,row,col,"%15.1f dB",demod->sig.bb_power);
+      mvwaddstr(sig,row++,col,"Baseband");
+    }
+    if(!isnan(demod->sig.n0)){
+      mvwprintw(sig,row,col,"%15.1f dB/Hz",demod->sig.n0);
+      mvwaddstr(sig,row++,col,"N0");
+    }
+    if(!isnan(sn0)){
+      mvwprintw(sig,row,col,"%15.1f dBHz",sn0);
+      mvwaddstr(sig,row++,col,"S/N0");
+    }
+    if(!isnan(bw)){
+      mvwprintw(sig,row,col,"%15.1f dBHz",bw);
+      mvwaddstr(sig,row++,col,"NBW");
+      if(!isnan(sn0)){
+	mvwprintw(sig,row,col,"%15.1f dB",sn0 - bw);
+	mvwaddstr(sig,row++,col,"SNR");
+      }
+    }
     box(sig,0,0);
     mvwaddstr(sig,0,9,"Signal");
 
@@ -549,32 +594,53 @@ int main(int argc,char *argv[]){
     // Display only if used by current mode
     switch(demod->demod_type){
     case FM_DEMOD:
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->sig.snr);
-      mvwaddstr(demodulator,row++,lcol,"Input SNR");
-      mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->sig.foffset);
-      mvwaddstr(demodulator,row++,lcol,"Offset");
-      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->sig.pdeviation);
-      mvwaddstr(demodulator,row++,lcol,"Deviation");
-      mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->sig.plfreq);
-      mvwaddstr(demodulator,row++,lcol,"PL Tone");
-      break;
-    case LINEAR_DEMOD:
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->agc.gain);
-      mvwaddstr(demodulator,row++,lcol,"AF Gain");
-      mvwprintw(demodulator,row,rcol,"%11.1f dB/s",demod->agc.recovery_rate);
-      mvwaddstr(demodulator,row++,lcol,"Recovery rate");
-      mvwprintw(demodulator,row,rcol,"%11.1f  s",demod->agc.hangtime);
-      mvwaddstr(demodulator,row++,lcol,"Hang time");
-      mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->agc.headroom);
-      mvwaddstr(demodulator,row++,lcol,"Headroom");
-
-      if(demod->opt.pll){
+      if(!isnan(demod->sig.snr)){
 	mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->sig.snr);
-	mvwaddstr(demodulator,row++,lcol,"PLL SNR");
+	mvwaddstr(demodulator,row++,lcol,"Input SNR");
+      }
+      if(!isnan(demod->sig.foffset)){
 	mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->sig.foffset);
 	mvwaddstr(demodulator,row++,lcol,"Offset");
-	mvwprintw(demodulator,row,rcol,"%+11.1f deg",demod->sig.cphase*DEGPRA);
-	mvwaddstr(demodulator,row++,lcol,"PLL Phase");
+      }
+      if(!isnan(demod->sig.pdeviation)){
+	mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->sig.pdeviation);
+	mvwaddstr(demodulator,row++,lcol,"Deviation");
+      }
+      if(!isnan(demod->sig.plfreq)){
+	mvwprintw(demodulator,row,rcol,"%11.1f Hz",demod->sig.plfreq);
+	mvwaddstr(demodulator,row++,lcol,"PL Tone");
+      }
+      break;
+    case LINEAR_DEMOD:
+      if(!isnan(demod->agc.gain)){
+	mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->agc.gain);
+	mvwaddstr(demodulator,row++,lcol,"AF Gain");
+      }
+      if(!isnan(demod->agc.recovery_rate)){
+	mvwprintw(demodulator,row,rcol,"%11.1f dB/s",demod->agc.recovery_rate);
+	mvwaddstr(demodulator,row++,lcol,"Recovery rate");
+      }
+      if(!isnan(demod->agc.hangtime)){
+	mvwprintw(demodulator,row,rcol,"%11.1f  s",demod->agc.hangtime);
+	mvwaddstr(demodulator,row++,lcol,"Hang time");
+      }
+      if(!isnan(demod->agc.headroom)){
+	mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->agc.headroom);
+	mvwaddstr(demodulator,row++,lcol,"Headroom");
+      }
+      if(demod->opt.pll){
+	if(!isnan(demod->sig.snr)){
+	  mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->sig.snr);
+	  mvwaddstr(demodulator,row++,lcol,"PLL SNR");
+	}
+	if(!isnan(demod->sig.foffset)){
+	  mvwprintw(demodulator,row,rcol,"%'+11.3f Hz",demod->sig.foffset);
+	  mvwaddstr(demodulator,row++,lcol,"Offset");
+	}
+	if(!isnan(demod->sig.cphase)){
+	  mvwprintw(demodulator,row,rcol,"%+11.1f deg",demod->sig.cphase*DEGPRA);
+	  mvwaddstr(demodulator,row++,lcol,"PLL Phase");
+	}
 	mvwprintw(demodulator,row,rcol,"%11s",demod->sig.pll_lock ? "Yes" : "No");
 	mvwaddstr(demodulator,row++,lcol,"PLL Lock");
       }
@@ -597,17 +663,26 @@ int main(int argc,char *argv[]){
     mvwaddstr(sdr,row++,col,"Mix gain");
     mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.if_gain); // SDR dependent    
     mvwaddstr(sdr,row++,col,"IF gain");
-    mvwprintw(sdr,row,col,"%'21.6f",demod->sdr.DC_i);
-    mvwaddstr(sdr,row++,col,"DC-i offs");
-    mvwprintw(sdr,row,col,"%'21.6f",demod->sdr.DC_q);
-    mvwaddstr(sdr,row++,col,"DC-q offs");
-    mvwprintw(sdr,row,col,"%'18.1f deg",DEGPRA * asin(demod->sdr.sinphi));
-    mvwaddstr(sdr,row++,col,"Phase offset");
-    mvwprintw(sdr,row,col,"%'18.1f dB",voltage2dB(demod->sdr.imbalance));
-    mvwaddstr(sdr,row++,col,"I/Q imbal");
-    mvwprintw(sdr,row,col,"%'21lg",demod->sdr.calibration);
-    mvwaddstr(sdr,row++,col,"TCXO cal");
-
+    if(!isnan(demod->sdr.DC_i)){
+      mvwprintw(sdr,row,col,"%'21.6f",demod->sdr.DC_i);
+      mvwaddstr(sdr,row++,col,"DC-i offs");
+    }
+    if(!isnan(demod->sdr.DC_q)){
+      mvwprintw(sdr,row,col,"%'21.6f",demod->sdr.DC_q);
+      mvwaddstr(sdr,row++,col,"DC-q offs");
+    }
+    if(!isnan(demod->sdr.sinphi)){
+      mvwprintw(sdr,row,col,"%'18.1f deg",DEGPRA * asin(demod->sdr.sinphi));
+      mvwaddstr(sdr,row++,col,"Phase offset");
+    }
+    if(!isnan(demod->sdr.imbalance)){
+      mvwprintw(sdr,row,col,"%'18.1f dB",demod->sdr.imbalance);
+      mvwaddstr(sdr,row++,col,"I/Q imbal");
+    }
+    if(!isnan(demod->sdr.calibration)){
+      mvwprintw(sdr,row,col,"%'21lg",demod->sdr.calibration);
+      mvwaddstr(sdr,row++,col,"TCXO cal");
+    }
     box(sdr,0,0);
     mvwaddstr(sdr,0,6,"SDR Hardware");
 
@@ -1033,6 +1108,10 @@ int main(int argc,char *argv[]){
       }
     }
     // OK, what changed?
+    // NB: NaNs always compare unequal, even with themselves. This will cause
+    // encode_double() and encode_float() to be called when their fields are NAN
+    // There are checks in encode_double() and encode_float() to suppress encoding
+    // Is this the right thing to do?
     {
       unsigned char cmd_packet[8192],*bp;
       memset(cmd_packet,0,sizeof(cmd_packet));
@@ -1208,7 +1287,7 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
       demod->second_LO.freq = decode_double(cp,optlen);
       break;
     case SHIFT_FREQUENCY:
-      demod->shift.freq = decode_double(cp,optlen);
+      demod->tune.shift = decode_double(cp,optlen);
       break;
     case DOPPLER_FREQUENCY:
       demod->doppler.freq = decode_double(cp,optlen);
