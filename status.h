@@ -85,6 +85,7 @@ enum status_type {
   AGC_ATTACK_RATE,
   DESCRIPTION,
   ENVELOPE,       // Envelope detection in linear mode
+  DIRECT_CONVERSION, // Boolean indicating SDR is direct conversion -- avoid DC
 };
 
 

@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.25 2018/12/13 09:47:57 karn Exp karn $
+// $Id: hackrf.c,v 1.26 2018/12/18 12:37:48 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -666,6 +666,8 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   encode_int32(&bp,OUTPUT_CHANNELS,2);
   if(Description)
     encode_string(&bp,DESCRIPTION,Description,strlen(Description));
+
+  encode_byte(&bp,DIRECT_CONVERSION,Offset == 0); // Direct conversion if offset == 0
 
   encode_eol(&bp);
   assert(bp - packet < sizeof(packet));

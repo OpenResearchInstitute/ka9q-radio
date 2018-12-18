@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.67 2018/12/13 09:47:57 karn Exp karn $
+// $Id: funcube.c,v 1.68 2018/12/18 12:37:48 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -620,6 +620,7 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
   if(Description)
     encode_string(&bp,DESCRIPTION,Description,strlen(Description));
+  encode_byte(&bp,DIRECT_CONVERSION,1);
   encode_eol(&bp);
   assert(bp - packet < sizeof(packet));
   
