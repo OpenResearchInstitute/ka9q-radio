@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.68 2018/12/18 12:37:48 karn Exp karn $
+// $Id: funcube.c,v 1.69 2018/12/18 18:28:01 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -606,12 +606,14 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   encode_float(&bp,DC_Q_OFFSET,cimagf(sdr->DC));
   encode_float(&bp,IQ_IMBALANCE,sdr->imbalance);
   encode_float(&bp,IQ_PHASE,sdr->sinphi);
+  encode_float(&bp,DEMOD_GAIN,(float)(sdr->status.lna_gain + sdr->status.mixer_gain + sdr->status.if_gain));
   
   // Filtering
   encode_float(&bp,LOW_EDGE,-90.0e3);
   encode_float(&bp,HIGH_EDGE,+90.0e3);
   
   // Signals - these ALWAYS change
+
   encode_float(&bp,BASEBAND_POWER,power2dB(sdr->in_power));
   encode_float(&bp,IF_POWER,power2dB(sdr->in_power));   // Same, since there's no filtering
   
