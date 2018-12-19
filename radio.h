@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.89 2018/12/16 04:30:05 karn Exp karn $
+// $Id: radio.h,v 1.90 2018/12/16 10:59:00 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -89,6 +89,7 @@ struct demod {
   // Front end hardware information
   struct {
     struct status status;           // Last status from FCD
+    int direct_conversion;          // Avoid 0 Hz if set
     double calibration;
     // I/Q correction parameters
     float DC_i,DC_q;       // Average DC offsets

@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.115 2018/12/16 04:30:05 karn Exp karn $
+// $Id: radio.c,v 1.116 2018/12/16 10:59:00 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -223,15 +223,15 @@ double set_freq(struct demod * const demod,double const f,double new_lo2){
     new_lo2 = -(f - get_first_LO(demod));
     // If the required new LO2 is out of range, retune LO1
     if(!LO2_in_range(demod,new_lo2,1)){
-      // Pick new LO2 to minimize change in LO1 in case another receiver is using it
-      new_lo2 = demod->sdr.status.samprate/4.;
-      // Experimentally disable this to keep IF from jumping around when using mspectrum
-#if 0
-      double LO1 = get_first_LO(demod);
-
-      if(fabs(f + new_lo2 - LO1) > fabs(f - new_lo2 - LO1))
-	new_lo2 = -new_lo2;
-#endif
+      if(!demod->sdr.direct_conversion)
+	new_lo2 = 0; // No need to avoid DC
+      else {
+	// Pick new LO2 to minimize change in LO1 in case another receiver is using it
+	new_lo2 = demod->sdr.status.samprate/4.;  // Halfway between DC and Nyquist rate
+	double LO1 = get_first_LO(demod);
+	if(fabs(f + new_lo2 - LO1) > fabs(f - new_lo2 - LO1))
+	  new_lo2 = -new_lo2;
+      }
     }
   }
   double new_lo1 = f + new_lo2;

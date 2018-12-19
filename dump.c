@@ -229,7 +229,7 @@ void dump_metadata(unsigned char *buffer,int length){
       printf(" %s;",decode_string(cp,optlen,sbuf,sizeof(sbuf)));
       break;
     case DIRECT_CONVERSION:
-      printf(" direct conv %d;",decode_int(cp,optlen));
+      printf(" direct conv %d;",(int)decode_int(cp,optlen));
       break;
     default:
       break;

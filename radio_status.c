@@ -457,6 +457,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       if(!isnan(d))
 	demod->sdr.calibration = d;
       break;
+    case DIRECT_CONVERSION:
+      demod->sdr.direct_conversion = decode_int(cp,optlen);
+      break;
     default:
       break;
     }
