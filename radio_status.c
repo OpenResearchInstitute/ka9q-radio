@@ -363,7 +363,6 @@ void *recv_sdr_status(void *arg){
 void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
   double nfreq = NAN;
-  int gainchange = 0;
   int nsamprate = 0;
 
   while(cp - buffer < length){
@@ -422,15 +421,15 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case LNA_GAIN:
       demod->sdr.status.lna_gain = decode_int(cp,optlen);
-      gainchange++;
       break;
     case MIXER_GAIN:
       demod->sdr.status.mixer_gain = decode_int(cp,optlen);
-      gainchange++;
       break;
     case IF_GAIN:
       demod->sdr.status.if_gain = decode_int(cp,optlen);
-      gainchange++;
+      break;
+    case DEMOD_GAIN:
+      demod->sdr.gain_factor = powf(10.,-0.05*decode_float(cp,optlen));
       break;
     case DC_I_OFFSET:
       f = decode_float(cp,optlen);
@@ -465,8 +464,6 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     }
     cp += optlen;
   }
-  if(gainchange)
-    demod->sdr.gain_factor = powf(10.,-0.05*(demod->sdr.status.lna_gain + demod->sdr.status.if_gain + demod->sdr.status.mixer_gain));
   if(!isnan(nfreq) && demod->sdr.status.frequency != nfreq && demod->input.samprate != 0){
     // Recalculate LO2
     demod->sdr.status.frequency = nfreq;
