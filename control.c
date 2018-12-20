@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.31 2018/12/18 12:39:46 karn Exp karn $
+// $Id: control.c,v 1.32 2018/12/20 02:11:05 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -1291,6 +1291,9 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case DOPPLER_FREQUENCY_RATE:
       demod->doppler.rate = decode_double(cp,optlen);
+      break;
+    case AD_LEVEL:
+      demod->sdr.ad_level = decode_float(cp,optlen);
       break;
     case LNA_GAIN:
       demod->sdr.status.lna_gain = decode_int(cp,optlen);

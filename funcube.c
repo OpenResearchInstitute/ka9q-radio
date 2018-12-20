@@ -620,7 +620,7 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   encode_float(&bp,OUTPUT_LEVEL,power2dB(sdr->in_power));
 
   float analog_gain = sdr->status.mixer_gain + sdr->status.if_gain + sdr->status.lna_gain;
-  encode_float(&bp,GAIN,power2dB(analog_gain));
+  encode_float(&bp,GAIN,analog_gain); // Overall gain (no digital gain)
   encode_byte(&bp,DEMOD_TYPE,0); // Actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
 

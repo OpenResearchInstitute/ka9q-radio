@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.27 2018/12/18 18:28:01 karn Exp karn $
+// $Id: hackrf.c,v 1.29 2018/12/20 02:11:34 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -666,7 +666,7 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   encode_float(&bp,OUTPUT_LEVEL,power2dB(sdr->in_power)); // Should be post-decimation
   
   float analog_gain = sdr->status.mixer_gain + sdr->status.if_gain + sdr->status.lna_gain;
-  encode_float(&bp,GAIN,power2dB(analog_gain));
+  encode_float(&bp,GAIN,analog_gain);
   encode_byte(&bp,DEMOD_TYPE,0); // actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
 

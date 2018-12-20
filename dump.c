@@ -141,10 +141,13 @@ void dump_metadata(unsigned char *buffer,int length){
       printf(" DC Q offset %g;",decode_float(cp,optlen));
       break;
     case IQ_IMBALANCE:
-      printf(" gain imbal %.1f dB;",10*log10f(decode_float(cp,optlen)));
+      printf(" gain imbal %.1f dB;",decode_float(cp,optlen));
       break;
     case IQ_PHASE:
       printf(" phase imbal %.1f deg;",(180./M_PI)*asinf(decode_float(cp,optlen)));
+      break;
+    case AD_LEVEL:
+      printf(" A/D level %.1f dB;",decode_float(cp,optlen));
       break;
     case LOW_EDGE:
       printf(" filt low %g Hz;",decode_float(cp,optlen));
