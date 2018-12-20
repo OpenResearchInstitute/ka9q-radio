@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.34 2018/12/20 03:13:19 karn Exp karn $
+// $Id: control.c,v 1.36 2018/12/20 06:58:09 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -369,9 +369,7 @@ int main(int argc,char *argv[]){
       struct demod ndemod;
       memcpy(&ndemod,demod,sizeof(ndemod));
       decode_radio_status(&ndemod,buffer+1,length-1);
-      // Have important things changed?
-#if 0
-      // Do we really need to listen directly to the front end, or just get everything via radio?
+      // Listen directly to the front end once we know who it is
       if(memcmp(&ndemod.input.metadata_dest_address,&demod->input.metadata_dest_address,sizeof(ndemod.input.metadata_dest_address)) != 0){
 	if(SDR_status_fd > 0){
 	  close(SDR_status_fd);
@@ -379,11 +377,9 @@ int main(int argc,char *argv[]){
 	}
 	SDR_status_fd = setup_mcast(NULL,(struct sockaddr *)&ndemod.input.metadata_dest_address,0,0,0);
       }
-#endif
       memcpy(demod,&ndemod,sizeof(*demod));
     }
-#if 0
-    if(FD_ISSET(SDR_status_fd,&fdset)){
+    if(SDR_status_fd != -1 && FD_ISSET(SDR_status_fd,&fdset)){
       unsigned char buffer[8192];
       memset(buffer,0,sizeof(buffer));
       int length = recv(SDR_status_fd,buffer,sizeof(buffer),0);
@@ -396,13 +392,8 @@ int main(int argc,char *argv[]){
       if(cr == 1)
 	continue;     // Ignore commands
 
-      struct demod ndemod;
-      memcpy(&ndemod,demod,sizeof(ndemod));
-      decode_sdr_status(&ndemod,buffer+1,length-1);
-      // Copy only certain fields
+      decode_sdr_status(demod,buffer+1,length-1);
     }
-#endif
-    
     // update display indefinitely, handle user commands
 
     // Tuning control window - these can be adjusted by the user
@@ -756,54 +747,43 @@ int main(int argc,char *argv[]){
     wmove(data,0,0);
     wclrtobot(data);
     row = 2;  col = 1;
-    mvwprintw(data,row,col,"in");
-    row++;
+    mvwprintw(data,row++,col,"in");
     mvwprintw(data,row,col,"out");
     col += 4;
 
     row = 1;
-    mvwprintw(data,row,col,"%12s","packets");
-    row++;
-    mvwprintw(data,row,col,"%'12llu",demod->input.rtp.packets);
-    row++;
+    mvwprintw(data,row++,col,"%12s","packets");
+    mvwprintw(data,row++,col,"%'12llu",demod->input.rtp.packets);
     mvwprintw(data,row,col,"%'12llu",demod->output.rtp.packets);
     col += 13;
 
     row = 1;
-    mvwprintw(data,row,col,"%16s","samples");
-    row++;
-    mvwprintw(data,row,col,"%'16llu",demod->input.samples);
-    row++;
+    mvwprintw(data,row++,col,"%16s","samples");
+    mvwprintw(data,row++,col,"%'16llu",demod->input.samples);
     mvwprintw(data,row,col,"%'16llu",demod->output.samples);
     col += 17;
 
     row = 1;
-    mvwprintw(data,row,col,"%6s","drops");
-    row++;
+    mvwprintw(data,row++,col,"%6s","drops");
     mvwprintw(data,row,col,"%'6llu",demod->input.rtp.drops);
     col += 7;
 
     row = 1;
-    mvwprintw(data,row,col,"%6s","dupes");
-    row++;
+    mvwprintw(data,row++,col,"%6s","dupes");
     mvwprintw(data,row,col,"%'6llu",demod->input.rtp.dupes);
     col += 7;
 
     row = 1;
-    mvwprintw(data,row,col,"%8s","ssrc");
-    row++;
-    mvwprintw(data,row,col,"%8x",demod->input.rtp.ssrc);
-    row++;
+    mvwprintw(data,row++,col,"%8s","ssrc");
+    mvwprintw(data,row++,col,"%8x",demod->input.rtp.ssrc);
     mvwprintw(data,row,col,"%8x",demod->output.rtp.ssrc);
     col += 9;
 
     row = 1;
-    mvwprintw(data,row,col,"socket");
-    row++;
-    mvwprintw(data,row,col,"%s:%s -> %s:%s",
+    mvwprintw(data,row++,col,"socket");
+    mvwprintw(data,row++,col,"%s:%s -> %s:%s",
 	      input_data_source.host,input_data_source.port,
 	      input_data_dest.host,input_data_dest.port);
-    row++;
     mvwprintw(data,row,col,"%s:%s -> %s:%s",
 	      output_data_source.host,output_data_source.port,
 	      output_data_dest.host,output_data_dest.port);
@@ -814,34 +794,27 @@ int main(int argc,char *argv[]){
     wmove(status,0,0);
     wclrtobot(status);
     row = 2;  col = 1;
-    mvwprintw(status,row,col,"in");
-    row++;
+    mvwprintw(status,row++,col,"in");
     mvwprintw(status,row,col,"out");
     col += 4;
 
     row = 1;
-    mvwprintw(status,row,col,"%12s","packets");
-    row++;
-    mvwprintw(status,row,col,"%'12llu",demod->input.metadata_packets);
-    row++;
+    mvwprintw(status,row++,col,"%12s","packets");
+    mvwprintw(status,row++,col,"%'12llu",demod->input.metadata_packets);
     mvwprintw(status,row,col,"%'12llu",demod->output.metadata_packets);
     col += 13;
 
     row = 1;
-    mvwprintw(status,row,col,"%12s","commands");
-    row++;
-    mvwprintw(status,row,col,"%'12llu",demod->input.commands);
-    row++;
+    mvwprintw(status,row++,col,"%12s","commands");
+    mvwprintw(status,row++,col,"%'12llu",demod->input.commands);
     mvwprintw(status,row,col,"%'12llu",demod->output.commands);    
     col += 13;
 
     row = 1;
-    mvwprintw(status,row,col,"socket");
-    row++;
-    mvwprintw(status,row,col,"%s:%s -> %s:%s",
+    mvwprintw(status,row++,col,"socket");
+    mvwprintw(status,row++,col,"%s:%s -> %s:%s",
 	      input_metadata_source.host,input_metadata_source.port,
 	      input_metadata_dest.host,input_metadata_dest.port);
-    row++;
     mvwprintw(status,row,col,"%s:%s -> %s:%s",
 	      output_metadata_source.host,output_metadata_source.port,
 	      output_metadata_dest.host,output_metadata_dest.port);
@@ -1277,6 +1250,9 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case DESCRIPTION:
       decode_string(cp,optlen,&demod->input.description,sizeof(demod->input.description));
       break;
+    case COMMANDS:
+      demod->output.commands = decode_int(cp,optlen);
+      break;
     case GPS_TIME:
       demod->sdr.status.timestamp = decode_int(cp,optlen);
       break;
@@ -1354,6 +1330,7 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case DOPPLER_FREQUENCY_RATE:
       demod->doppler.rate = decode_double(cp,optlen);
       break;
+#if 0
     case AD_LEVEL:
       demod->sdr.ad_level = decode_float(cp,optlen);
       break;
@@ -1378,6 +1355,11 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case IQ_PHASE:
       demod->sdr.sinphi = decode_float(cp,optlen);
       break;
+    case CALIBRATE:
+      demod->sdr.calibration = decode_double(cp,optlen);
+      break;
+#endif
+
     case LOW_EDGE:
       demod->filter.low = decode_float(cp,optlen);
       break;
@@ -1456,9 +1438,6 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case OUTPUT_LEVEL:
       demod->output.level = decode_float(cp,optlen);
       break;
-    case CALIBRATE:
-      demod->sdr.calibration = decode_double(cp,optlen);
-      break;
     default:
       break;
     }
@@ -1535,14 +1514,10 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       if(nsamprate != demod->sdr.status.samprate){
 	demod->input.samprate = demod->sdr.status.samprate = nsamprate;
 	demod->filter.decimate = demod->sdr.status.samprate / demod->output.samprate;
-#if 0
-	if(demod->filter.out)
-	  set_filter(demod->filter.out,
-		     demod->filter.low/demod->output.samprate,
-		     demod->filter.high/demod->output.samprate,
-		     demod->filter.kaiser_beta);
-#endif
       }
+      break;
+    case COMMANDS:
+      demod->input.commands = decode_int(cp,optlen);
       break;
     case GPS_TIME:
       demod->sdr.status.timestamp = decode_int(cp,optlen);
@@ -1588,10 +1563,6 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
   if(!isnan(nfreq) && demod->sdr.status.frequency != nfreq && demod->sdr.status.samprate != 0){
     // Recalculate LO2
     demod->sdr.status.frequency = nfreq;
-#if 0
-    double new_LO2 = -(demod->tune.freq - get_first_LO(demod));
-    set_second_LO(demod,new_LO2);
-#endif
   }
   done:;
 }

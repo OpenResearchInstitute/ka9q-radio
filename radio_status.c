@@ -116,9 +116,11 @@ void send_radio_status(struct demod *demod,int full){
   encode_double(&bp,SECOND_LO_FREQUENCY,get_second_LO(demod)); // Hz
   encode_double(&bp,SHIFT_FREQUENCY,demod->tune.shift); // Hz
   
-  // Front end - passed through from SDR metadata
-  encode_double(&bp,AD_LEVEL,demod->sdr.ad_level);
   encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency); // Hz
+
+#if 0
+  // Remainder of front end data is not needed by radio
+  encode_double(&bp,AD_LEVEL,demod->sdr.ad_level);
   encode_byte(&bp,LNA_GAIN,demod->sdr.status.lna_gain); // dB
   encode_byte(&bp,MIXER_GAIN,demod->sdr.status.mixer_gain); // dB
   encode_byte(&bp,IF_GAIN,demod->sdr.status.if_gain); // dB
@@ -127,6 +129,7 @@ void send_radio_status(struct demod *demod,int full){
   encode_float(&bp,IQ_IMBALANCE,demod->sdr.imbalance); // dB
   encode_float(&bp,IQ_PHASE,demod->sdr.sinphi); // sine - dimensionless
   encode_double(&bp,CALIBRATE,demod->sdr.calibration); // dimensionless
+#endif
   
   // Doppler info
   encode_double(&bp,DOPPLER_FREQUENCY,get_doppler(demod));
@@ -383,7 +386,7 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     if(type == EOL)
       break; // End of list
 
-    double d;
+    double d __attribute__((unused)); // depends on ifdef below
     float f;
     
     unsigned int optlen = *cp++;
@@ -403,9 +406,6 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     case RADIO_FREQUENCY:
       nfreq = decode_double(cp,optlen);
       break;
-    case INPUT_SAMPRATE:
-      demod->sdr.status.samprate = decode_int(cp,optlen);
-      break;
     case OUTPUT_SAMPRATE:
       nsamprate = decode_int(cp,optlen);
       if(nsamprate != demod->input.samprate){
@@ -421,9 +421,6 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     case GPS_TIME:
       demod->sdr.status.timestamp = decode_int(cp,optlen);
       break;
-    case AD_LEVEL:
-      demod->sdr.ad_level = decode_float(cp,optlen);
-      break;
     case LOW_EDGE:
       f = decode_float(cp,optlen);
       if(!isnan(f))
@@ -434,6 +431,14 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       if(!isnan(f))
 	demod->sdr.max_IF = f;
       break;
+#if 0
+      // These SDR parameters are not needed by radio; control can fetch them directly
+    case INPUT_SAMPRATE:
+      demod->sdr.status.samprate = decode_int(cp,optlen);
+      break;
+    case AD_LEVEL:
+      demod->sdr.ad_level = decode_float(cp,optlen);
+      break;
     case LNA_GAIN:
       demod->sdr.status.lna_gain = decode_int(cp,optlen);
       break;
@@ -442,10 +447,6 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case IF_GAIN:
       demod->sdr.status.if_gain = decode_int(cp,optlen);
-      break;
-    case GAIN: // Overall SDR gain (entirely analog)
-      f = decode_float(cp,optlen);
-      demod->sdr.gain_factor = powf(10.,-f/20); // Amplitude ratio to make overall gain unity
       break;
     case DC_I_OFFSET:
       f = decode_float(cp,optlen);
@@ -471,6 +472,11 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       d = decode_float(cp,optlen);
       if(!isnan(d))
 	demod->sdr.calibration = d;
+      break;
+#endif
+    case GAIN: // Overall SDR gain (entirely analog)
+      f = decode_float(cp,optlen);
+      demod->sdr.gain_factor = powf(10.,-f/20); // Amplitude ratio to make overall gain unity
       break;
     case DIRECT_CONVERSION:
       demod->sdr.direct_conversion = decode_int(cp,optlen);
