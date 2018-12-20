@@ -11,13 +11,9 @@ Right arrow  Move cursor right one digit
 Up arrow     Increase by 1
 Down arrow   Decrease by 1
 ctl+L        Redraw screen
-b            Set filter blocksize (samples)
-c            Set calibration offset (ppm)
 f            Set frequency (eg: 147m435, 10m0, 760k0, 14313000)
 k            Set Kaiser window beta parameter
 m            Set demod mode
 o            Set/clear option flag
 q            Quit program
-u            Set display update rate, ms
-w            Write statefile
 

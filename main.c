@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.138 2018/12/18 12:37:48 karn Exp karn $
+// $Id: main.c,v 1.139 2018/12/20 02:11:05 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -55,7 +55,6 @@ void *rtp_recv(void *);
 void *rtcp_send(void *);
 void cleanup(void);
 void closedown(int);
-void *recv_sdr_status(void *);
 void *send_status(void *);
 
 struct option Options[] =
@@ -135,65 +134,6 @@ int main(int argc,char *argv[]){
 
   demod->output.samprate = DAC_samprate; // currently 48 kHz, hard to change
   demod->filter.interpolate = 1;
-
-  pthread_mutex_init(&demod->sdr.status_mutex,NULL);
-  pthread_cond_init(&demod->sdr.status_cond,NULL);
-  pthread_mutex_init(&demod->doppler.mutex,NULL);
-  pthread_mutex_init(&demod->shift.mutex,NULL);
-  pthread_mutex_init(&demod->second_LO.mutex,NULL);
-  pthread_mutex_init(&demod->input.qmutex,NULL);
-  pthread_cond_init(&demod->input.qcond,NULL);
-  pthread_mutex_init(&demod->demod_mutex,NULL);
-  pthread_cond_init(&demod->demod_cond,NULL);
-
-  demod->input.status_fd = -1;
-  
-  // First pass over options to pick up SDR metadata
-  int c;
-  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
-    switch(c){
-    case 'I':   // Multicast address to listen to for receiver metadata
-      // Input socket for status from SDR
-      demod->input.status_fd = setup_mcast(optarg,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,2);
-      if(demod->input.status_fd == -1){
-	fprintf(stderr,"Can't set up SDR status socket\n");
-	exit(1);
-      }
-      break;
-    default: // Ignore others for now
-      break;
-    }
-  }
-  if(demod->input.status_fd == -1){
-    fprintf(stderr,"No valid SDR metadata address given with -I\n");
-    exit(1);
-  }
-
-  // Output socket for commands to SDR - same group as metadata input
-  demod->input.ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,1,Mcast_ttl,0);
-  if(demod->input.ctl_fd == -1){
-    fprintf(stderr,"Can't set up SDR control socket\n");
-    exit(1);
-  }
-
-  // Start listening to SDR metadata, wait for it
-  pthread_t recv_sdr_status_thread;
-  pthread_create(&recv_sdr_status_thread,NULL,recv_sdr_status,demod);
-
-  fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
-  pthread_mutex_lock(&demod->sdr.status_mutex);
-  while(demod->input.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
-    pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
-  pthread_mutex_unlock(&demod->sdr.status_mutex);
-  fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
-
-  // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
-  demod->input.data_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
-  if(demod->input.data_fd == -1){
-    fprintf(stderr,"Can't set up I/Q input\n");
-    exit(1);
-  }
-
   // Set receiver defaults, can be overridden by command line args
   demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
   demod->filter.M = 4352+1;    // Length of filter impulse response
@@ -211,11 +151,31 @@ int main(int argc,char *argv[]){
   demod->output.rtp.ssrc = Starttime.tv_sec & 0xffffffff;
   demod->output.status_fd = demod->output.ctl_fd = demod->output.data_fd = demod->output.rtcp_fd = -1;
 
-  // Go back and re-read rest of args
-  // -T must be specified ahead of argument it modifies
-  optind = 1;
+  pthread_mutex_init(&demod->sdr.status_mutex,NULL);
+  pthread_cond_init(&demod->sdr.status_cond,NULL);
+  pthread_mutex_init(&demod->doppler.mutex,NULL);
+  pthread_mutex_init(&demod->shift.mutex,NULL);
+  pthread_mutex_init(&demod->second_LO.mutex,NULL);
+  pthread_mutex_init(&demod->input.qmutex,NULL);
+  pthread_cond_init(&demod->input.qcond,NULL);
+  pthread_mutex_init(&demod->demod_mutex,NULL);
+  pthread_cond_init(&demod->demod_cond,NULL);
+
+  demod->input.status_fd = -1;
+  
+  // First pass over options to pick up I/O sockets
+  // -T must be specified ahead of output argument it modifies
+  int c;
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
+    case 'I':   // Multicast address to listen to for receiver metadata
+      // Input socket for status from SDR
+      demod->input.status_fd = setup_mcast(optarg,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,2);
+      if(demod->input.status_fd == -1){
+	fprintf(stderr,"Can't set up SDR status socket\n");
+	exit(1);
+      }
+      break;
     case 'R':   // Set output target IP multicast address for metadata
       demod->output.status_fd = setup_mcast(optarg,(struct sockaddr *)&demod->output.metadata_dest_address,1,Mcast_ttl,2); // RTP port + 2
       if(demod->output.status_fd == -1){
@@ -247,11 +207,47 @@ int main(int argc,char *argv[]){
     case 'S':   // Set SSRC on output stream
       demod->output.rtp.ssrc = strtol(optarg,NULL,0);
       break;
-    case 'I':
-      break; // Already processed
     case 'T': // TTL on output packets
       Mcast_ttl = strtol(optarg,NULL,0);
       break;
+    default: // Ignore others for now
+      break;
+    }
+  }
+  if(demod->input.status_fd == -1){
+    fprintf(stderr,"No valid SDR metadata address given with -I\n");
+    exit(1);
+  }
+
+  // Output socket for commands to SDR - same group as metadata input
+  demod->input.ctl_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.metadata_dest_address,1,Mcast_ttl,0);
+  if(demod->input.ctl_fd == -1){
+    fprintf(stderr,"Can't set up SDR control socket\n");
+    exit(1);
+  }
+  // Start status thread - will also listen for SDR commands
+  pthread_t status_thread;
+  pthread_create(&status_thread,NULL,send_status,demod);
+
+
+  fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
+  pthread_mutex_lock(&demod->sdr.status_mutex);
+  while(demod->input.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
+    pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
+  pthread_mutex_unlock(&demod->sdr.status_mutex);
+  fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
+
+  // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
+  demod->input.data_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
+  if(demod->input.data_fd == -1){
+    fprintf(stderr,"Can't set up I/Q input\n");
+    exit(1);
+  }
+
+  // Go back and re-read rest of args
+  optind = 1;
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
+    switch(c){
     case 'a': // AGC recovery rate, dB/s
       // Convert to ratio per sample
       demod->agc.recovery_rate = fabs(strtof(optarg,NULL)) / demod->output.samprate;
@@ -317,11 +313,7 @@ int main(int argc,char *argv[]){
       break;
     }
   }
-  // Start emitting status and RTCP
-  pthread_t status_thread;
-  if(demod->output.status_fd != -1)
-    pthread_create(&status_thread,NULL,send_status,demod);
-
+  // Start emitting RTCP
   pthread_t rtcp_thread;
   if(demod->output.rtcp_fd != -1)
     pthread_create(&rtcp_thread,NULL,rtcp_send,demod);

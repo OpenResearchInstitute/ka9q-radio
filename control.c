@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.36 2018/12/20 06:58:09 karn Exp karn $
+// $Id: control.c,v 1.38 2018/12/20 08:25:15 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -720,6 +720,12 @@ int main(int argc,char *argv[]){
 	wattron(options,A_UNDERLINE);	
       mvwprintw(options,row++,col,"Envel");    
       wattroff(options,A_UNDERLINE);
+
+      if(demod->opt.agc)
+	wattron(options,A_UNDERLINE);
+      mvwprintw(options,row++,col,"AGC");
+      wattroff(options,A_UNDERLINE);      
+
     }
     box(options,0,0);
     mvwaddstr(options,0,2,"Options");
@@ -888,32 +894,6 @@ int main(int argc,char *argv[]){
     case '?':
       popup("help.txt");
       break;
-#if 0 // DO this later
-    case 'I': // Change multicast address for input I/Q stream
-      {
-	char str[160];
-	getentry("IQ input IP dest address: ",str,sizeof(str));
-	if(strlen(str) <= 0)
-	  break;
-
-	int const i = setup_mcast(str,NULL,0,0,0);
-	if(i == -1){
-	  beep();
-	  break;
-	}
-	// demod->input.fd is not protected by a mutex, so swap it carefully
-	// Mutex protection would be difficult because input thread is usually
-	// blocked on the socket, and if there's no I/Q input we'd hang
-	int const j = demod->input.fd;
-	demod->input.fd = i;
-	if(j != -1)
-	  close(j); // This should cause the input thread to see an error
-	strlcpy(demod->input.dest_address_text,str,sizeof(demod->input.dest_address_text));
-	// Clear RTP receiver state
-	memset(&demod->input.rtp,0,sizeof(demod->input.rtp));
-      }
-      break;
-#endif
     case 'l': // Toggle RF or first LO lock; affects how adjustments to LO and IF behave
       toggle_lock(demod);
       break;
@@ -953,21 +933,6 @@ int main(int argc,char *argv[]){
     case '\f':  // Screen repaint (formfeed, aka control-L)
       clearok(curscr,TRUE);
       break;
-#if 0 // Do later
-    case 'b':   // Blocksize - sets both data and impulse response-1
-                // They should be separably set. Do this in the state file for now
-      {
-	char str[160],*ptr;
-	getentry("Enter blocksize in samples: ",str,sizeof(str));
-	int const i = strtol(str,&ptr,0);
-	if(ptr == str)
-	  break; // Nothing entered
-	
-	demod->filter.L = i;
-	demod->filter.M = demod->filter.L + 1;
-      }
-      break;
-#endif
     case 'm': // Manually set modulation mode
       {
 	char str[1024];
@@ -1004,9 +969,6 @@ int main(int argc,char *argv[]){
 	  demod->tune.freq = f;
       }
       break;
-    case 'i':    // Recenter IF to +/- samprate/4
-      demod->tune.freq += demod->input.samprate/4.;
-      break;
     case 'k': // Kaiser window beta parameter
       {
 	char str[160],*ptr;
@@ -1024,7 +986,7 @@ int main(int argc,char *argv[]){
     case 'o': // Set/clear option flags, most apply only to linear detector
       {
 	char str[160];
-	getentry("Enter option [isb pll cal flat square stereo mono], '!' prefix disables: ",str,sizeof(str));
+	getentry("Enter option [isb pll flat square stereo mono agc], '!' prefix disables: ",str,sizeof(str));
 	if(strcasecmp(str,"mono") == 0){
 	  demod->output.channels = 1;
 	} else if(strcasecmp(str,"!mono") == 0){
@@ -1047,6 +1009,10 @@ int main(int argc,char *argv[]){
 	  demod->opt.flat = 1;
 	} else if(strcasecmp(str,"!flat") == 0){
 	  demod->opt.flat = 0;
+	} else if(strcasecmp(str,"agc") == 0){
+	  demod->opt.agc = 1;
+	} else if(strcasecmp(str,"!agc") == 0){
+	  demod->opt.agc = 0;
 	}
       }
       break;
@@ -1135,6 +1101,9 @@ int main(int argc,char *argv[]){
 	  case 6:
 	    demod->opt.env = !demod->opt.env;
 	    break;
+	  case 7:
+	    demod->opt.agc = !demod->opt.agc;
+	    break;
 	  }
 	}
       }
@@ -1203,6 +1172,9 @@ int main(int argc,char *argv[]){
 
       if(demod->opt.env != old_demod.opt.env)
 	encode_byte(&bp,ENVELOPE,demod->opt.env);
+
+      if(demod->opt.agc != old_demod.opt.agc)
+	encode_byte(&bp,AGC_ENABLE,demod->opt.agc);	
 
       demod->output.command_tag = random();
       encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
@@ -1505,7 +1477,6 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       goto done;
     case OUTPUT_DATA_DEST_SOCKET:
       // SDR data destination address (usually multicast)
-      // Becomes our data input socket
       decode_socket(&demod->input.data_dest_address,cp,optlen);
       break;
     case RADIO_FREQUENCY:

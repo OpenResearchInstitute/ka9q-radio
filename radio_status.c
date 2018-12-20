@@ -28,10 +28,11 @@
 
 void send_radio_status(struct demod *demod,int full);
 void decode_radio_commands(struct demod *, unsigned char *, int);
+void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length);
 
 struct state State[256];
 
-// Thread to periodically transmit receiver state
+// Status reception and transmission
 void *send_status(void *arg){
   pthread_setname("status");
   assert(arg != NULL);
@@ -39,33 +40,73 @@ void *send_status(void *arg){
 
   memset(State,0,sizeof(State));
   
-  struct timeval tv;
-  tv.tv_sec = 0;
-  tv.tv_usec = 100000; // 100 ms
+  // Solicit immediate full status
+  unsigned char packet[8192],*bp;
+  memset(packet,0,sizeof(packet));
+  bp = packet;
+  *bp++ = 1; // Command
+  encode_eol(&bp);
+  int len = bp - packet;
+  send(demod->input.ctl_fd,packet,len,0);
 
-  if(setsockopt(demod->output.ctl_fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))){
-    perror("ncmd setsockopt");
-    return NULL;
-  }
-  int counter = 0;
+  int full_status_counter = 0;
   while(1){
-    unsigned char buffer[8192];
-    memset(buffer,0,sizeof(buffer));
-    int length = recv(demod->output.ctl_fd,buffer,sizeof(buffer),0); // Waits up to 100 ms for command
-    if(length > 0){
-      // Parse entries
-      unsigned char *cp = buffer;
+    // Set timeout slightly long than 100 ms from front end so latter will usually trigger us
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 120000;
 
-      int cr = *cp++; // Command/response
-      if(cr == 0)
-	continue; // Ignore our own status messages
-      demod->output.commands++;
-      decode_radio_commands(demod,cp,length-1);
-      counter = 0; // Send complete status in response
+    fd_set fdset;
+    FD_ZERO(&fdset);
+    if(demod->input.status_fd != -1)
+      FD_SET(demod->input.status_fd,&fdset);
+    if(demod->output.ctl_fd != -1)
+      FD_SET(demod->output.ctl_fd,&fdset);      
+
+    int n = max(demod->input.status_fd,demod->output.ctl_fd) + 1;
+    n = select(n,&fdset,NULL,NULL,&timeout);
+
+    if(FD_ISSET(demod->input.status_fd,&fdset)){
+      // Status Update from SDR
+      unsigned char buffer[8192];
+      memset(buffer,0,sizeof(buffer));
+      socklen_t socklen;
+      int len = recvfrom(demod->input.status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->input.metadata_source_address,&socklen);
+      if(len <= 0){
+	usleep(100000);
+	continue;
+      }
+      // Parse entries
+      int cr = buffer[0]; // command-response byte
+      
+      if(cr == 1)
+	continue; // Ignore commands
+      demod->input.metadata_packets++;
+      decode_sdr_status(demod,buffer+1,len-1);
+      pthread_mutex_lock(&demod->sdr.status_mutex);
+      pthread_cond_broadcast(&demod->sdr.status_cond);
+      pthread_mutex_unlock(&demod->sdr.status_mutex);
+    }    
+    if(FD_ISSET(demod->output.ctl_fd,&fdset)){
+      // Command from user
+      unsigned char buffer[8192];
+      memset(buffer,0,sizeof(buffer));
+      int length = recv(demod->output.ctl_fd,buffer,sizeof(buffer),0);
+      if(length > 0){
+	// Parse entries
+	unsigned char *cp = buffer;
+	
+	int cr = *cp++; // Command/response
+	if(cr == 0)
+	  continue; // Ignore our own status messages
+	demod->output.commands++;
+	decode_radio_commands(demod,cp,length-1);
+	full_status_counter = 0; // Send complete status in response
+      }
     }
-    send_radio_status(demod,(counter == 0));
-    if(counter-- <= 0)
-      counter = 10;
+    send_radio_status(demod,(full_status_counter == 0));
+    if(full_status_counter-- <= 0)
+      full_status_counter = 10;
   }
 }
 
@@ -337,43 +378,7 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
 }
 
 
-void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length);
 
-void *recv_sdr_status(void *arg){
-  struct demod *demod = (struct demod *)arg;
-
-  // Solicit immediate full status
-  unsigned char packet[8192],*bp;
-  memset(packet,0,sizeof(packet));
-  bp = packet;
-  *bp++ = 1; // Command
-  encode_eol(&bp);
-  int len = bp - packet;
-  send(demod->input.ctl_fd,packet,len,0);
-
-  while(1){
-    unsigned char buffer[8192];
-
-    memset(buffer,0,sizeof(buffer));
-    socklen_t socklen;
-    int len = recvfrom(demod->input.status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&demod->input.metadata_source_address,&socklen);
-    if(len <= 0){
-      sleep(1);
-      continue;
-    }
-    // Parse entries
-    int cr = buffer[0]; // command-response byte
-
-    if(cr == 1)
-      continue; // Ignore commands
-    
-    demod->input.metadata_packets++;
-    decode_sdr_status(demod,buffer+1,len-1);
-    pthread_mutex_lock(&demod->sdr.status_mutex);
-    pthread_cond_broadcast(&demod->sdr.status_cond);
-    pthread_mutex_unlock(&demod->sdr.status_mutex);
-  }    
-}
 
 void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
