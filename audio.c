@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.86 2018/12/13 21:49:27 karn Exp karn $
+// $Id: audio.c,v 1.87 2018/12/16 10:58:36 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -30,6 +30,8 @@ static short const scaleclip(float const x){
 
 // Send 'size' stereo samples, each in a pair of floats
 int send_stereo_output(struct demod * const demod,float const * buffer,int size){
+
+  demod->output.samples += size;
 
   struct rtp_header rtp;
   memset(&rtp,0,sizeof(rtp));
@@ -80,6 +82,8 @@ int send_stereo_output(struct demod * const demod,float const * buffer,int size)
 
 // Send 'size' mono samples, each in a float
 int send_mono_output(struct demod * const demod,float const * buffer,int size){
+
+  demod->output.samples += size;
 
   struct rtp_header rtp;
   memset(&rtp,0,sizeof(rtp));

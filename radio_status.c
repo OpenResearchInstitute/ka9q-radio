@@ -26,7 +26,6 @@
 #include "status.h"
 
 
-uint64_t Commands;
 void send_radio_status(struct demod *demod,int full);
 void decode_radio_commands(struct demod *, unsigned char *, int);
 
@@ -60,7 +59,7 @@ void *send_status(void *arg){
       int cr = *cp++; // Command/response
       if(cr == 0)
 	continue; // Ignore our own status messages
-      Commands++;
+      demod->output.commands++;
       decode_radio_commands(demod,cp,length-1);
       counter = 0; // Send complete status in response
     }
@@ -78,7 +77,7 @@ void send_radio_status(struct demod *demod,int full){
   *bp++ = 0; // Response (not a command);
   
   encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
-  encode_int64(&bp,COMMANDS,Commands); // integer
+  encode_int64(&bp,COMMANDS,demod->output.commands); // integer
 
   if(strlen(demod->input.description) > 0)
     encode_string(&bp,DESCRIPTION,demod->input.description,strlen(demod->input.description));
@@ -175,10 +174,9 @@ void send_radio_status(struct demod *demod,int full){
     encode_float(&bp,AGC_HANGTIME,demod->agc.hangtime / demod->output.samprate); // samples -> sec
     encode_float(&bp,AGC_RECOVERY_RATE,voltage2dB(demod->agc.recovery_rate) * demod->output.samprate);
     encode_float(&bp,AGC_ATTACK_RATE,voltage2dB(demod->agc.attack_rate) * demod->output.samprate); // amplitude/sample -> dB/s
-    encode_float(&bp,OUTPUT_LEVEL,power2dB(demod->output.level));
     break;
   }
-
+  encode_float(&bp,OUTPUT_LEVEL,power2dB(demod->output.level));
 
   encode_eol(&bp);
   
@@ -476,6 +474,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case DIRECT_CONVERSION:
       demod->sdr.direct_conversion = decode_int(cp,optlen);
+      break;
+    case COMMANDS:
+      demod->input.commands = decode_int(cp,optlen);
       break;
     default:
       break;

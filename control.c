@@ -267,7 +267,7 @@ int main(int argc,char *argv[]){
 
   atexit(display_cleanup);
 
-  WINDOW *tuning,*sig,*info,*filtering,*demodulator,*options,*sdr,*modes,*debug,*input,*output;
+  WINDOW *tuning,*sig,*info,*filtering,*demodulator,*options,*sdr,*modes,*debug,*data,*status;
 
   // talk directly to the terminal
   Tty = fopen("/dev/tty","r+");
@@ -306,12 +306,12 @@ int main(int argc,char *argv[]){
   // Third row
   col = 0;
   row += 12;
-  input = newwin(5,109,row,col); // Network status information
+  data = newwin(5,109,row,col);
   col = 0;
   row += 5;
-  output = newwin(4,109,row,col);
+  status = newwin(5,109,row,col);
   col = 0;
-  row += 4;
+  row += 5;
   debug = newwin(8,109,row,col); // Note: overlaps function keys
   scrollok(debug,1);
   
@@ -457,6 +457,7 @@ int main(int argc,char *argv[]){
     wclrtobot(info);  // Output 
     row = 1;
     col = 1;
+    mvwprintw(info,row++,col,"%s",lltime(demod->sdr.status.timestamp));
     mvwprintw(info,row++,col,"%s",demod->input.description);
 
     struct bandplan const *bp_low,*bp_high;
@@ -743,54 +744,110 @@ int main(int argc,char *argv[]){
     box(modes,0,0);
     mvwaddstr(modes,0,1,"Modes");
 
-    row = 1;
-    col = 1;
-    wmove(input,0,0);
-    wclrtobot(input);
-    update_sockcache(&input_metadata_source,(struct sockaddr *)&demod->input.metadata_source_address);
-    update_sockcache(&input_metadata_dest,(struct sockaddr *)&demod->input.metadata_dest_address);
-    mvwprintw(input,row++,col,"stat %s:%s -> %s:%s pkts %'llu",
-	      input_metadata_source.host,input_metadata_source.port,
-	      input_metadata_dest.host,input_metadata_dest.port,
-	      demod->input.metadata_packets);
-
     update_sockcache(&input_data_source,(struct sockaddr *)&demod->input.data_source_address);
     update_sockcache(&input_data_dest,(struct sockaddr *)&demod->input.data_dest_address);
-    mvwprintw(input,row++,col,"data %s:%s -> %s:%s ssrc %0lx pkts %'llu samples %'llu",
-	      input_data_source.host,input_data_source.port,
-	      input_data_dest.host,input_data_dest.port,
-	      demod->input.rtp.ssrc,
-	      demod->input.rtp.packets,demod->input.samples);
-
-    if(demod->input.rtp.drops)
-      wprintw(input," drops %'llu",demod->input.rtp.drops);
-    if(demod->input.rtp.dupes)
-      wprintw(input," dupes %'llu",demod->input.rtp.dupes);
-
-    mvwprintw(input,row++,col,"%s",lltime(demod->sdr.status.timestamp));
-    box(input,0,0);
-    mvwaddstr(input,0,40,"Input");
-
-    row = 1; col = 1;
-    wmove(output,0,0);
-    update_sockcache(&output_metadata_source,(struct sockaddr *)&demod->output.metadata_source_address);
-    update_sockcache(&output_metadata_dest,(struct sockaddr *)&demod->output.metadata_dest_address);
-    mvwprintw(output,row++,col,"stat %s:%s -> %s:%s pkts %'llu",
-	      output_metadata_source.host,output_metadata_source.port,
-	      output_metadata_dest.host,output_metadata_dest.port,
-	      demod->output.metadata_packets);
-
-
     update_sockcache(&output_data_source,(struct sockaddr *)&demod->output.data_source_address);
     update_sockcache(&output_data_dest,(struct sockaddr *)&demod->output.data_dest_address);
-    mvwprintw(output,row++,col,"data %s:%s -> %s:%s ssrc %8x TTL %d%s",
-	      output_data_source.host,output_data_source.port,
-	      output_data_dest.host,output_data_dest.port,
-	      demod->output.rtp.ssrc,Mcast_ttl,Mcast_ttl == 0 ? " (Local host only)":"");
-    wprintw(output," pkts %'llu",demod->output.rtp.packets);
+    update_sockcache(&input_metadata_source,(struct sockaddr *)&demod->input.metadata_source_address);
+    update_sockcache(&input_metadata_dest,(struct sockaddr *)&demod->input.metadata_dest_address);
+    update_sockcache(&output_metadata_source,(struct sockaddr *)&demod->output.metadata_source_address);
+    update_sockcache(&output_metadata_dest,(struct sockaddr *)&demod->output.metadata_dest_address);
 
-    box(output,0,0);
-    mvwaddstr(output,0,40,"Output");
+    wmove(data,0,0);
+    wclrtobot(data);
+    row = 2;  col = 1;
+    mvwprintw(data,row,col,"in");
+    row++;
+    mvwprintw(data,row,col,"out");
+    col += 4;
+
+    row = 1;
+    mvwprintw(data,row,col,"%12s","packets");
+    row++;
+    mvwprintw(data,row,col,"%'12llu",demod->input.rtp.packets);
+    row++;
+    mvwprintw(data,row,col,"%'12llu",demod->output.rtp.packets);
+    col += 13;
+
+    row = 1;
+    mvwprintw(data,row,col,"%16s","samples");
+    row++;
+    mvwprintw(data,row,col,"%'16llu",demod->input.samples);
+    row++;
+    mvwprintw(data,row,col,"%'16llu",demod->output.samples);
+    col += 17;
+
+    row = 1;
+    mvwprintw(data,row,col,"%6s","drops");
+    row++;
+    mvwprintw(data,row,col,"%'6llu",demod->input.rtp.drops);
+    col += 7;
+
+    row = 1;
+    mvwprintw(data,row,col,"%6s","dupes");
+    row++;
+    mvwprintw(data,row,col,"%'6llu",demod->input.rtp.dupes);
+    col += 7;
+
+    row = 1;
+    mvwprintw(data,row,col,"%8s","ssrc");
+    row++;
+    mvwprintw(data,row,col,"%8x",demod->input.rtp.ssrc);
+    row++;
+    mvwprintw(data,row,col,"%8x",demod->output.rtp.ssrc);
+    col += 9;
+
+    row = 1;
+    mvwprintw(data,row,col,"socket");
+    row++;
+    mvwprintw(data,row,col,"%s:%s -> %s:%s",
+	      input_data_source.host,input_data_source.port,
+	      input_data_dest.host,input_data_dest.port);
+    row++;
+    mvwprintw(data,row,col,"%s:%s -> %s:%s",
+	      output_data_source.host,output_data_source.port,
+	      output_data_dest.host,output_data_dest.port);
+    
+    box(data,0,0);
+    mvwaddstr(data,0,6,"Data");
+
+    wmove(status,0,0);
+    wclrtobot(status);
+    row = 2;  col = 1;
+    mvwprintw(status,row,col,"in");
+    row++;
+    mvwprintw(status,row,col,"out");
+    col += 4;
+
+    row = 1;
+    mvwprintw(status,row,col,"%12s","packets");
+    row++;
+    mvwprintw(status,row,col,"%'12llu",demod->input.metadata_packets);
+    row++;
+    mvwprintw(status,row,col,"%'12llu",demod->output.metadata_packets);
+    col += 13;
+
+    row = 1;
+    mvwprintw(status,row,col,"%12s","commands");
+    row++;
+    mvwprintw(status,row,col,"%'12llu",demod->input.commands);
+    row++;
+    mvwprintw(status,row,col,"%'12llu",demod->output.commands);    
+    col += 13;
+
+    row = 1;
+    mvwprintw(status,row,col,"socket");
+    row++;
+    mvwprintw(status,row,col,"%s:%s -> %s:%s",
+	      input_metadata_source.host,input_metadata_source.port,
+	      input_metadata_dest.host,input_metadata_dest.port);
+    row++;
+    mvwprintw(status,row,col,"%s:%s -> %s:%s",
+	      output_metadata_source.host,output_metadata_source.port,
+	      output_metadata_dest.host,output_metadata_dest.port);
+
+    box(status,0,0);
+    mvwaddstr(status,0,6,"Status");
 
     touchwin(debug); // since we're not redrawing it every cycle
 
@@ -836,8 +893,8 @@ int main(int argc,char *argv[]){
     wnoutrefresh(sdr);
     wnoutrefresh(options);
     wnoutrefresh(modes);
-    wnoutrefresh(input);
-    wnoutrefresh(output);
+    wnoutrefresh(data);
+    wnoutrefresh(status);
     doupdate();      // Update the screen right before we pause
     
     // Scan and process keyboard commands
