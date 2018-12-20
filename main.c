@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.139 2018/12/20 02:11:05 karn Exp karn $
+// $Id: main.c,v 1.140 2018/12/20 11:43:24 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -235,7 +235,7 @@ int main(int argc,char *argv[]){
   while(demod->input.samprate == 0 || demod->input.data_dest_address.ss_family == 0)
     pthread_cond_wait(&demod->sdr.status_cond,&demod->sdr.status_mutex);
   pthread_mutex_unlock(&demod->sdr.status_mutex);
-  fprintf(stderr,"%'d Hz\n",demod->sdr.status.samprate);
+  fprintf(stderr,"%'d Hz\n",demod->input.samprate);
 
   // Input socket for I/Q data from SDR, set from OUTPUT_DEST_SOCKET in SDR metadata
   demod->input.data_fd = setup_mcast(NULL,(struct sockaddr *)&demod->input.data_dest_address,0,0,0);
@@ -307,6 +307,8 @@ int main(int argc,char *argv[]){
       break;
     case 'M':
       demod->filter.M = strtol(optarg,NULL,0);
+      break;
+    case 'I': case 'R': case 'D': case 'S': case 'T':
       break;
     default:
       fprintf(stderr,"option %c unknown\n",c);
