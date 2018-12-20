@@ -125,7 +125,7 @@ void send_radio_status(struct demod *demod,int full){
   encode_byte(&bp,IF_GAIN,demod->sdr.status.if_gain); // dB
   encode_float(&bp,DC_I_OFFSET,demod->sdr.DC_i); // relative 1
   encode_float(&bp,DC_Q_OFFSET,demod->sdr.DC_q); // relative 1
-  encode_float(&bp,IQ_IMBALANCE,voltage2dB(demod->sdr.imbalance)); // amplitude ?
+  encode_float(&bp,IQ_IMBALANCE,demod->sdr.imbalance); // dB
   encode_float(&bp,IQ_PHASE,demod->sdr.sinphi); // sine - dimensionless
   encode_double(&bp,CALIBRATE,demod->sdr.calibration); // dimensionless
   
