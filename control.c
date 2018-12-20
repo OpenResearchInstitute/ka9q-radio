@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.30 2018/12/18 12:37:48 karn Exp karn $
+// $Id: control.c,v 1.31 2018/12/18 12:39:46 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -614,7 +614,7 @@ int main(int argc,char *argv[]){
     case LINEAR_DEMOD:
       if(!isnan(demod->agc.gain)){
 	mvwprintw(demodulator,row,rcol,"%11.1f dB",demod->agc.gain);
-	mvwaddstr(demodulator,row++,lcol,"AF Gain");
+	mvwaddstr(demodulator,row++,lcol,"Gain");
       }
       if(!isnan(demod->agc.recovery_rate)){
 	mvwprintw(demodulator,row,rcol,"%11.1f dB/s",demod->agc.recovery_rate);
@@ -654,15 +654,12 @@ int main(int argc,char *argv[]){
     col = 1;
     mvwprintw(sdr,row,col,"%'18d Hz",demod->sdr.status.samprate); // Nominal
     mvwaddstr(sdr,row++,col,"Samprate");
-    mvwprintw(sdr,row,col,"%'18.1f dBFS",
-	      demod->sig.if_power + demod->sdr.status.lna_gain + demod->sdr.status.mixer_gain + demod->sdr.status.if_gain);
+    mvwprintw(sdr,row,col,"%'18.1f dBFS",demod->sdr.ad_level);
     mvwprintw(sdr,row++,col,"A/D Level");
-    mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.lna_gain);   // SDR dependent
-    mvwaddstr(sdr,row++,col,"LNA gain");
-    mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.mixer_gain); // SDR dependent
-    mvwaddstr(sdr,row++,col,"Mix gain");
-    mvwprintw(sdr,row,col,"%18u dB",demod->sdr.status.if_gain); // SDR dependent    
-    mvwaddstr(sdr,row++,col,"IF gain");
+    mvwprintw(sdr,row++,col,"Analog gain %d+%d+%d dB",demod->sdr.status.lna_gain,
+	      demod->sdr.status.mixer_gain,
+	      demod->sdr.status.if_gain);
+
     if(!isnan(demod->sdr.DC_i)){
       mvwprintw(sdr,row,col,"%'21.6f",demod->sdr.DC_i);
       mvwaddstr(sdr,row++,col,"DC-i offs");
@@ -1352,7 +1349,7 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case DEMOD_SNR:
       demod->sig.snr = decode_float(cp,optlen);
       break;
-    case DEMOD_GAIN:
+    case GAIN:
       demod->agc.gain = decode_float(cp,optlen);
       break;
     case HEADROOM:
@@ -1443,7 +1440,6 @@ int preset_mode(struct demod * const demod,const char * const mode){
 void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
   double nfreq = NAN;
-  int gainchange = 0;
   int nsamprate = 0;
 
   while(cp - buffer < length){
@@ -1461,19 +1457,7 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     case OUTPUT_DATA_DEST_SOCKET:
       // SDR data destination address (usually multicast)
       // Becomes our data input socket
-      if(optlen == 6){
-	struct sockaddr_in *sin;
-	sin = (struct sockaddr_in *)&demod->input.data_dest_address;
-	sin->sin_family = AF_INET;
-	memcpy(&sin->sin_addr.s_addr,cp,4);
-	memcpy(&sin->sin_port,cp+4,2);
-      } else if(optlen == 10){
-	struct sockaddr_in6 *sin6;
-	sin6 = (struct sockaddr_in6 *)&demod->input.data_dest_address;
-	sin6->sin6_family = AF_INET6;
-	memcpy(&sin6->sin6_addr,cp,8);
-	memcpy(&sin6->sin6_port,cp+8,2);
-      }
+      decode_socket(&demod->input.data_dest_address,cp,optlen);
       break;
     case RADIO_FREQUENCY:
       nfreq = decode_double(cp,optlen);
@@ -1503,15 +1487,15 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case LNA_GAIN:
       demod->sdr.status.lna_gain = decode_int(cp,optlen);
-      gainchange++;
       break;
     case MIXER_GAIN:
       demod->sdr.status.mixer_gain = decode_int(cp,optlen);
-      gainchange++;
       break;
     case IF_GAIN:
       demod->sdr.status.if_gain = decode_int(cp,optlen);
-      gainchange++;
+      break;
+    case GAIN:
+      demod->sdr.gain_factor = powf(10.,-0.05*decode_float(cp,optlen));
       break;
     case DC_I_OFFSET:
       demod->sdr.DC_i = decode_float(cp,optlen);
@@ -1533,8 +1517,6 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     }
     cp += optlen;
   }
-  if(gainchange)
-    demod->sdr.gain_factor = powf(10.,-0.05*(demod->sdr.status.lna_gain + demod->sdr.status.if_gain + demod->sdr.status.mixer_gain));
   if(!isnan(nfreq) && demod->sdr.status.frequency != nfreq && demod->sdr.status.samprate != 0){
     // Recalculate LO2
     demod->sdr.status.frequency = nfreq;

@@ -484,7 +484,7 @@ void *display(void *arg){
 
   while(1){
     //    float powerdB = 10*log10f(sdr->in_power) - 90.308734;
-    float powerdB = 10*log10f(sdr->in_power);
+    float powerdB = power2dB(sdr->in_power);
 
     if(stat_point != -1)
       fseeko(Status,stat_point,SEEK_SET);
@@ -577,13 +577,17 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   bp = packet;
   
   *bp++ = 0; // command/response = response
+  encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
+  encode_int64(&bp,COMMANDS,Commands);
   
   struct timeval tp;
   gettimeofday(&tp,NULL);
   // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
   long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
   encode_int64(&bp,GPS_TIME,timestamp);
-  encode_int64(&bp,COMMANDS,Commands);
+
+  if(Description)
+    encode_string(&bp,DESCRIPTION,Description,strlen(Description));
   
   encode_socket(&bp,OUTPUT_DATA_SOURCE_SOCKET,&Output_data_source_address);
   encode_socket(&bp,OUTPUT_DATA_DEST_SOCKET,&Output_data_dest_address);
@@ -594,35 +598,32 @@ void send_fcd_status(struct sdrstate *sdr,int full){
   encode_int64(&bp,OUTPUT_DATA_PACKETS,Rtp.packets);
   encode_int64(&bp,OUTPUT_METADATA_PACKETS,Output_metadata_packets);
   
-  // Tuning
-  encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
-  encode_double(&bp,CALIBRATE,sdr->calibration);
-  
   // Front end
+  encode_float(&bp,AD_LEVEL,power2dB(sdr->in_power));
+  encode_double(&bp,CALIBRATE,sdr->calibration);
   encode_byte(&bp,LNA_GAIN,sdr->status.lna_gain);
   encode_byte(&bp,MIXER_GAIN,sdr->status.mixer_gain);
   encode_byte(&bp,IF_GAIN,sdr->status.if_gain);
   encode_float(&bp,DC_I_OFFSET,crealf(sdr->DC));
   encode_float(&bp,DC_Q_OFFSET,cimagf(sdr->DC));
-  encode_float(&bp,IQ_IMBALANCE,sdr->imbalance);
+  encode_float(&bp,IQ_IMBALANCE,power2dB(sdr->imbalance));
   encode_float(&bp,IQ_PHASE,sdr->sinphi);
-  encode_float(&bp,DEMOD_GAIN,(float)(sdr->status.lna_gain + sdr->status.mixer_gain + sdr->status.if_gain));
+  encode_byte(&bp,DIRECT_CONVERSION,1);
+  
+  // Tuning
+  encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
   
   // Filtering
   encode_float(&bp,LOW_EDGE,-90.0e3);
   encode_float(&bp,HIGH_EDGE,+90.0e3);
   
-  // Signals - these ALWAYS change
+  encode_float(&bp,OUTPUT_LEVEL,power2dB(sdr->in_power));
 
-  encode_float(&bp,BASEBAND_POWER,power2dB(sdr->in_power));
-  encode_float(&bp,IF_POWER,power2dB(sdr->in_power));   // Same, since there's no filtering
-  
+  float analog_gain = sdr->status.mixer_gain + sdr->status.if_gain + sdr->status.lna_gain;
+  encode_float(&bp,GAIN,power2dB(analog_gain));
   encode_byte(&bp,DEMOD_TYPE,0); // Actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
-  encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
-  if(Description)
-    encode_string(&bp,DESCRIPTION,Description,strlen(Description));
-  encode_byte(&bp,DIRECT_CONVERSION,1);
+
   encode_eol(&bp);
   assert(bp - packet < sizeof(packet));
   
@@ -718,7 +719,7 @@ int front_end_init(struct sdrstate *sdr,int device, int samprate,int L){
 // Executed only if -o option isn't specified; this allows manual control with, e.g., the fcdpp command
 void do_fcd_agc(struct sdrstate *sdr){
 
-  float powerdB = 10*log10f(sdr->in_power);
+  float powerdB = power2dB(sdr->in_power);
   
   if(powerdB > AGC_upper){
     if(sdr->status.if_gain > 0){

@@ -1,4 +1,4 @@
-// $Id: dump.c,v 1.4 2018/12/16 10:59:00 karn Exp karn $
+// $Id: dump.c,v 1.6 2018/12/19 04:49:50 karn Exp karn $
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
@@ -183,8 +183,8 @@ void dump_metadata(unsigned char *buffer,int length){
     case DEMOD_SNR:
       printf(" Demod SNR %.1f dB;",decode_float(cp,optlen));
       break;
-    case DEMOD_GAIN:
-      printf(" AGC gain %.1f dB;",decode_float(cp,optlen));
+    case GAIN:
+      printf(" gain %.1f dB;",decode_float(cp,optlen));
       break;
     case FREQ_OFFSET:
       printf(" freq offset %g Hz;",decode_float(cp,optlen));
@@ -212,6 +212,9 @@ void dump_metadata(unsigned char *buffer,int length){
       break;
     case CALIBRATE:
       printf(" calibration %lg;",decode_double(cp,optlen));
+      break;
+    case AGC_ENABLE:
+      printf(" agc enab %'llu;",(long long unsigned)decode_int(cp,optlen));
       break;
     case HEADROOM:
       printf(" headroom %lg dB;",decode_float(cp,optlen));

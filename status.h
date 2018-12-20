@@ -9,6 +9,7 @@ enum status_type {
   COMMANDS,       // Count of input commands
   GPS_TIME,       // Nanoseconds since GPS epoch (remember to update the leap second tables!)
 
+  DESCRIPTION,    // Free form text describing source
   INPUT_DATA_SOURCE_SOCKET,
   INPUT_DATA_DEST_SOCKET,
   INPUT_METADATA_SOURCE_SOCKET,
@@ -29,6 +30,18 @@ enum status_type {
   OUTPUT_METADATA_PACKETS,
   OUTPUT_DATA_PACKETS,
 
+  // Hardware
+  AD_LEVEL,
+  CALIBRATE,
+  LNA_GAIN,    // Analog gain = sum of three
+  MIXER_GAIN,
+  IF_GAIN,
+  DC_I_OFFSET,
+  DC_Q_OFFSET,
+  IQ_IMBALANCE,
+  IQ_PHASE,
+  DIRECT_CONVERSION, // Boolean indicating SDR is direct conversion -- should avoid DC
+
   // Tuning
   RADIO_FREQUENCY,
   FIRST_LO_FREQUENCY,
@@ -36,16 +49,6 @@ enum status_type {
   SHIFT_FREQUENCY,
   DOPPLER_FREQUENCY,
   DOPPLER_FREQUENCY_RATE,
-
-  // Hardware
-  CALIBRATE,
-  LNA_GAIN,
-  MIXER_GAIN,
-  IF_GAIN,
-  DC_I_OFFSET,
-  DC_Q_OFFSET,
-  IQ_IMBALANCE,
-  IQ_PHASE,
 
   // Filtering
   LOW_EDGE,
@@ -60,32 +63,32 @@ enum status_type {
   BASEBAND_POWER,
   NOISE_DENSITY,
 
-  // Demodulation
-  DEMOD_TYPE, // 0 = linear (default), 1 = AM envelope, 2 = FM
+  // Demodulation configuration
+  DEMOD_TYPE, // 0 = linear (default), 1 = FM
+  OUTPUT_CHANNELS, // 1 or 2 in Linear, otherwise 1
   INDEPENDENT_SIDEBAND, // Linear only
-  DEMOD_SNR,       // FM, PLL linear
-  DEMOD_GAIN,      // AM, Linear
-  FREQ_OFFSET,     // FM, PLL linear
-
-  FM_FLAT,
-  PEAK_DEVIATION, // FM only
-  PL_TONE,        // FM only
-  
   PLL_ENABLE,
   PLL_LOCK,       // Linear PLL
   PLL_SQUARE,     // Linear PLL
   PLL_PHASE,      // Linear PLL
-
-  OUTPUT_CHANNELS, // 1 or 2 in Linear, otherwise 1
-
+  ENVELOPE,       // Envelope detection in linear mode
+  FM_FLAT,
+  
+  // Demodulation status
+  DEMOD_SNR,      // FM, PLL linear
+  FREQ_OFFSET,    // FM, PLL linear
+  PEAK_DEVIATION, // FM only
+  PL_TONE,        // FM only
+  
   // Settable gain parameters
+  AGC_ENABLE,     // boolean, linear modes only
   HEADROOM,       // Audio level headroom
   AGC_HANGTIME,   // AGC hang time
   AGC_RECOVERY_RATE,
   AGC_ATTACK_RATE,
-  DESCRIPTION,
-  ENVELOPE,       // Envelope detection in linear mode
-  DIRECT_CONVERSION, // Boolean indicating SDR is direct conversion -- avoid DC
+
+  GAIN,     // AM, Linear only
+  OUTPUT_LEVEL,     // All modes
 };
 
 

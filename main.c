@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.137 2018/12/17 00:16:38 karn Exp karn $
+// $Id: main.c,v 1.138 2018/12/18 12:37:48 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -201,6 +201,7 @@ int main(int argc,char *argv[]){
   demod->agc.headroom = pow(10.,-15./20); // -15 dB
   demod->sdr.imbalance = 1; // 0 dB
   demod->demod_type = 1; // FM
+  demod->opt.agc = 1; // AGC is on by default
   demod->agc.gain = dB2voltage(80.); // Empirical starting point
   demod->agc.recovery_rate = powf(10.,6/20./demod->output.samprate);
   demod->output.channels = 1;

@@ -80,6 +80,9 @@ void send_radio_status(struct demod *demod,int full){
   encode_int(&bp,COMMAND_TAG,demod->output.command_tag);
   encode_int64(&bp,COMMANDS,Commands); // integer
 
+  if(strlen(demod->input.description) > 0)
+    encode_string(&bp,DESCRIPTION,demod->input.description,strlen(demod->input.description));
+
   // Echo timestamp from source
   encode_int64(&bp,GPS_TIME,demod->sdr.status.timestamp); // integer
   // Who's sending us I/Q data
@@ -115,6 +118,7 @@ void send_radio_status(struct demod *demod,int full){
   encode_double(&bp,SHIFT_FREQUENCY,demod->tune.shift); // Hz
   
   // Front end - passed through from SDR metadata
+  encode_double(&bp,AD_LEVEL,demod->sdr.ad_level);
   encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency); // Hz
   encode_byte(&bp,LNA_GAIN,demod->sdr.status.lna_gain); // dB
   encode_byte(&bp,MIXER_GAIN,demod->sdr.status.mixer_gain); // dB
@@ -154,7 +158,7 @@ void send_radio_status(struct demod *demod,int full){
     encode_byte(&bp,FM_FLAT,demod->opt.flat);
     break;
   case LINEAR_DEMOD:
-    encode_float(&bp,DEMOD_GAIN,voltage2dB(demod->agc.gain));
+    encode_float(&bp,GAIN,voltage2dB(demod->agc.gain));
     encode_byte(&bp,INDEPENDENT_SIDEBAND,demod->filter.isb);
     encode_byte(&bp,PLL_ENABLE,demod->opt.pll);
     if(demod->opt.pll){
@@ -168,11 +172,10 @@ void send_radio_status(struct demod *demod,int full){
     encode_float(&bp,AGC_HANGTIME,demod->agc.hangtime / demod->output.samprate); // samples -> sec
     encode_float(&bp,AGC_ATTACK_RATE,voltage2dB(demod->agc.attack_rate) * demod->output.samprate); // amplitude/sample -> dB/s
     encode_float(&bp,AGC_RECOVERY_RATE,voltage2dB(demod->agc.recovery_rate) * demod->output.samprate);
+    encode_byte(&bp,AGC_ENABLE,demod->opt.agc);
     break;
   }
   encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
-  if(strlen(demod->input.description) > 0)
-    encode_string(&bp,DESCRIPTION,demod->input.description,strlen(demod->input.description));
   encode_byte(&bp,ENVELOPE,demod->opt.env);
   encode_eol(&bp);
   
@@ -268,11 +271,17 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
     case FM_FLAT:  // boolean
       demod->opt.flat = decode_int(cp,optlen);
       break;
+    case AGC_ENABLE: // boolean
+      demod->opt.agc = decode_int(cp,optlen);
+      break;
     case OUTPUT_CHANNELS: // integer (1 or 2)
       demod->output.channels = decode_int(cp,optlen);
       break;
     case COMMAND_TAG:     // dimensionless, opaque integer
       demod->output.command_tag = decode_int(cp,optlen);
+      break;
+    case GAIN:
+      demod->agc.gain = decode_float(cp,optlen);
       break;
     case HEADROOM:        // dB -> amplitude ratio < 1
       f = decode_float(cp,optlen);
@@ -409,6 +418,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     case GPS_TIME:
       demod->sdr.status.timestamp = decode_int(cp,optlen);
       break;
+    case AD_LEVEL:
+      demod->sdr.ad_level = decode_float(cp,optlen);
+      break;
     case LOW_EDGE:
       f = decode_float(cp,optlen);
       if(!isnan(f))
@@ -428,8 +440,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     case IF_GAIN:
       demod->sdr.status.if_gain = decode_int(cp,optlen);
       break;
-    case DEMOD_GAIN:
-      demod->sdr.gain_factor = powf(10.,-0.05*decode_float(cp,optlen));
+    case GAIN: // Overall SDR gain (entirely analog)
+      f = decode_float(cp,optlen);
+      demod->sdr.gain_factor = powf(10.,-f/20); // Amplitude ratio to make overall gain unity
       break;
     case DC_I_OFFSET:
       f = decode_float(cp,optlen);

@@ -623,12 +623,15 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   
   encode_int32(&bp,COMMAND_TAG,sdr->command_tag);
   encode_int64(&bp,COMMANDS,Commands);
-
+  
   struct timeval tp;
   gettimeofday(&tp,NULL);
   // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
   long long timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
   encode_int64(&bp,GPS_TIME,timestamp);
+
+  if(Description)
+    encode_string(&bp,DESCRIPTION,Description,strlen(Description));
 
   // Source address we're using to send data
   encode_socket(&bp,OUTPUT_DATA_SOURCE_SOCKET,&Output_data_source_address);
@@ -636,39 +639,37 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   encode_socket(&bp,OUTPUT_DATA_DEST_SOCKET,&Output_data_dest_address);
   encode_int32(&bp,OUTPUT_SSRC,Rtp.ssrc);
   encode_byte(&bp,OUTPUT_TTL,Mcast_ttl);
-  encode_int32(&bp,INPUT_SAMPRATE,Out_samprate);  // This should be the actual A/D sample rate, which will be higher
+  encode_int32(&bp,INPUT_SAMPRATE,ADC_samprate);  // This should be the actual A/D sample rate, which will be higher
   encode_int32(&bp,OUTPUT_SAMPRATE,Out_samprate);
   encode_int64(&bp,OUTPUT_DATA_PACKETS,Rtp.packets);
   encode_int64(&bp,OUTPUT_METADATA_PACKETS,Output_metadata_packets);
   
-  // Tuning
-  encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
-  encode_double(&bp,CALIBRATE,sdr->calibration);
-  
   // Front end
+  encode_double(&bp,AD_LEVEL,power2dB(sdr->in_power));
+  encode_double(&bp,CALIBRATE,sdr->calibration);
   encode_byte(&bp,LNA_GAIN,sdr->status.lna_gain);
   encode_byte(&bp,MIXER_GAIN,sdr->status.mixer_gain);
   encode_byte(&bp,IF_GAIN,sdr->status.if_gain);
   encode_float(&bp,DC_I_OFFSET,crealf(sdr->DC));
   encode_float(&bp,DC_Q_OFFSET,cimagf(sdr->DC));
+  encode_float(&bp,IQ_IMBALANCE,power2dB(sdr->imbalance));
   encode_float(&bp,IQ_PHASE,sdr->sinphi);
-  encode_float(&bp,IQ_IMBALANCE,sdr->imbalance);
-  encode_float(&bp,DEMOD_GAIN,(float)(sdr->status.lna_gain + sdr->status.mixer_gain + sdr->status.if_gain));
+  encode_byte(&bp,DIRECT_CONVERSION,Offset == 0); // Direct conversion if offset == 0
   
+  // Tuning
+  encode_double(&bp,RADIO_FREQUENCY,sdr->status.frequency);
+
   // Filtering
   encode_float(&bp,LOW_EDGE,-0.47 * Out_samprate); // Should look at the actual filter curves
   encode_float(&bp,HIGH_EDGE,+0.47 * Out_samprate);
   
-  // Signals - these ALWAYS change
-  encode_float(&bp,BASEBAND_POWER,power2dB(sdr->in_power));
-  encode_float(&bp,IF_POWER,power2dB(sdr->in_power));   // Same, since there's no filtering
+  encode_float(&bp,OUTPUT_LEVEL,power2dB(sdr->in_power)); // Should be post-decimation
   
+  float analog_gain = sdr->status.mixer_gain + sdr->status.if_gain + sdr->status.lna_gain;
+  encode_float(&bp,GAIN,power2dB(analog_gain));
   encode_byte(&bp,DEMOD_TYPE,0); // actually LINEAR_MODE
   encode_int32(&bp,OUTPUT_CHANNELS,2);
-  if(Description)
-    encode_string(&bp,DESCRIPTION,Description,strlen(Description));
 
-  encode_byte(&bp,DIRECT_CONVERSION,Offset == 0); // Direct conversion if offset == 0
 
   encode_eol(&bp);
   assert(bp - packet < sizeof(packet));

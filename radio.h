@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.90 2018/12/16 10:59:00 karn Exp karn $
+// $Id: radio.h,v 1.91 2018/12/19 04:49:31 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -95,6 +95,7 @@ struct demod {
     float DC_i,DC_q;       // Average DC offsets
     float sinphi;          // smoothed estimate of I/Q phase error
     float imbalance;       // Ratio of I power to Q power
+    float ad_level;        // A/D signal level, dBFS
     
     // Limits on usable IF due to aliasing, filtering, etc
     // Less than or equal to +/- samprate/2
@@ -102,7 +103,6 @@ struct demod {
     float max_IF;
     
     float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
-
 
     // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
     pthread_mutex_t status_mutex;
@@ -163,6 +163,7 @@ struct demod {
     int pll;     // Linear mode PLL tracking of carrier
     int square;  // Squarer on PLL input
     float loop_bw;    // Loop bw (coherent modes)
+    int agc;
   } opt;
 
   // AGC (AM and linear modes)
