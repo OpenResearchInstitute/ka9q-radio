@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.32 2018/12/20 02:11:05 karn Exp karn $
+// $Id: control.c,v 1.33 2018/12/20 02:30:06 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -299,8 +299,8 @@ int main(int argc,char *argv[]){
   col += 26;
   options = newwin(12,12,row,col); // Demod options
   col += 12;
-  sdr = newwin(12,25,row,col); // SDR information
-  col += 25;
+  sdr = newwin(12,30,row,col); // SDR information
+  col += 30;
   
   // Third row
   col = 0;
@@ -621,7 +621,7 @@ int main(int argc,char *argv[]){
 	mvwaddstr(demodulator,row++,lcol,"Recovery rate");
       }
       if(!isnan(demod->agc.hangtime)){
-	mvwprintw(demodulator,row,rcol,"%11.1f  s",demod->agc.hangtime);
+	mvwprintw(demodulator,row,rcol,"%11.1f s",demod->agc.hangtime);
 	mvwaddstr(demodulator,row++,lcol,"Hang time");
       }
       if(!isnan(demod->agc.headroom)){
@@ -652,32 +652,32 @@ int main(int argc,char *argv[]){
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 1;
     col = 1;
-    mvwprintw(sdr,row,col,"%'18d Hz",demod->sdr.status.samprate); // Nominal
+    mvwprintw(sdr,row,col,"%'23d Hz",demod->sdr.status.samprate); // Nominal
     mvwaddstr(sdr,row++,col,"Samprate");
-    mvwprintw(sdr,row,col,"%'18.1f dBFS",demod->sdr.ad_level);
+    mvwprintw(sdr,row,col,"%'23.1f dBFS",demod->sdr.ad_level);
     mvwprintw(sdr,row++,col,"A/D Level");
-    mvwprintw(sdr,row++,col,"Analog gain %d+%d+%d dB",demod->sdr.status.lna_gain,
+    mvwprintw(sdr,row++,col,"Analog gain    %02d+%02d+%02d dB",demod->sdr.status.lna_gain,
 	      demod->sdr.status.mixer_gain,
 	      demod->sdr.status.if_gain);
 
     if(!isnan(demod->sdr.DC_i)){
-      mvwprintw(sdr,row,col,"%'21.6f",demod->sdr.DC_i);
+      mvwprintw(sdr,row,col,"%'23.6f",demod->sdr.DC_i);
       mvwaddstr(sdr,row++,col,"DC-i offs");
     }
     if(!isnan(demod->sdr.DC_q)){
-      mvwprintw(sdr,row,col,"%'21.6f",demod->sdr.DC_q);
+      mvwprintw(sdr,row,col,"%'23.6f",demod->sdr.DC_q);
       mvwaddstr(sdr,row++,col,"DC-q offs");
     }
     if(!isnan(demod->sdr.sinphi)){
-      mvwprintw(sdr,row,col,"%'18.1f deg",DEGPRA * asin(demod->sdr.sinphi));
+      mvwprintw(sdr,row,col,"%'23.1f deg",DEGPRA * asin(demod->sdr.sinphi));
       mvwaddstr(sdr,row++,col,"Phase offset");
     }
     if(!isnan(demod->sdr.imbalance)){
-      mvwprintw(sdr,row,col,"%'18.1f dB",demod->sdr.imbalance);
+      mvwprintw(sdr,row,col,"%'23.1f dB",demod->sdr.imbalance);
       mvwaddstr(sdr,row++,col,"I/Q imbal");
     }
     if(!isnan(demod->sdr.calibration)){
-      mvwprintw(sdr,row,col,"%'21lg",demod->sdr.calibration);
+      mvwprintw(sdr,row,col,"%'23lg",demod->sdr.calibration);
       mvwaddstr(sdr,row++,col,"TCXO cal");
     }
     box(sdr,0,0);
