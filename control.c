@@ -1330,7 +1330,8 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case DOPPLER_FREQUENCY_RATE:
       demod->doppler.rate = decode_double(cp,optlen);
       break;
-#if 0
+
+      // Process SDR parameters in case we're looking at it directly
     case AD_LEVEL:
       demod->sdr.ad_level = decode_float(cp,optlen);
       break;
@@ -1358,7 +1359,8 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
     case CALIBRATE:
       demod->sdr.calibration = decode_double(cp,optlen);
       break;
-#endif
+
+
 
     case LOW_EDGE:
       demod->filter.low = decode_float(cp,optlen);
@@ -1518,6 +1520,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case COMMANDS:
       demod->input.commands = decode_int(cp,optlen);
+      break;
+    case AD_LEVEL:
+      demod->sdr.ad_level = decode_float(cp,optlen);
       break;
     case GPS_TIME:
       demod->sdr.status.timestamp = decode_int(cp,optlen);
