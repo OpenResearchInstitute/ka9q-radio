@@ -149,34 +149,37 @@ void send_radio_status(struct demod *demod,int full){
   
   // Demodulation mode
   encode_byte(&bp,DEMOD_TYPE,demod->demod_type);
+  encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
   switch(demod->demod_type){
   case FM_DEMOD:
+    encode_byte(&bp,FM_FLAT,demod->opt.flat);
+    encode_float(&bp,DEMOD_SNR,power2dB(demod->sig.snr));
+    encode_float(&bp,FREQ_OFFSET,demod->sig.foffset);
     encode_float(&bp,PEAK_DEVIATION,demod->sig.pdeviation);
     encode_float(&bp,PL_TONE,demod->sig.plfreq);
-    encode_float(&bp,FREQ_OFFSET,demod->sig.foffset);
-    encode_float(&bp,DEMOD_SNR,power2dB(demod->sig.snr));
-    encode_byte(&bp,FM_FLAT,demod->opt.flat);
     break;
   case LINEAR_DEMOD:
-    encode_float(&bp,GAIN,voltage2dB(demod->agc.gain));
     encode_byte(&bp,INDEPENDENT_SIDEBAND,demod->filter.isb);
     encode_byte(&bp,PLL_ENABLE,demod->opt.pll);
     if(demod->opt.pll){
-      encode_float(&bp,FREQ_OFFSET,demod->sig.foffset);
-      encode_float(&bp,PLL_PHASE,demod->sig.cphase); // radians
-      encode_float(&bp,DEMOD_SNR,power2dB(demod->sig.snr));
       encode_byte(&bp,PLL_LOCK,demod->sig.pll_lock);
       encode_byte(&bp,PLL_SQUARE,demod->opt.square);
+      encode_float(&bp,PLL_PHASE,demod->sig.cphase); // radians
+      encode_byte(&bp,ENVELOPE,demod->opt.env);
+      encode_float(&bp,DEMOD_SNR,power2dB(demod->sig.snr));
+      encode_float(&bp,FREQ_OFFSET,demod->sig.foffset);
     }
+    encode_float(&bp,GAIN,voltage2dB(demod->agc.gain));
+    encode_byte(&bp,AGC_ENABLE,demod->opt.agc);
     encode_float(&bp,HEADROOM,voltage2dB(demod->agc.headroom));
     encode_float(&bp,AGC_HANGTIME,demod->agc.hangtime / demod->output.samprate); // samples -> sec
-    encode_float(&bp,AGC_ATTACK_RATE,voltage2dB(demod->agc.attack_rate) * demod->output.samprate); // amplitude/sample -> dB/s
     encode_float(&bp,AGC_RECOVERY_RATE,voltage2dB(demod->agc.recovery_rate) * demod->output.samprate);
-    encode_byte(&bp,AGC_ENABLE,demod->opt.agc);
+    encode_float(&bp,AGC_ATTACK_RATE,voltage2dB(demod->agc.attack_rate) * demod->output.samprate); // amplitude/sample -> dB/s
+    encode_float(&bp,OUTPUT_LEVEL,power2dB(demod->output.level));
     break;
   }
-  encode_int32(&bp,OUTPUT_CHANNELS,demod->output.channels);
-  encode_byte(&bp,ENVELOPE,demod->opt.env);
+
+
   encode_eol(&bp);
   
   int len = compact_packet(&State[0],packet,full);
@@ -281,7 +284,9 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       demod->output.command_tag = decode_int(cp,optlen);
       break;
     case GAIN:
-      demod->agc.gain = decode_float(cp,optlen);
+      f = decode_float(cp,optlen);
+      if(!isnan(f))
+	demod->agc.gain = powf(10.,f/20);
       break;
     case HEADROOM:        // dB -> amplitude ratio < 1
       f = decode_float(cp,optlen);

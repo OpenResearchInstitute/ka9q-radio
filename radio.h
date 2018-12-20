@@ -211,6 +211,7 @@ struct demod {
     int ctl_fd;     // File descriptor for receiving user commands
     int channels;   // 1 = mono, 2 = stereo
     uint32_t command_tag; // Echoed in responses to commands
+    float level;    // Output level
   } output;
 };
 extern char Libdir[];

@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.39 2018/12/16 04:30:05 karn Exp karn $
+// $Id: linear.c,v 1.40 2018/12/16 10:59:00 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -248,6 +248,7 @@ void *demod_linear(void *arg){
     // Demodulation
     float samples[filter->olen]; // for mono output
     float energy = 0;
+    float output_level = 0;
     for(int n=0; n<filter->olen; n++){
       complex float s = filter->output.c[n] * step_osc(&demod->shift);
       float norm = cnrmf(s);
@@ -261,23 +262,29 @@ void *demod_linear(void *arg){
       // slow you get an annoying "pumping" effect.
       // But if it's too fast, brief spikes can deafen you for some time
       // What to do?
-      if(isnan(demod->agc.gain) || amplitude * demod->agc.gain > demod->agc.headroom){
-	demod->agc.gain = demod->agc.headroom / amplitude; // Startup
-	hangcount = demod->agc.hangtime;
-      } else if(hangcount > 0){
-	hangcount--;
-      } else {
-	demod->agc.gain *= demod->agc.recovery_rate;
+      if(demod->opt.agc){
+	if(isnan(demod->agc.gain) || amplitude * demod->agc.gain > demod->agc.headroom){
+	  demod->agc.gain = demod->agc.headroom / amplitude; // Startup
+	  hangcount = demod->agc.hangtime;
+	} else if(hangcount > 0){
+	  hangcount--;
+	} else {
+	  demod->agc.gain *= demod->agc.recovery_rate;
+	}
       }
-
       if(demod->opt.env){
 	// AM envelope detection -- should re-add DC removal
 	samples[n] = amplitude * demod->agc.gain;
+	output_level += samples[n] * samples[n];
       } else if(demod->output.channels == 1) {
 	samples[n] = crealf(s) * demod->agc.gain;
-      } else
+	output_level += samples[n] * samples[n];
+      } else {
 	filter->output.c[n] = s * demod->agc.gain;
+	output_level += cnrmf(filter->output.c[n]);
+      }
     }
+    demod->output.level = output_level / (filter->olen * demod->output.channels);
     if(demod->opt.env || demod->output.channels == 1)
       send_mono_output(demod,samples,filter->olen);
     else      // I on left, Q on right

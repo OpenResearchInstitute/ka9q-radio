@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.61 2018/12/06 09:45:36 karn Exp karn $
+// $Id: fm.c,v 1.63 2018/12/10 11:54:23 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -106,6 +106,7 @@ void *demod_fm(void *arg){
       if(++snr_below_threshold > 1000)
 	snr_below_threshold = 1000; // Could conceivably wrap if squelch is closed for long time
     }
+    float output_level = 0;
     if(snr_below_threshold < 2){ // Squelch is (still) open
       // keep the squelch open an extra block to flush out the filters and buffers
 
@@ -133,6 +134,7 @@ void *demod_fm(void *arg){
 	    pdev_neg = lastaudio;
 	} else {
 	  samples[n] = audio_master->input.r[n] = lastaudio; // Replace unreliable sample with last good one
+	  output_level += samples[n] * samples[n];
 	}
 	avg_f += lastaudio;
       }
@@ -159,9 +161,13 @@ void *demod_fm(void *arg){
     if(!demod->opt.flat){
       execute_filter_output(audio_filter);
       assert(audio_master->ilen == audio_filter->olen);
-      for(int n=0; n < audio_filter->olen; n++)
+      output_level = 0; // Level of filter output instead of input
+      for(int n=0; n < audio_filter->olen; n++){
 	samples[n] = audio_filter->output.r[n] * gain;
+	output_level += samples[n] * samples[n];	
+      }
     }
+    demod->output.level = output_level / audio_master->ilen;
     send_mono_output(demod,samples,audio_master->ilen);
   }
 }

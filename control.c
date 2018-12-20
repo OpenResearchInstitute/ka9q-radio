@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.33 2018/12/20 02:30:06 karn Exp karn $
+// $Id: control.c,v 1.34 2018/12/20 03:13:19 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -252,9 +252,10 @@ int main(int argc,char *argv[]){
   demod->tune.freq = demod->tune.shift = NAN;
   demod->second_LO.freq = NAN;
   demod->filter.low = demod->filter.high = demod->filter.kaiser_beta = demod->filter.noise_bandwidth = NAN;
-  demod->agc.headroom = demod->agc.hangtime = demod->agc.recovery_rate = demod->agc.attack_rate = demod->agc.gain = NAN;
+  demod->agc.headroom = demod->agc.hangtime = demod->agc.recovery_rate = demod->agc.attack_rate = NAN;
   demod->sig.if_power = demod->sig.bb_power = demod->sig.n0 = demod->sig.snr = demod->sig.foffset = NAN;
   demod->sig.pdeviation = demod->sig.cphase = demod->sig.plfreq = demod->sig.lock_timer = NAN;
+  demod->agc.gain = 1;
   
 
   Status_fd = setup_mcast(argv[optind],(struct sockaddr *)&demod->output.metadata_dest_address,0,Mcast_ttl,2);
@@ -281,17 +282,17 @@ int main(int argc,char *argv[]){
   // First row
   int row = 0;
   int col = 0;
-  tuning = newwin(8,35,row,col);    // Frequency information
+  tuning = newwin(9,35,row,col);    // Frequency information
   col += 35;
-  sig = newwin(8,25,row,col); // Signal information
+  sig = newwin(9,25,row,col); // Signal information
   col += 25;
-  info = newwin(8,42,row,col);     // Band information
+  info = newwin(9,42,row,col);     // Band information
   col += 42;
   modes = newwin(Nmodes+2,7,row,col);
   col += 7;
 
   // Second row
-  row += 8;
+  row += 9;
   col = 0;
   filtering = newwin(12,22,row,col);
   col += 22;
@@ -580,6 +581,10 @@ int main(int argc,char *argv[]){
 	mvwprintw(sig,row,col,"%15.1f dB",sn0 - bw);
 	mvwaddstr(sig,row++,col,"SNR");
       }
+    }
+    if(!isnan(demod->output.level)){
+      mvwprintw(sig,row,col,"%15.1lf dB",demod->output.level);
+      mvwaddstr(sig,row++,col,"Output");
     }
     box(sig,0,0);
     mvwaddstr(sig,0,9,"Signal");
@@ -1390,6 +1395,9 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case OUTPUT_CHANNELS:
       demod->output.channels = decode_int(cp,optlen);
+      break;
+    case OUTPUT_LEVEL:
+      demod->output.level = decode_float(cp,optlen);
       break;
     case CALIBRATE:
       demod->sdr.calibration = decode_double(cp,optlen);
