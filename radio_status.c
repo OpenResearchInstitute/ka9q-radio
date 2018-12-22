@@ -235,6 +235,8 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
   double nrf = NAN;
   double nlo2 = NAN;
   double nlo1 = NAN;
+  float new_low = demod->filter.low;
+  float new_high = demod->filter.high;
 
   while(cp - buffer < length){
     enum status_type type = *cp++; // increment cp to length field
@@ -279,15 +281,11 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
       nlo2 = decode_double(cp,optlen);
       break;
     case LOW_EDGE:  // Hz
-      f = decode_float(cp,optlen);
-      if(!isnan(f))
-	demod->filter.low = f;
+      new_low = decode_float(cp,optlen);
       fset++;
       break;
     case HIGH_EDGE: // Hz
-      f = decode_float(cp,optlen);
-      if(!isnan(f))
-	demod->filter.high = f;
+      new_high = decode_float(cp,optlen);
       fset++;
       break;
     case SHIFT_FREQUENCY: // Hz
@@ -360,7 +358,9 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
     }
     cp += optlen;
   }
-  if(fset){
+  if(fset && !isnan(new_high) && !isnan(new_low) && new_high >= new_low){
+    demod->filter.low = new_low;
+    demod->filter.high = new_high;
     double samptime = 1./demod->output.samprate;
     set_filter(demod->filter.out,samptime*demod->filter.low,samptime*demod->filter.high,demod->filter.kaiser_beta);
   }
