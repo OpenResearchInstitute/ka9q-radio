@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.117 2018/12/19 04:49:31 karn Exp karn $
+// $Id: radio.c,v 1.118 2018/12/20 12:49:14 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
+#include <unistd.h>
 #if defined(linux)
 #include <bsd/string.h>
 #endif
@@ -24,65 +25,87 @@
 #include "status.h"
 
 
-// SDR alias keep-out region, i.e., stay between -(samprate/2 - IF_EXCLUDE) and (samprate/2 - IF_EXCLUDE)
-const float IF_EXCLUDE = 0.95; // Assume decimation filters roll off above Fs/2 * IF_EXCLUDE
-
-// Preferred A/D sample rate; ignored by funcube but may be used by others someday
-const int ADC_samprate = 192000;
-
 // thread for first half of demodulator
 // Preprocessing of samples performed for all demodulators
-// Update power measurement
 // Pass to input of pre-demodulation filter
+// Update power measurement, estimate noise level
 
 float const SCALE16 = 1./SHRT_MAX; // Scale signed 16-bit int to float in range -1, +1
 float const SCALE8 = 1./127;       // Scale signed 8-bit int to float in range -1, +1
 
 void *proc_samples(void *arg){
-  // gain and phase balance coefficients
   assert(arg);
   pthread_setname("procsamp");
 
   struct demod *demod = (struct demod *)arg;
   float complex block_energy = 0;
   int in_cnt = 0;
-  struct packet *pkt = NULL;
 
   while(1){
-    // Pull next I/Q data packet off queue
-    pthread_mutex_lock(&demod->input.qmutex);
-    while(demod->input.queue == NULL)
-      pthread_cond_wait(&demod->input.qcond,&demod->input.qmutex);
-    pkt = demod->input.queue;
-    demod->input.queue = pkt->next;
-    pthread_mutex_unlock(&demod->input.qmutex);
+    // Packet consists of Ethernet, IP and UDP header (already stripped)
+    // then standard Real Time Protocol (RTP), a status header and the PCM
+    // I/Q data. RTP is an IETF standard, so it uses big endian numbers
+    // The status header and I/Q data are *not* standard, so we save time
+    // by using machine byte order (almost certainly little endian).
+    // Note this is a portability problem if this system and the one generating
+    // the data have opposite byte orders. But who's big endian anymore?
+    // Receive I/Q data from front end
+    // Incoming RTP packets
+
+    struct packet pkt;
+
+    socklen_t socksize = sizeof(demod->input.data_source_address);
+    int size = recvfrom(demod->input.data_fd,pkt.content,sizeof(pkt.content),0,(struct sockaddr *)&demod->input.data_source_address,&socksize);
+    if(size <= 0){    // ??
+      perror("recvfrom");
+      usleep(50000);
+      continue;
+    }
+    if(size < RTP_MIN_SIZE)
+      continue; // Too small for RTP, ignore
+
+    unsigned char *dp = pkt.content;
+    dp = ntoh_rtp(&pkt.rtp,dp);
+    size -= (dp - pkt.content);
+    
+    if(pkt.rtp.pad){
+      // Remove padding
+      size -= dp[size-1];
+      pkt.rtp.pad = 0;
+    }
+    // Old status information, now obsolete, replaced by TLV streams on port 5006. Ignore for now, eventually it'll go away entirely
+    // These are in host byte order, i.e., *little* endian because we don't have to interoperate with anything else
+    dp += 24;
+    size -= 24;
+
+    pkt.data = dp;
+    pkt.len = size;
 
     int sampcount;
 
-    switch(pkt->rtp.type){
-    default: // Shut up lint
+    switch(pkt.rtp.type){
     case IQ_PT:
-      sampcount = pkt->len / (2 * sizeof(signed short));
+      sampcount = pkt.len / (2 * sizeof(signed short));
       break;
     case IQ_PT8:
-      sampcount = pkt->len / (2 * sizeof(signed char));
+      sampcount = pkt.len / (2 * sizeof(signed char));
       break;
+    default:
+      continue; // Wrong type; ignore
     }
-    if(pkt->rtp.ssrc != demod->input.rtp.ssrc){
+    if(pkt.rtp.ssrc != demod->input.rtp.ssrc){
       // SSRC changed; reset sample count.
       // rtp_process will reset packet count
       demod->input.samples = 0;
     }
-    int time_step = rtp_process(&demod->input.rtp,&pkt->rtp,sampcount);
+    int time_step = rtp_process(&demod->input.rtp,&pkt.rtp,sampcount);
     if(time_step < 0 || time_step > 192000){
       // Old samples, or too big a jump; drop. Shouldn't happen if sequence number isn't old
-      free(pkt); pkt = NULL;
       continue;
     } else if(time_step > 0){
       // Samples were lost. Inject enough zeroes to keep the sample count and LO phase correct
       // Arbitrary 1 sec limit just to keep things from blowing up
       // Good enough for the occasional lost packet or two
-      // May upset the I/Q DC offset and channel balance estimates, but hey you can't win 'em all
       // Note: we don't use marker bits since we don't suppress silence
       demod->input.samples += time_step;
       for(int i=0;i < time_step; i++){
@@ -100,15 +123,15 @@ void *proc_samples(void *arg){
       }
     }
     // Process individual samples
-    signed short *sp = (signed short *)pkt->data;
-    signed char *cp = (signed char *)pkt->data;
+    signed short *sp = (signed short *)pkt.data;
+    signed char *cp = (signed char *)pkt.data;
     demod->input.samples += sampcount;
 
     while(sampcount--){
 
       float samp_i,samp_q;
 
-      switch(pkt->rtp.type){
+      switch(pkt.rtp.type){
       default: // shuts up lint
       case IQ_PT:
 	samp_i = *sp++ * SCALE16;
@@ -151,7 +174,6 @@ void *proc_samples(void *arg){
 	  demod->sig.n0 = compute_n0(demod); // Happens at startup
       } // Every FFT block
     } // for each sample in I/Q packet
-    free(pkt); pkt = NULL;
   } // end of main loop
 }
 
@@ -324,8 +346,7 @@ double get_shift(struct demod * const demod){
   return demod->tune.shift;
 }
 
-// Load mode table entry presets without actually engaging
-// Return nonzero if demod has changed and must be engaged
+// Load mode table entry presets
 int preset_mode(struct demod * const demod,const char * const mode){
   assert(demod != NULL);
   if(demod == NULL)
@@ -387,29 +408,33 @@ float const compute_n0(struct demod const * const demod){
   struct filter_in const *f = demod->filter.in;
   int const N = f->ilen + f->impulse_length - 1;
   float power_spectrum[N];
+  int low_n = N * demod->filter.low / demod->input.samprate;
+  if(low_n < 0)
+    low_n += N;
+  int high_n = N * demod->filter.high / demod->input.samprate;
+  if(high_n < 0)
+    high_n += N;
   
+  assert(low_n >= 0 && low_n < N);
+  assert(high_n >= 0 && high_n < N);
+
   // Compute smoothed power spectrum
   // There will be some spectral leakage because the convolution FFT we're using is unwindowed
   // Includes both real and imaginary components
-  for(int n=0;n<N;n++)
+  for(int n=high_n+1; n != low_n; n++){
+    if(n == N)
+      n = 0; // Wrap around, neg->pos frequencies
     power_spectrum[n] = cnrmf(f->fdomain[n]);
-
+  }
   // compute average energy outside passband, then iterate computing a new average that
   // omits bins > 3dB above the previous average. This should pick up only the noise
   float avg_n = INFINITY;
   for(int iter=0;iter<2;iter++){
     int noisebins = 0;
     float new_avg_n = 0;
-    for(int n=0;n<N;n++){
-      float f;
-      if(n <= N/2)
-	f = (float)(n * demod->input.samprate) / N;
-      else
-	f = (float)((n-N) * demod->input.samprate) / N;
-      
-      if(f >= demod->filter.low && f <= demod->filter.high)
-	continue; // Avoid passband
-      
+    for(int n=high_n+1; n != low_n;n++){
+      if(n == N) // Wrap around from negative frequencies to positive
+	n = 0;
       float const s = power_spectrum[n];
       if(s < avg_n * 2){ // +3dB threshold
 	new_avg_n += s;

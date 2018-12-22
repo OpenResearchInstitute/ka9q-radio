@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.141 2018/12/20 12:49:05 karn Exp karn $
+// $Id: main.c,v 1.142 2018/12/22 02:27:08 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -154,8 +154,6 @@ int main(int argc,char *argv[]){
   pthread_mutex_init(&demod->doppler.mutex,NULL);
   pthread_mutex_init(&demod->shift.mutex,NULL);
   pthread_mutex_init(&demod->second_LO.mutex,NULL);
-  pthread_mutex_init(&demod->input.qmutex,NULL);
-  pthread_cond_init(&demod->input.qcond,NULL);
   pthread_mutex_init(&demod->demod_mutex,NULL);
   pthread_cond_init(&demod->demod_cond,NULL);
 
@@ -328,8 +326,7 @@ int main(int argc,char *argv[]){
 	     demod->filter.kaiser_beta);
 
   // Start processing I/Q data stream
-  pthread_t rtp_recv_thread,proc_samples_thread;
-  pthread_create(&rtp_recv_thread,NULL,rtp_recv,demod);
+  pthread_t proc_samples_thread;
   pthread_create(&proc_samples_thread,NULL,proc_samples,demod);
 
   // Graceful signal catch
@@ -353,88 +350,6 @@ int main(int argc,char *argv[]){
 }
 
 
-// Thread to read from RTP network socket, remove DC offsets,
-// fix I/Q gain and phase imbalance,
-// Write corrected data to circular buffer, wake up demodulator thread(s)
-// when data is available and when SDR status (frequency, sampling rate) changes
-void *rtp_recv(void *arg){
-  pthread_setname("rtp-rcv");
-  assert(arg != NULL);
-  struct demod * const demod = arg;
-  
-  struct packet *pkt = NULL;
-
-  while(1){
-    // Packet consists of Ethernet, IP and UDP header (already stripped)
-    // then standard Real Time Protocol (RTP), a status header and the PCM
-    // I/Q data. RTP is an IETF standard, so it uses big endian numbers
-    // The status header and I/Q data are *not* standard, so we save time
-    // by using machine byte order (almost certainly little endian).
-    // Note this is a portability problem if this system and the one generating
-    // the data have opposite byte orders. But who's big endian anymore?
-    // Receive I/Q data from front end
-    // Incoming RTP packets
-
-    if(!pkt)
-      pkt = malloc(sizeof(*pkt));
-
-    socklen_t socksize = sizeof(demod->input.data_source_address);
-    int size = recvfrom(demod->input.data_fd,pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&demod->input.data_source_address,&socksize);
-    if(size <= 0){    // ??
-      perror("recvfrom");
-      usleep(50000);
-      continue;
-    }
-    if(size < RTP_MIN_SIZE)
-      continue; // Too small for RTP, ignore
-
-    unsigned char *dp = pkt->content;
-    dp = ntoh_rtp(&pkt->rtp,dp);
-    size -= (dp - pkt->content);
-    
-    if(pkt->rtp.pad){
-      // Remove padding
-      size -= dp[size-1];
-      pkt->rtp.pad = 0;
-    }
-    if(pkt->rtp.type != IQ_PT && pkt->rtp.type != IQ_PT8)
-      continue; // Wrong type
-  
-    // Unlike 'opus', 'packet', 'monitor', etc, 'radio' is nominally an interactive program so we don't keep track of SSRCs.
-    // All digital IF traffic to this multicast group with the correct payload type will be accepted so that we don't have to restart
-    // the single copy of 'radio' when the SDR hardware daemon restarts.
-    // Maybe this should change, but it's hard to know what to do except when running as a non-interactive
-    // background daemon. In that case, a new SSRC in the digital IF stream could fork a new instance of 'radio' with the same parameters,
-    // and it in turn would send demodulated PCM to a new SSRC.
-
-    // Old status information, now obsolete, replaced by TLV streams on port 5006. Ignore for now, eventually it'll go away entirely
-    // These are in host byte order, i.e., *little* endian because we don't have to interoperate with anything else
-    dp += 24;
-    size -= 24;
-
-    pkt->data = dp;
-    pkt->len = size;
-
-    // Insert onto queue sorted by sequence number, wake up thread
-    struct packet *q_prev = NULL;
-    struct packet *qe = NULL;
-    pthread_mutex_lock(&demod->input.qmutex);
-    for(qe = demod->input.queue; qe && pkt->rtp.seq >= qe->rtp.seq; q_prev = qe,qe = qe->next)
-      ;
-
-    pkt->next = qe;
-    if(q_prev)
-      q_prev->next = pkt;
-    else
-      demod->input.queue = pkt; // Front of list
-
-    pkt = NULL;        // force new packet to be allocated
-    // wake up decoder thread
-    pthread_cond_signal(&demod->input.qcond);
-    pthread_mutex_unlock(&demod->input.qmutex);
-  }      
-  return NULL;
-}
 
 
 // RTP control protocol sender task
