@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.140 2018/12/20 11:43:24 karn Exp karn $
+// $Id: main.c,v 1.141 2018/12/20 12:49:05 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -32,13 +32,12 @@
 
 
 // Config constants
-#define MAXPKT 1500 // Maximum bytes of data in incoming I/Q packet
 char Libdir[] = "/usr/local/share/ka9q-radio";
 int DAC_samprate = 48000;
 
 // Command line Parameters with default values
 int Nthreads = 1;
-char Locale[256] = "en_US.UTF-8";
+char const *Locale = "en_US.UTF-8";
 int Mcast_ttl = 1;
 
 // Primary control blocks for downconvert/filter/demodulate and output
@@ -114,9 +113,8 @@ int main(int argc,char *argv[]){
     // The display thread assumes en_US.UTF-8, or anything with a thousands grouping character
     // Otherwise the cursor movements will be wrong
     char const * const cp = getenv("LANG");
-    if(cp != NULL){
-      strlcpy(Locale,cp,sizeof(Locale));
-    }
+    if(cp != NULL)
+      Locale = cp;
   }
   setlocale(LC_ALL,Locale); // Set either the hardwired default or the value of $LANG if it exists
   fprintf(stderr,"General coverage software receiver\n");

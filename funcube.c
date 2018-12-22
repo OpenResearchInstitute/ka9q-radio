@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.69 2018/12/18 18:28:01 karn Exp karn $
+// $Id: funcube.c,v 1.72 2018/12/20 02:30:13 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <syslog.h>
 #include <errno.h>
+#include <getopt.h>
 
 #include "fcd.h"
 #include "sdr.h"
@@ -63,6 +64,7 @@ int const ADC_samprate = 192000;
 float const SCALE16 = 1./SHRT_MAX;
 float const DC_alpha = 1.0e-6;  // high pass filter coefficient for DC offset estimates, per sample
 float const Power_alpha = 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
+int const Bufsize = 16384;
 char const *Rundir = "/run/funcube"; // Where 'status' and 'pid' are created
 
 // Variables set by command line options
@@ -73,11 +75,28 @@ int No_hold_open; // if set, close control between commands
 // 240 samples @ 16 bit stereo = 960 bytes/packet; at 192 kHz, this is 1.25 ms (800 pkt/sec)
 int Blocksize = 240;
 int Device = 0;
-char *Locale;
+char *Locale = "en_US.UTF-8";
 int Daemonize;
 int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by default
 char *Metadata_dest;
 char *Data_dest;
+
+struct option const Options[] =
+  {
+   {"pcm-out", required_argument, NULL, 'D'},
+   {"device", required_argument, NULL, 'I'},
+   {"status-out", required_argument, NULL, 'R'},
+   {"ssrc", required_argument, NULL, 'S'},
+   {"ttl", required_argument, NULL, 'T'},
+   {"blocksize", required_argument, NULL, 'b'},
+   {"daemonize", no_argument, NULL, 'd'},
+   {"frequency", required_argument, NULL, 'f'},
+   {"verbose", no_argument, NULL, 'v'},
+   {"samprate", required_argument, NULL, 'r'},
+   {NULL, 0, NULL, 0},
+  };
+char const Optstring[] = "b:c:dovD:i:LR:S:T:";
+
 
 // Global variables
 struct rtp_state Rtp;
@@ -117,52 +136,49 @@ void errmsg(const char *fmt,...);
 int main(int argc,char *argv[]){
   struct sdrstate * const sdr = &FCD;
 
-  Locale = getenv("LANG");
-  if(Locale == NULL || strlen(Locale) == 0)
-    Locale = "en_US.UTF-8";
+  char *cp;
+  if((cp = getenv("LANG")) != NULL)
+    Locale = cp;
 
   int c;
   int List_audio = 0;
 
-  while((c = getopt(argc,argv,"dc:vl:b:oR:T:LI:S:D:")) != -1){
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
-    case 'd':
-      Daemonize++;
-      Status = NULL;
-      break;
-    case 'D':
-      Data_dest = optarg;
-      break;
-    case 'L':
-      List_audio++;
+    case 'b':
+      Blocksize = strtol(optarg,NULL,0);
       break;
     case 'c':
       sdr->calibration = strtod(optarg,NULL) * 1e-6; // Calibration offset in ppm
       break;
-    case 'R':
-      Metadata_dest = optarg;
+    case 'd':
+      Daemonize++;
+      Status = NULL;
       break;
     case 'o':
       No_hold_open++; // Close USB control port between commands so fcdpp can be used
-      break;
-    case 'I':
-      Device = strtol(optarg,NULL,0);
       break;
     case 'v':
       if(!Daemonize)
 	Status = stderr; // Could be overridden by status file argument below
       break;
-    case 'l':
-      Locale = optarg;
+    case 'D':
+      Data_dest = optarg;
       break;
-    case 'b':
-      Blocksize = strtol(optarg,NULL,0);
+    case 'I':
+      Device = strtol(optarg,NULL,0);
       break;
-    case 'T':
-      Mcast_ttl = strtol(optarg,NULL,0);
+    case 'L':
+      List_audio++;
+      break;
+    case 'R':
+      Metadata_dest = optarg;
       break;
     case 'S':
       Rtp.ssrc = strtol(optarg,NULL,0);
+      break;
+    case 'T':
+      Mcast_ttl = strtol(optarg,NULL,0);
       break;
     default:
     case '?':
@@ -432,7 +448,7 @@ void *ncmd(void *arg){
   }
   int counter = 0;
   while(1){
-    unsigned char buffer[8192];
+    unsigned char buffer[Bufsize];
     memset(buffer,0,sizeof(buffer));
     int length = recv(Nctl_sock,buffer,sizeof(buffer),0); // Waits up to 100 ms for command
     if(sdr->phd == NULL && (sdr->phd = fcdOpen(sdr->sdr_name,sizeof(sdr->sdr_name),Device)) == NULL){

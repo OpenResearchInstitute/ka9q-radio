@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.29 2018/12/20 02:11:34 karn Exp karn $
+// $Id: hackrf.c,v 1.30 2018/12/20 02:30:06 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <syslog.h>
 #include <sys/stat.h>
+#include <getopt.h>
 
 #include "sdr.h"
 #include "misc.h"
@@ -59,6 +60,7 @@ int Out_samprate = 192000;
 int Decimate = 64;
 int Log_decimate = 6; // Computed from Decimate
 const float SCALE8 = 1./127.;   // Scale 8-bit samples to unity range floats
+const int Bufsize = 16384;
 float const DC_alpha = 1.0e-7;  // high pass filter coefficient for DC offset estimates, per sample
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
 char *Rundir = "/run/hackrf"; // Where 'status' and 'pid' get written
@@ -75,7 +77,27 @@ int Daemonize = 0;
 int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by default
 char *Data_dest = "239.1.6.10";
 char *Metadata_dest = "239.1.6.1"; // Default for testing
+double Frequency = 146e6;
+
 struct sockaddr_storage Output_metadata_dest_address;
+
+struct option Options[] =
+  {
+   {"pcm-out", required_argument, NULL, 'D'},
+   {"device", required_argument, NULL, 'I'},
+   {"status-out", required_argument, NULL, 'R'},
+   {"ssrc", required_argument, NULL, 'S'},
+   {"ttl", required_argument, NULL, 'T'},
+   {"blocksize", required_argument, NULL, 'b'},
+   {"decimate", required_argument, NULL, 'c'},
+   {"daemonize", no_argument, NULL, 'd'},
+   {"frequency", required_argument, NULL, 'f'},
+   {"verbose", no_argument, NULL, 'v'},
+   {"samprate", required_argument, NULL, 'r'},
+   {NULL, 0, NULL, 0},
+  };
+char Optstring[] = "DIRSTbdfvr";
+
 
 // Global variables
 struct rtp_state Rtp;
@@ -125,11 +147,35 @@ int main(int argc,char *argv[]){
     Locale = "en_US.UTF-8";
 
   int c;
-  while((c = getopt(argc,argv,"D:I:dvl:b:R:T:o:r:S:")) != -1){
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
+    case 'D':
+      Data_dest = optarg;
+      break;
+    case 'I':
+      Device = strtol(optarg,NULL,0);
+      break;
+    case 'R':
+      Metadata_dest = optarg;
+      break;
+    case 'S':
+      Rtp.ssrc = strtol(optarg,NULL,0);
+      break;
+    case 'T':
+      Mcast_ttl = strtol(optarg,NULL,0);
+      break;
+    case 'b':
+      Blocksize = strtol(optarg,NULL,0);
+      break;
+    case 'c':
+      Decimate = strtol(optarg,NULL,0);
+      break;
     case 'd':
       Daemonize++;
       Status = NULL;
+      break;
+    case 'f':
+      Frequency = strtod(optarg,NULL);
       break;
     case 'o':
       Offset = strtol(optarg,NULL,0);
@@ -137,30 +183,9 @@ int main(int argc,char *argv[]){
     case 'r':
       Out_samprate = strtol(optarg,NULL,0);
       break;
-    case 'R':
-      Metadata_dest = optarg;
-      break;
-    case 'D':
-      Data_dest = optarg;
-      break;
-    case 'I':
-      Device = strtol(optarg,NULL,0);
-      break;
     case 'v':
       if(!Daemonize)
 	Status = stderr;
-      break;
-    case 'l':
-      Locale = optarg;
-      break;
-    case 'b':
-      Blocksize = strtol(optarg,NULL,0);
-      break;
-    case 'T':
-      Mcast_ttl = strtol(optarg,NULL,0);
-      break;
-    case 'S':
-      Rtp.ssrc = strtol(optarg,NULL,0);
       break;
     default:
     case '?':
@@ -169,7 +194,6 @@ int main(int argc,char *argv[]){
     }
   }
   Description = argv[optind];
-  setlocale(LC_ALL,Locale);
   if(Daemonize){
     openlog("hackrf",LOG_PID,LOG_DAEMON);
 
@@ -269,7 +293,7 @@ int main(int argc,char *argv[]){
   ret = hackrf_set_vga_gain(sdr->device,sdr->status.if_gain);
   assert(ret == HACKRF_SUCCESS);
 
-  uint64_t intfreq = sdr->status.frequency = 146000000;
+  uint64_t intfreq = sdr->status.frequency = Frequency;
   
   intfreq += Offset * ADC_samprate / 4; // Offset tune high by +Fs/4
 
@@ -490,7 +514,7 @@ void *ncmd(void *arg){
 
   int counter = 0;
   while(1){
-    unsigned char buffer[8192];
+    unsigned char buffer[Bufsize];
     memset(buffer,0,sizeof(buffer));
     struct timeval tv;
     tv.tv_sec = 0;

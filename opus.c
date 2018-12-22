@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.26 2018/10/13 23:39:47 karn Exp karn $
+// $Id: opus.c,v 1.27 2018/12/02 09:16:45 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -45,7 +45,7 @@ struct session {
 
 
 // Global config variables
-int const Bufsize = 8192;     // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
+int const Bufsize = 16384;     // Maximum samples/words per RTP packet - must be bigger than Ethernet MTU
 int const Samprate = 48000;   // Too hard to handle other sample rates right now
                               // Opus will notice the actual audio bandwidth, so there's no real cost to this
 
@@ -378,7 +378,7 @@ int send_samples(struct session *sp,float left,float right){
     rtp_hdr.timestamp = sp->rtp_state_out.timestamp;
     sp->rtp_state_out.timestamp += Opus_frame_size; // Always increase timestamp
     
-    unsigned char outbuffer[16384]; // fix this to a more reasonable number
+    unsigned char outbuffer[Bufsize];
     unsigned char *dp = outbuffer;
     dp = hton_rtp(dp,&rtp_hdr);
     size = opus_encode_float(sp->opus,sp->audio_buffer,Opus_frame_size,dp,sizeof(outbuffer) - (dp - outbuffer));

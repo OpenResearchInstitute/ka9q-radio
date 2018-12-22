@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.24 2018/11/27 07:34:32 karn Exp karn $
+// $Id: packet.c,v 1.25 2018/12/02 09:16:45 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -39,7 +39,7 @@ struct session {
 // Config constants
 #define MAX_MCAST 20          // Maximum number of multicast addresses
 float const SCALE = 1./32768;
-int const Bufsize = 2048;
+int const Bufsize = 16384;
 int const AN = 2048; // Should be power of 2 for FFT efficiency
 int const AL = 1000; // 25 bit times
 //int const AM = AN - AL + 1; // should be >= Samppbit, i.e., samprate / bitrate
@@ -148,7 +148,7 @@ int main(int argc,char *argv[]){
       if(input_fd[fd_index] == -1 || !FD_ISSET(input_fd[fd_index],&fdset))
 	continue;
 
-      unsigned char buffer[16384]; // Fix this
+      unsigned char buffer[Bufsize];
       socklen_t socksize = sizeof(sender);
       int size = recvfrom(input_fd[fd_index],buffer,sizeof(buffer),0,&sender,&socksize);
       if(size == -1){
