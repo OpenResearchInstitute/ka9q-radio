@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.142 2018/12/22 02:27:08 karn Exp karn $
+// $Id: main.c,v 1.143 2018/12/22 10:12:04 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -39,6 +39,7 @@ int DAC_samprate = 48000;
 int Nthreads = 1;
 char const *Locale = "en_US.UTF-8";
 int Mcast_ttl = 1;
+int Blocktime = 20; // 20 milliseconds
 
 // Primary control blocks for downconvert/filter/demodulate and output
 // Note: initialized to all zeroes, like all global variables
@@ -62,12 +63,11 @@ struct option Options[] =
    {"flat", no_argument, NULL, 'F'},
    {"agc-hangtime", required_argument, NULL, 'H'},
    {"status-in", required_argument, NULL, 'I'},
-   {"blocksize", required_argument, NULL, 'L'},
-   {"filter-length", required_argument, NULL, 'M'},
    {"status-out", required_argument, NULL, 'R'},
    {"ssrc", required_argument, NULL, 'S'},
    {"ttl", required_argument, NULL, 'T'},
    {"agc-recover", required_argument, NULL, 'a'},
+   {"block-time", required_argument, NULL, 'b'},
    {"channels", required_argument, NULL, 'c'},
    {"env", no_argument, NULL, 'e'},
    {"frequency", required_argument, NULL, 'f'},
@@ -84,7 +84,7 @@ struct option Options[] =
    {NULL, 0, NULL, 0},
   };
 
-char Optstring[] = "D:FI:L:M:R:S:T:a:c:e:f:h:ik:l:m:pqr:s:t:";
+char Optstring[] = "D:FI:R:S:T:a:b:c:e:f:h:ik:l:m:pqr:s:t:";
 
 
 // The main program sets up the demodulator parameter defaults,
@@ -133,8 +133,6 @@ int main(int argc,char *argv[]){
   demod->output.samprate = DAC_samprate; // currently 48 kHz, hard to change
   demod->filter.interpolate = 1;
   // Set receiver defaults, can be overridden by command line args
-  demod->filter.L = 3840;      // Number of samples in buffer: FFT length = L + M - 1
-  demod->filter.M = 4352+1;    // Length of filter impulse response
   demod->filter.kaiser_beta = 3.0; // Reasonable compromise
   demod->agc.headroom = pow(10.,-15./20); // -15 dB
   demod->sdr.imbalance = 1; // 0 dB
@@ -249,6 +247,9 @@ int main(int argc,char *argv[]){
       demod->agc.recovery_rate = fabs(strtof(optarg,NULL)) / demod->output.samprate;
       demod->agc.recovery_rate = powf(10.,demod->agc.recovery_rate/20.);
       break;
+    case 'b': // FFT convolver block duration
+      Blocktime = strtol(optarg,NULL,0);
+      break;
     case 'c': // Output channels
       demod->output.channels = strtol(optarg,NULL,0);
       break;
@@ -298,12 +299,6 @@ int main(int argc,char *argv[]){
     case 'H':
       demod->agc.hangtime = strtod(optarg,NULL) * demod->output.samprate;
       break;
-    case 'L':
-      demod->filter.L = strtol(optarg,NULL,0);
-      break;
-    case 'M':
-      demod->filter.M = strtol(optarg,NULL,0);
-      break;
     case 'I': case 'R': case 'D': case 'S': case 'T':
       break;
     default:
@@ -316,8 +311,17 @@ int main(int argc,char *argv[]){
   if(demod->output.rtcp_fd != -1)
     pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
 
+
   // Create filter now that we know the parameters
-  // Blocksize really should be computed from demod->filter.L and decimate
+  // FFT and filter sizes now computed from specified block duration and sample rate
+  // L = data block size
+  // M = filter impulse response duration
+  // N = FFT size (power of 2) = L + M - 1
+  demod->filter.L = demod->input.samprate * Blocktime / 1000; // Blocktime is in milliseconds
+  // FFT size N is next power of 2 larger than 2*L, so M = N - L + 1
+  int N = 1 << ((int)(log2(2.0 * demod->filter.L) + 1));
+  demod->filter.M = N - demod->filter.L + 1;
+
   demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
   demod->filter.out = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,demod->filter.isb ? CROSS_CONJ : COMPLEX);
   set_filter(demod->filter.out,
