@@ -407,24 +407,24 @@ float const compute_n0(struct demod const * const demod){
   
   struct filter_in const *f = demod->filter.in;
   int const N = f->ilen + f->impulse_length - 1;
-  float power_spectrum[N];
-  int low_n = N * demod->filter.low / demod->input.samprate;
-  if(low_n < 0)
-    low_n += N;
-  int high_n = N * demod->filter.high / demod->input.samprate;
-  if(high_n < 0)
-    high_n += N;
-  
-  assert(low_n >= 0 && low_n < N);
-  assert(high_n >= 0 && high_n < N);
 
+  int low_n = (N * demod->filter.low) / demod->input.samprate;
+  int high_n = (N * demod->filter.high) / demod->input.samprate;
+  int bincount = N - (high_n - low_n);
+  if(bincount < 0 || bincount > N){
+    return 0; // Can this happen?
+  }
   // Compute smoothed power spectrum
   // There will be some spectral leakage because the convolution FFT we're using is unwindowed
   // Includes both real and imaginary components
-  for(int n=high_n+1; n != low_n; n++){
-    if(n == N)
-      n = 0; // Wrap around, neg->pos frequencies
-    power_spectrum[n] = cnrmf(f->fdomain[n]);
+  float power_spectrum[bincount];
+  int in = high_n + 1;
+  for(int n=0; n < bincount; n++){ // modulo operation without division
+    if(in >= N)
+      in -= N;
+    else if(in < 0)
+      in += N;
+    power_spectrum[n] = cnrmf(f->fdomain[in++]);
   }
   // compute average energy outside passband, then iterate computing a new average that
   // omits bins > 3dB above the previous average. This should pick up only the noise
@@ -432,18 +432,15 @@ float const compute_n0(struct demod const * const demod){
   for(int iter=0;iter<2;iter++){
     int noisebins = 0;
     float new_avg_n = 0;
-    for(int n=high_n+1; n != low_n;n++){
-      if(n == N) // Wrap around from negative frequencies to positive
-	n = 0;
+    for(int n=0; n < bincount; n++){
       float const s = power_spectrum[n];
       if(s < avg_n * 2){ // +3dB threshold
 	new_avg_n += s;
 	noisebins++;
       }
     }
-    new_avg_n /= noisebins;
-    avg_n = new_avg_n;
+    avg_n = new_avg_n / noisebins;
   }
   // return noise power per Hz, normalized to 0dBFS
-  return avg_n / (N*demod->input.samprate);
+  return avg_n / ((float)N*demod->input.samprate); // integer product can overflow 32 bits for large N and samprate
 }
