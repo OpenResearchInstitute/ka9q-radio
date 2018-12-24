@@ -69,7 +69,7 @@ int send_stereo_output(struct demod * const demod,float const * buffer,int size)
       memcpy(dp,PCM_buf,2*chunk);
       dp += 2*chunk;
       int r = send(demod->output.data_fd,&packet,dp - packet,0);
-      demod->output.samples += (dp - packet);
+      demod->output.samples += chunk/2; // Count stereo samples
       if(r < 0){
 	perror("pcm: send");
 	break;
@@ -122,7 +122,7 @@ int send_mono_output(struct demod * const demod,float const * buffer,int size){
       dp += 2 * chunk;
 
       int r = send(demod->output.data_fd,&packet,dp - packet,0);
-      demod->output.samples += (dp - packet);
+      demod->output.samples += chunk;
       if(r < 0){
 	perror("pcm: send");
 	break;
