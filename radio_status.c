@@ -221,6 +221,7 @@ void send_radio_status(struct demod *demod,int full){
     break;
   }
   encode_float(&bp,OUTPUT_LEVEL,power2dB(demod->output.level));
+  encode_int64(&bp,OUTPUT_SAMPLES,demod->output.samples);
 
   encode_eol(&bp);
   

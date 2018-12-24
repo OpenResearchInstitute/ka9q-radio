@@ -1,4 +1,4 @@
-// $Id: dump.c,v 1.6 2018/12/19 04:49:50 karn Exp karn $
+// $Id: dump.c,v 1.8 2018/12/20 02:30:38 karn Exp karn $
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
@@ -236,6 +236,9 @@ void dump_metadata(unsigned char *buffer,int length){
       break;
     case DIRECT_CONVERSION:
       printf(" direct conv %d;",(int)decode_int(cp,optlen));
+      break;
+    case OUTPUT_SAMPLES:
+      printf(" output samp %'llu",(long long unsigned)decode_int(cp,optlen));
       break;
     default:
       break;

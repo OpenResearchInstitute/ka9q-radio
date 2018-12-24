@@ -89,6 +89,7 @@ enum status_type {
 
   GAIN,     // AM, Linear only
   OUTPUT_LEVEL,     // All modes
+  OUTPUT_SAMPLES,
 };
 
 

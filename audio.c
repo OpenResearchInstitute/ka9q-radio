@@ -1,4 +1,4 @@
-// $Id: audio.c,v 1.87 2018/12/16 10:58:36 karn Exp karn $
+// $Id: audio.c,v 1.88 2018/12/20 06:57:49 karn Exp karn $
 // Audio multicast routines for KA9Q SDR receiver
 // Handles linear 16-bit PCM, mono and stereo
 // Copyright 2017 Phil Karn, KA9Q
@@ -31,7 +31,7 @@ static short const scaleclip(float const x){
 // Send 'size' stereo samples, each in a pair of floats
 int send_stereo_output(struct demod * const demod,float const * buffer,int size){
 
-  demod->output.samples += size;
+
 
   struct rtp_header rtp;
   memset(&rtp,0,sizeof(rtp));
@@ -69,6 +69,7 @@ int send_stereo_output(struct demod * const demod,float const * buffer,int size)
       memcpy(dp,PCM_buf,2*chunk);
       dp += 2*chunk;
       int r = send(demod->output.data_fd,&packet,dp - packet,0);
+      demod->output.samples += (dp - packet);
       if(r < 0){
 	perror("pcm: send");
 	break;
@@ -82,8 +83,6 @@ int send_stereo_output(struct demod * const demod,float const * buffer,int size)
 
 // Send 'size' mono samples, each in a float
 int send_mono_output(struct demod * const demod,float const * buffer,int size){
-
-  demod->output.samples += size;
 
   struct rtp_header rtp;
   memset(&rtp,0,sizeof(rtp));
@@ -102,7 +101,6 @@ int send_mono_output(struct demod * const demod,float const * buffer,int size){
       PCM_buf[i] = htons(scaleclip(samp));
       not_silent |= PCM_buf[i];
     }      
-    //    not_silent = 1; // Disable silence-squelching !!!!!
     // If packet is all zeroes, don't send it but still increase the timestamp
     rtp.timestamp = demod->output.rtp.timestamp;
     demod->output.rtp.timestamp += chunk; // Increase by sample count
@@ -124,6 +122,7 @@ int send_mono_output(struct demod * const demod,float const * buffer,int size){
       dp += 2 * chunk;
 
       int r = send(demod->output.data_fd,&packet,dp - packet,0);
+      demod->output.samples += (dp - packet);
       if(r < 0){
 	perror("pcm: send");
 	break;
