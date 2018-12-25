@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.86 2018/11/22 09:57:13 karn Exp karn $
+// $Id: monitor.c,v 1.87 2018/12/02 09:16:45 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -130,7 +130,7 @@ int main(int argc,char * const argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"R:S:I:vLqu:")) != EOF){
+  while((c = getopt(argc,argv,"R:I:vLqu:")) != EOF){
     switch(c){
     case 'L':
       List_audio++;
@@ -158,6 +158,14 @@ int main(int argc,char * const argv[]){
       exit(1);
     }
   }
+  // Also accept groups without -I option
+  for(int i=optind; i < argc; i++){
+    if(Nfds == MAX_MCAST){
+      fprintf(stderr,"Too many multicast addresses; max %d\n",MAX_MCAST);
+    } else 
+      Mcast_address_text[Nfds++] = argv[i];
+  }
+
   PaError r = Pa_Initialize();
   if(r != paNoError){
     fprintf(stderr,"Portaudio error: %s\n",Pa_GetErrorText(r));
@@ -176,7 +184,7 @@ int main(int argc,char * const argv[]){
     exit(0);
   }
   if(Nfds == 0){
-    fprintf(stderr,"At least one -I option required\n");
+    fprintf(stderr,"At least one multicast group required\n");
     exit(1);
   }
 
@@ -209,7 +217,6 @@ int main(int argc,char * const argv[]){
   signal(SIGINT,closedown);
   signal(SIGKILL,closedown);
   signal(SIGQUIT,closedown);
-
   signal(SIGTERM,closedown);
   signal(SIGHUP,closedown);
   signal(SIGPIPE,SIG_IGN);
@@ -457,7 +464,6 @@ void *decode_task(void *arg){
       sp->start_timestamp = pkt->rtp.timestamp; // Resynch as if new stream
       sp->timestamp_upper = 0;
       sp->playout = PLAYOUT;
-      sp->reset = 0;
     }
     // Find where to write in circular output buffer
     // Handle wraparound in timestamp (unlikely but possible in long-lived stream)
@@ -600,7 +606,6 @@ void *display(void *arg){
 	continue;
       if(strlen(sp->src_addr) == 0){
 	getnameinfo((struct sockaddr *)&sp->sender,sizeof(sp->sender),sp->src_addr,sizeof(sp->src_addr),
-		    //		    sp->src_port,sizeof(sp->src_port),NI_NOFQDN|NI_DGRAM|NI_NUMERICHOST);
 		    sp->src_port,sizeof(sp->src_port),NI_NOFQDN|NI_DGRAM);
       }      
       char temp[strlen(sp->src_addr)+strlen(sp->src_port)+strlen(sp->dest) + 20]; // Allow some room
@@ -680,10 +685,10 @@ void *display(void *arg){
 	Current = Current->prev;
       break;
     case KEY_UP:
-      Current->gain *= 1.122018454; // 1 dB
+      Current->gain *= 1.122018454; // +1 dB
       break;
     case KEY_DOWN:
-      Current->gain /= 1.122018454;
+      Current->gain /= 1.122018454; // -1 dB
       break;
     case KEY_LEFT:
       Current->pan = max(Current->pan - .01,-1.0);
@@ -694,7 +699,6 @@ void *display(void *arg){
     case 'm': // Mute current session
       if(Current)
 	Current->muted = 1;
-
       break;
     case 'u': // Unmute current session
       if(Current)
@@ -704,18 +708,15 @@ void *display(void *arg){
       // Reset playout queue
       if(Current)
 	Current->reset = 1;
-
       break;
     break;
     case 'd':
-      {
-	if(Current){
-	  Current->terminate = 1;
-	  pthread_cancel(Current->task);
-	  pthread_join(Current->task,NULL);
-	  close_session(Current);
-	  Current = Session;
-	}
+      if(Current){
+	Current->terminate = 1;
+	pthread_cancel(Current->task);
+	pthread_join(Current->task,NULL);
+	close_session(Current);
+	Current = Session;
       }
       break;
     case '\f':  // Screen repaint (formfeed, aka control-L)

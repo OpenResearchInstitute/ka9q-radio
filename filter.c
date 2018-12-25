@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.31 2018/12/05 09:07:18 karn Exp karn $
+// $Id: filter.c,v 1.32 2018/12/10 11:53:31 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -171,7 +171,6 @@ int execute_filter_input(struct filter_in * const master){
   return 0;
 }
 
-
 int execute_filter_output(struct filter_out * const slave){
   assert(slave != NULL);
   if(slave == NULL)
@@ -203,17 +202,16 @@ int execute_filter_output(struct filter_out * const slave){
   assert(slave->response != NULL);
 
   // Positive frequencies up to half the nyquist rate are the same for all types
-  for(int p=0; p <= N_dec/2; p++){
+  for(int p=0; p <= N_dec/2; p++)
     slave->f_fdomain[p] = slave->response[p] * master->fdomain[p];
-  }
+
   if(master->in_type == REAL){
     if(slave->out_type != REAL){
       // For a purely real input, F[-f] = conj(F[+f])
       assert(malloc_usable_size(slave->f_fdomain) >= N_dec * sizeof(*slave->f_fdomain));
       int p,dn;
-      for(p=1,dn=N_dec-1; dn > N_dec/2; p++,dn--){
+      for(p=1,dn=N_dec-1; dn > N_dec/2; p++,dn--)
 	slave->f_fdomain[dn] = slave->response[dn] * conjf(master->fdomain[p]);
-      }
     } // out_type == REAL already handled
   } else { // in_type == COMPLEX
     if(slave->out_type != REAL){
@@ -222,16 +220,14 @@ int execute_filter_output(struct filter_out * const slave){
       assert(malloc_usable_size(slave->response) >= N_dec * sizeof(*slave->response));
       assert(malloc_usable_size(slave->f_fdomain) >= N_dec * sizeof(*slave->f_fdomain));
 
-      for(int n=N-1,dn=N_dec-1; dn > N_dec/2;n--,dn--){
+      for(int n=N-1,dn=N_dec-1; dn > N_dec/2;n--,dn--)
 	slave->f_fdomain[dn] = slave->response[dn] * master->fdomain[n];
-      }
     } else {
       // Real output; fold conjugates of negative frequencies into positive to force pure real result
       assert(malloc_usable_size(master->fdomain) >= N * sizeof(*master->fdomain));
       assert(malloc_usable_size(slave->response) >= N_dec * sizeof(*slave->response));
-      for(int n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--){
+      for(int n=N-1,p=1,dn=N_dec-1; p < N_dec/2; p++,n--,dn--)
 	slave->f_fdomain[p] += conjf(slave->response[dn] * master->fdomain[n]);
-      }
     }
   }
   pthread_mutex_unlock(&slave->response_mutex); // release response[]

@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.40 2018/12/16 10:59:00 karn Exp karn $
+// $Id: linear.c,v 1.41 2018/12/20 05:25:42 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -237,7 +237,7 @@ void *demod_linear(void *arg){
       if(isnan(demod->sig.foffset))
 	demod->sig.foffset = feedback + delta_f;
       else
-	demod->sig.foffset += 0.001 * (feedback + delta_f - demod->sig.foffset);
+	demod->sig.foffset += 0.01 * (feedback + delta_f - demod->sig.foffset);
       if(noise != 0){
 	demod->sig.snr = (signal / noise) - 1; // S/N as power ratio; meaningful only in coherent modes
 	if(demod->sig.snr < 0)
