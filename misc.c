@@ -1,4 +1,4 @@
-// $Id: misc.c,v 1.27 2018/08/04 22:18:49 karn Exp karn $
+// $Id: misc.c,v 1.28 2018/12/16 04:30:05 karn Exp karn $
 // Miscellaneous low-level routines, mostly time-related
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -124,6 +124,28 @@ double const parse_frequency(const char *s){
   return f;
 }
 
+// Return smallest integer greater than N with no factors > 7
+// Useful for determining efficient FFT sizes
+uint32_t nextfastfft(uint32_t n){
+
+  // Do all internal arithmetic in 64 bits to avoid wraparound
+  uint64_t result = 4288306050; // == 2 * 3^6 * 5^2 * 7^6, largest integer < 2^32 with small factors (biggest possible 32-bit result)
+  if(n >= result)
+    return 0; // Error
+  for(uint64_t f7=1; f7 < result; f7 *= 7){
+    for(uint64_t f5=f7; f5 < result; f5 *= 5){
+      for(uint64_t f3=f5; f3 < result; f3 *= 3){
+	for(uint64_t f2=f3; f2 < result; f2 *= 2){
+	  if(f2 > n){
+	    result = f2;
+	    break;
+	  }
+	}
+      }
+    }
+  }
+  return result;
+}
 
 
 #if __APPLE__

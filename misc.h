@@ -1,8 +1,10 @@
-// $Id: misc.h,v 1.6 2018/07/06 06:08:45 karn Exp karn $
+// $Id: misc.h,v 1.7 2018/08/04 22:19:11 karn Exp karn $
 // Miscellaneous constants, macros and function prototypes
 // Copyright 2018 Phil Karn, KA9Q
 #ifndef _MISC_H
 #define _MISC_H 1
+
+#include <stdint.h>
 
 int pipefill(int,void *,const int);
 void chomp(char *);
@@ -27,6 +29,8 @@ void chomp(char *);
 char *lltime(long long t);
 extern char *Months[12];
 
+
+uint32_t nextfastfft(uint32_t n);
 
 // I *hate* this sort of pointless, stupid, gratuitous incompatibility that
 // makes a lot of code impossible to read and debug

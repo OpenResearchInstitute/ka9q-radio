@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.143 2018/12/22 10:12:04 karn Exp karn $
+// $Id: main.c,v 1.144 2018/12/23 23:06:20 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -63,6 +63,7 @@ struct option Options[] =
    {"flat", no_argument, NULL, 'F'},
    {"agc-hangtime", required_argument, NULL, 'H'},
    {"status-in", required_argument, NULL, 'I'},
+   {"fft-size", required_argument, NULL, 'N'},
    {"status-out", required_argument, NULL, 'R'},
    {"ssrc", required_argument, NULL, 'S'},
    {"ttl", required_argument, NULL, 'T'},
@@ -84,7 +85,7 @@ struct option Options[] =
    {NULL, 0, NULL, 0},
   };
 
-char Optstring[] = "D:FI:R:S:T:a:b:c:e:f:h:ik:l:m:pqr:s:t:";
+char Optstring[] = "D:FI:N:R:S:T:a:b:c:e:f:h:ik:l:m:pqr:s:t:";
 
 
 // The main program sets up the demodulator parameter defaults,
@@ -240,6 +241,7 @@ int main(int argc,char *argv[]){
 
   // Go back and re-read rest of args
   optind = 1;
+  int N = -1;
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
     case 'a': // AGC recovery rate, dB/s
@@ -301,6 +303,9 @@ int main(int argc,char *argv[]){
       break;
     case 'I': case 'R': case 'D': case 'S': case 'T':
       break;
+    case 'N':
+      N = strtol(optarg,NULL,0);
+      break;
     default:
       fprintf(stderr,"option %c unknown\n",c);
       break;
@@ -318,8 +323,9 @@ int main(int argc,char *argv[]){
   // M = filter impulse response duration
   // N = FFT size (power of 2) = L + M - 1
   demod->filter.L = demod->input.samprate * Blocktime / 1000; // Blocktime is in milliseconds
-  // FFT size N is next power of 2 larger than 2*L, so M = N - L + 1
-  int N = 1 << ((int)(log2(2.0 * demod->filter.L) + 1));
+  // Make filter impulse response = blocksize + 1
+  if(N <= 0)
+    N = nextfastfft(2*demod->filter.L - 1);
   demod->filter.M = N - demod->filter.L + 1;
 
   demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
