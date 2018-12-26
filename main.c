@@ -321,11 +321,11 @@ int main(int argc,char *argv[]){
   // FFT and filter sizes now computed from specified block duration and sample rate
   // L = data block size
   // M = filter impulse response duration
-  // N = FFT size (power of 2) = L + M - 1
+  // N = FFT size = L + M - 1
   demod->filter.L = demod->input.samprate * Blocktime / 1000; // Blocktime is in milliseconds
-  // Make filter impulse response = blocksize + 1
+  // Make FIR order equal to blocksize
   if(N <= 0)
-    N = nextfastfft(2*demod->filter.L - 1);
+    N = nextfastfft(2*demod->filter.L - 1); // Factors of 2, 5 and 7
   demod->filter.M = N - demod->filter.L + 1;
 
   demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
@@ -369,7 +369,6 @@ void *rtcp_send(void *arg){
     pthread_exit(NULL);
 
   pthread_setname("rtcp");
-  //  fprintf(stderr,"hello from rtcp_send\n");
   while(1){
 
     if(demod->output.rtp.ssrc == 0) // Wait until it's set by output RTP subsystem
