@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.87 2018/12/02 09:16:45 karn Exp karn $
+// $Id: monitor.c,v 1.88 2018/12/25 12:00:23 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -455,16 +455,6 @@ void *decode_task(void *arg){
 
       assert(left_delay >= 0 && right_delay >= 0);
     }
-
-    if(pkt->rtp.marker || sp->reset){
-      if(sp->opus)
-	opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder
-      sp->reset = 0;
-      sp->start_rptr = Rptr;
-      sp->start_timestamp = pkt->rtp.timestamp; // Resynch as if new stream
-      sp->timestamp_upper = 0;
-      sp->playout = PLAYOUT;
-    }
     // Find where to write in circular output buffer
     // Handle wraparound in timestamp (unlikely but possible in long-lived stream)
     // This can still fail if there's an outage more than 2^31 samples long without a mark (seems unlikely)
@@ -472,10 +462,22 @@ void *decode_task(void *arg){
       sp->timestamp_upper += (1LL << 32);
 
     sp->wptr = sp->start_rptr + sp->timestamp_upper + pkt->rtp.timestamp - sp->start_timestamp + sp->playout;
-    if(sp->wptr < Rptr){
+
+    if(pkt->rtp.marker || sp->reset || sp->wptr > Rptr + BUFFERSIZE){
+      // Reset at beginning of talk spurt or if system has been suspended
+      if(sp->opus)
+	opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder
+      sp->reset = 0;
+      sp->start_rptr = Rptr;
+      sp->start_timestamp = pkt->rtp.timestamp; // Resynch as if new stream
+      sp->timestamp_upper = 0;
+      //      sp->playout = PLAYOUT;
+      sp->playout = 0;
+      sp->wptr = Rptr + sp->playout;
+    } else if(sp->wptr < Rptr){
       sp->late++;
-      sp->playout += SAMPRATE/1000; // 1 ms
-      goto drop;
+      sp->playout += Rptr - sp->wptr;
+      sp->wptr = Rptr;
     }
 
     unsigned int left = sp->wptr + left_delay;
@@ -526,7 +528,6 @@ void *decode_task(void *arg){
       sp->frame_size = 0;
       break;
     }
-  drop:;
     free(pkt); pkt = NULL;
   }
   pthread_cleanup_pop(1);

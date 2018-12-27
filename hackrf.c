@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.30 2018/12/20 02:30:06 karn Exp karn $
+// $Id: hackrf.c,v 1.31 2018/12/22 02:27:08 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -64,7 +64,7 @@ const int Bufsize = 16384;
 float const DC_alpha = 1.0e-7;  // high pass filter coefficient for DC offset estimates, per sample
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
 char *Rundir = "/run/hackrf"; // Where 'status' and 'pid' get written
-float Filter_atten = 1;
+float Filter_atten;
 int const stage_threshold = 8; // point at which to switch to filter f8
 #define BUFFERSIZE  (1<<19) // Upcalls seem to be 256KB; don't make too big or we may blow out of the cache
 
@@ -115,11 +115,12 @@ pthread_t Ncmd_thread;
 FILE *Status;
 char *Status_filename;
 char *Pid_filename;
-complex float Sampbuffer[BUFFERSIZE];
+float Sampbuffer_i[BUFFERSIZE];
+float Sampbuffer_q[BUFFERSIZE];
 pthread_mutex_t Buf_mutex;
 pthread_cond_t Buf_cond;
 int Samp_wp;
-int Samp_rp;
+
 
 uint64_t Commands;
 struct state State[256];
@@ -237,8 +238,6 @@ int main(int argc,char *argv[]){
     } else {
       setlinebuf(Status);
     }
-  } else {
-    Status = stderr; // Write status to stderr when running in foreground
   }
   
   ADC_samprate = Decimate * Out_samprate;
@@ -247,7 +246,17 @@ int main(int argc,char *argv[]){
     errmsg("Decimation ratios must currently be a power of 2\n");
     exit(1);
   }
-  Filter_atten = powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
+  // Fold in scaling from float to short integer
+  Filter_atten = 32767. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
+
+  if(Decimate == 1){
+    errmsg("No spectrum shift without decimation");
+    Offset = 0; // No reason to offset when not decimating
+  }
+  if(2*sizeof(short) * Blocksize + 200 > Bufsize){
+    Blocksize = (Bufsize - 200) / (2 * sizeof(short));
+    errmsg("Blocksize reduced to %d",Blocksize);
+  }
 
   // Set up RTP output socket
   Rtp_sock = setup_mcast(Data_dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
@@ -325,7 +334,7 @@ int main(int argc,char *argv[]){
   if(Status)
     pthread_create(&Display_thread,NULL,display,&HackCD);
 
-  int rotate_phase = 0;
+  pthread_setname("hrf-decim");
 
   // Decimation filter states
   struct hb15_state hb15_state_real[Log_decimate];
@@ -361,6 +370,8 @@ int main(int argc,char *argv[]){
   // Timestamp is in nanoseconds for futureproofing, but time of day is only available in microsec
   sdr->status.timestamp = ((tp.tv_sec - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000LL + tp.tv_usec) * 1000LL;
 
+  int samp_rp = 0;
+
   while(1){
     struct rtp_header rtp;
     memset(&rtp,0,sizeof(rtp));
@@ -370,95 +381,70 @@ int main(int argc,char *argv[]){
     rtp.seq = Rtp.seq++;
     rtp.timestamp = Rtp.timestamp;
 
-    unsigned char buffer[200+2*Blocksize*sizeof(short)];
+    unsigned char buffer[Bufsize];
     unsigned char *dp = buffer;
 
     dp = hton_rtp(dp,&rtp);
     dp = hton_status(dp,&sdr->status);
 
-    // Wait for enough to be available
+    float output_energy = 0;
+    // NB: We assume that Decimate divides into BUFFERSIZE
+    // They will since both are powers of 2
+    // Wait for enough to be available to send a full packet
     pthread_mutex_lock(&Buf_mutex);
     while(1){
-      int avail = (Samp_wp - Samp_rp) & (BUFFERSIZE-1);
-      if(avail >= Blocksize*Decimate)
+      int avail = (Samp_wp - samp_rp) & (BUFFERSIZE-1);
+      if(avail >= Decimate * Blocksize)
 	break;
       pthread_cond_wait(&Buf_cond,&Buf_mutex);
     }
     pthread_mutex_unlock(&Buf_mutex);
+    short *sp = (short *)dp;
     
-    float workblock_real[Decimate*Blocksize];    // Hold input to first decimator, half used on each filter call
-    float workblock_imag[Decimate*Blocksize];
+    int remain = Blocksize;
+    while(remain > 0){
+      int chunk = remain;
+      // Don't straddle the end of the circular sample buffer
+      if(samp_rp + chunk * Decimate > BUFFERSIZE)
+	chunk = (BUFFERSIZE - samp_rp) / Decimate;
 
-    // Load first stage with corrected samples
-    int loop_limit = Decimate * Blocksize;
-    for(int i=0; i<loop_limit; i++){
-      complex float samp = Sampbuffer[Samp_rp++];
-      float samp_i = crealf(samp);
-      float samp_q = cimagf(samp);
-      Samp_rp &= (BUFFERSIZE-1); // Assume even buffer size
+      // Real channel in-place decimation
+      // First stages can use simple, fast filter; later ones use slower filter
+      // each stage is half the length of the previous one, and puts its output in the first half of its input buffer
+      // so the final outputs are in the first 'chunk' elements of the buffer
+      float *ip = &Sampbuffer_i[samp_rp];
+      int j;
+      for(j=Log_decimate-1;j>=stage_threshold;j--)
+	hb3_block(&hb3state_real[j], ip, ip, chunk<<j);
 
-      // Increase frequency by Fs/4 to compensate for tuner being high by Fs/4
-      switch(rotate_phase){
-      default:
-      case 0:
-	workblock_real[i] = samp_i;
-	workblock_imag[i] = samp_q;
-	break;
-      case 1:
-	workblock_real[i] = -samp_q;
-	workblock_imag[i] = samp_i;
-	break;
-      case 2:
-	workblock_real[i] = -samp_i;
-	workblock_imag[i] = -samp_q;
-	break;
-      case 3:
-	workblock_real[i] = samp_q;
-	workblock_imag[i] = -samp_i;
-	break;
+      for(; j>=0;j--)
+	hb15_block(&hb15_state_real[j], ip, ip, chunk<<j);
+
+      // Imaginary channel decimation
+      float *qp = &Sampbuffer_q[samp_rp];
+      for(j=Log_decimate-1;j>=stage_threshold;j--)
+	hb3_block(&hb3state_imag[j], qp, qp, chunk<<j);
+
+      for(; j>=0;j--)
+	hb15_block(&hb15_state_imag[j], qp, qp, chunk<<j);
+
+      // Interleave real and imaginary samples
+      for(int i=0;i < chunk; i++){
+	float s = *ip++ * Filter_atten;
+	output_energy += s*s;
+	*sp++ = (short)s; // Can this overflow an int?
+	
+	s = *qp++ * Filter_atten;
+	output_energy += s*s;
+	*sp++ = (short)s;
       }
-      rotate_phase += Offset;
-      rotate_phase &= 3; // Modulo 4
+      samp_rp += chunk * Decimate;
+      samp_rp &= (BUFFERSIZE-1);
+      remain -= chunk;
     }
-
-    // Real channel decimation
-    // First stages can use simple, fast filter; later ones use slower filter
-    int j;
-    for(j=Log_decimate-1;j>=stage_threshold;j--)
-      hb3_block(&hb3state_real[j],workblock_real,workblock_real,(1<<j)*Blocksize);
-
-    for(; j>=0;j--)
-      hb15_block(&hb15_state_real[j],workblock_real,workblock_real,(1<<j)*Blocksize);
-
-    float output_energy = 0;
-    signed short *up = (signed short *)dp;
-    loop_limit = Blocksize;
-    for(int j=0;j<loop_limit;j++){
-      float s = workblock_real[j] * Filter_atten;
-      output_energy += s*s;
-      *up++ = (short)round(32767 * s);
-      up++;
-    }
-
-    // Imaginary channel decimation
-    for(j=Log_decimate-1;j>=stage_threshold;j--)
-      hb3_block(&hb3state_imag[j],workblock_imag,workblock_imag,(1<<j)*Blocksize);
-
-    for(; j>=0;j--)
-      hb15_block(&hb15_state_imag[j],workblock_imag,workblock_imag,(1<<j)*Blocksize);
-
-    // Interleave imaginary samples following real
-    up = (signed short *)dp;
-    loop_limit = Blocksize;
-    for(int j=0;j<loop_limit;j++){
-      float s = workblock_imag[j] * Filter_atten;
-      output_energy += s*s;
-      up++;
-      *up++ = (short)round(32767 * s);
-    }
-
-    sdr->out_power = output_energy / Blocksize;
-    dp = (unsigned char *)up;
+    dp = (unsigned char *)sp;
+    // Remove scaling factor in power just once per block
+    sdr->out_power = output_energy / (32767.0 * 32767.0 * Blocksize);
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
       errmsg("send: %s",strerror(errno));
       // If we're sending to a unicast address without a listener, we'll get ECONNREFUSED
@@ -703,6 +689,12 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
 }
 
 
+int rotate_phase = 0;
+
+complex float rotate_phasor = 1;
+
+
+
 // Callback called with incoming receiver data from A/D
 int rx_callback(hackrf_transfer *transfer){
 
@@ -710,29 +702,26 @@ int rx_callback(hackrf_transfer *transfer){
 
   int remain = transfer->valid_length; // Count of individual samples; divide by 2 to get complex samples
   int samples = remain / 2;            // Complex samples
-  unsigned char *dp = transfer->buffer;
+  char *dp = (char *)transfer->buffer;
 
-  complex float samp_sum = 0;
+  complex float samp,samp_sum = 0;
   float i_energy=0,q_energy=0;
   float dotprod = 0;                           // sum of I*Q, for phase balance
   float rate_factor = 1./(ADC_samprate * Power_alpha);
 
   while(remain > 0){
-    complex float samp;
-    int isamp_i = (char)*dp++;
-    int isamp_q = (char)*dp++;
+    __real__ samp = SCALE8 * (float)*dp++;
+    __imag__ samp = SCALE8 * (float)*dp++;
     remain -= 2;
 
-    if(isamp_q == -128){
+    if(__imag__ samp < -1){
       sdr->clips++;
-      isamp_q = -127;
+      __imag__ samp = -1;
     }
-    if(isamp_i == -128){
+    if(__real__ samp < -1){
       sdr->clips++;
-      isamp_i = -127;
+      __real__ samp = -1;
     }
-    samp = CMPLXF(isamp_i,isamp_q) * SCALE8; // -1.0 to +1.0
-
     samp_sum += samp;
 
     // remove DC offset (which can be fractional)
@@ -753,10 +742,41 @@ int rx_callback(hackrf_transfer *transfer){
     // Correct phase
     __imag__ samp = secphi * cimagf(samp) - tanphi * crealf(samp);
     
-    Sampbuffer[Samp_wp] = samp;
+#if 0
+    // On Atom CPU, seems slightly slower than swapping/flipping code below
+    samp *= rotate_phasor;
+    rotate_phasor *= _Complex_I;
+    Sampbuffer_i[Samp_wp] = __real__ samp;
+    Sampbuffer_q[Samp_wp] = __imag__ samp;
+
+#else
+    // Optionally increase frequency by Fs/4 to compensate for tuner being high by Fs/4
+    switch(rotate_phase){
+    default:
+    case 0:
+      Sampbuffer_i[Samp_wp] = __real__ samp;
+      Sampbuffer_q[Samp_wp] = __imag__ samp;
+      break;
+    case 1:
+      Sampbuffer_i[Samp_wp] = - __imag__ samp;
+      Sampbuffer_q[Samp_wp] = __real__ samp;
+      break;
+    case 2:
+      Sampbuffer_i[Samp_wp] = - __real__ samp;
+      Sampbuffer_q[Samp_wp] = - __imag__ samp;
+      break;
+    case 3:
+      Sampbuffer_i[Samp_wp] = __imag__ samp;
+      Sampbuffer_q[Samp_wp] = - __real__ samp;
+      break;
+    }
+    rotate_phase += Offset;
+    rotate_phase &= 3; // Modulo 4
+#endif
+
     Samp_wp = (Samp_wp + 1) & (BUFFERSIZE-1);
   }
-  pthread_cond_signal(&Buf_cond); // Wake him up only after we're done
+  pthread_cond_broadcast(&Buf_cond); // Wake him up only after we're done
   // Update every block
   // estimates of DC offset, signal powers and phase error
   sdr->DC += DC_alpha * (samp_sum - samples*sdr->DC);
