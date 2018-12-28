@@ -1,4 +1,4 @@
-// $Id: multicast.h,v 1.21 2018/09/08 06:06:21 karn Exp karn $
+// $Id: multicast.h,v 1.22 2018/12/02 09:16:45 karn Exp karn $
 // Multicast and RTP functions, constants and structures
 // Not every RTP module uses these yet, they need to be revised
 // Copyright 2018, Phil Karn, KA9Q
@@ -16,7 +16,8 @@
 #define RTP_VERS 2
 #define RTP_MARKER 0x80  // Marker flag in mpt field
 
-#define IQ_PT (97)    // NON-standard payload type for my raw I/Q stream - 16 bit version
+#define IQ_PT12 (95)  // NON-standard payload for 12-bit packed integers, BIG ENDIAN
+#define IQ_PT (97)    // NON-standard payload type for my raw I/Q stream - 16 bit little endian
 #define IQ_PT8 (98)   // NON-standard payload type for my raw I/Q stream - 8 bit version
 #define AX25_PT (96)  // NON-standard paylaod type for my raw AX.25 frames
 #define PCM_MONO_PT (11)
