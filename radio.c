@@ -127,54 +127,62 @@ void *proc_samples(void *arg){
 	}
       }
     }
-    // Process individual samples
-    signed short *sp = (signed short *)dp;
+    // Convert and scale samples to internal float-32 format
     demod->input.samples += sampcount;
+    complex float sampbuf[sampcount];
 
-    while(sampcount--){
-
-      float samp_i,samp_q;
-
-      switch(pkt.rtp.type){
-      default: // shuts up lint
-      case IQ_PT12:
-	// two 12-bit signed integers packed big-endian into 3 bytes
-	samp_i = SCALE16 * (short)(((dp[0] << 8) | dp[1]) & 0xfff0);
-	samp_q = SCALE16 * (short)(((dp[1] << 8) | dp[2]) << 4);
-	dp += 3;
-	break;
-      case PCM_STEREO_PT:
-	// Two 16-bit signed integers, BIG ENDIAN (network order)
-	samp_i = SCALE16 * ntohs(*sp++);
-	samp_q = SCALE16 * ntohs(*sp++);
-	break;
-      case IQ_PT:
-	// Two 16-bit signed integers LITTLE ENDIAN
-	samp_i = SCALE16 * *sp++;
-	samp_q = SCALE16 * *sp++;
-	break;
-      case IQ_PT8:
-	// Two signed 8-bit integers
-	samp_i = SCALE8 * *(char *)dp++;
-	samp_q = SCALE8 * *(char *)dp++;
-	break;
+    switch(pkt.rtp.type){
+    default: // shuts up lint
+    case IQ_PT12:      // two 12-bit signed integers packed big-endian into 3 bytes
+      {
+	float gain = SCALE16 * demod->sdr.gain_factor;
+	for(int i=0; i<sampcount; i++){
+	  __real__ sampbuf[i] = gain * (short)(((dp[0] << 8) | dp[1]) & 0xfff0);
+	  __imag__ sampbuf[i] = gain * (short)(((dp[1] << 8) | dp[2]) << 4);
+	  dp += 3;
+	}
       }
-      // Scale down according to analog gain from SDR front end
-      complex float samp = CMPLXF(samp_i,samp_q) * demod->sdr.gain_factor;
+      break;
+    case PCM_STEREO_PT:      // Two 16-bit signed integers, BIG ENDIAN (network order)
+      {
+	signed short *sp = (signed short *)dp;
+	float gain = SCALE16 * demod->sdr.gain_factor;
+	for(int i=0; i<sampcount; i++){
+	  __real__ sampbuf[i] = gain * ntohs(*sp++);
+	  __imag__ sampbuf[i] = gain * ntohs(*sp++);
+	}
+      }
+      break;
+    case IQ_PT:      // Two 16-bit signed integers LITTLE ENDIAN
+      {
+	signed short *sp = (signed short *)dp;
+	float gain = SCALE16 * demod->sdr.gain_factor;
+	for(int i=0; i<sampcount; i++){
+	  __real__ sampbuf[i] = gain * *sp++;
+	  __imag__ sampbuf[i] = gain * *sp++;
+	}
+      }
+      break;
+    case IQ_PT8:      // Two signed 8-bit integers
+      {
+	float gain = SCALE8 * demod->sdr.gain_factor;
+	for(int i=0; i<sampcount; i++){
+	  __real__ sampbuf[i] = gain * *(char *)dp++;
+	  __imag__ sampbuf[i] = gain * *(char *)dp++;
+	}
+      }
+      break;
+    }
+    // Apply Doppler if active
+    if(demod->doppler.freq != 0){
+      for(int i=0; i < sampcount; i++){
+	sampbuf[i] *= step_osc(&demod->doppler);
+      }
+    }
+
+    for(int i=0; i < sampcount; i++){
+      complex float samp = sampbuf[i] * step_osc(&demod->second_LO);      // Mix down
       block_energy += cnrmf(samp);
-
-#if 0
-      // Experimental notch filter
-      if(demod->nf)
-	samp = notch(demod->nf,samp);
-#endif
-
-      // Apply 2nd LO
-      samp *= step_osc(&demod->second_LO);
-
-      // Apply Doppler if active
-      if(demod->doppler.freq != 0)
-	samp *= step_osc(&demod->doppler);
 
       // Accumulate in filter input buffer
       demod->filter.in->input.c[in_cnt++] = samp;
