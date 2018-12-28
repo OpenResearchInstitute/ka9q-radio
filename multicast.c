@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.36 2018/12/07 10:15:49 karn Exp karn $
+// $Id: multicast.c,v 1.37 2018/12/09 12:12:20 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -235,38 +235,26 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
 // Convert RTP header from network (wire) big-endian format to internal host structure
 // Written to be insensitive to host byte order and C structure layout and padding
 // Use of unsigned formats is important to avoid unwanted sign extension
-unsigned char *ntoh_rtp(struct rtp_header *rtp,unsigned char *data){
-  unsigned char *dp = data;
+void  *ntoh_rtp(struct rtp_header *rtp,void  *data){
+  uint32_t *dp = data;
 
-  rtp->version = *dp >> 6; // What should we do if it's not 2??
-  rtp->pad = (*dp >> 5) & 1;
-  rtp->extension = (*dp >> 4) & 1;
-  rtp->cc = *dp & 0xf;
-  dp++;
+  uint32_t w = ntohl(*dp++);
+  rtp->version = w >> 30;
+  rtp->pad = (w >> 29) & 1;
+  rtp->extension = (w >> 28) & 1;
+  rtp->cc = (w >> 24) & 0xf;
+  rtp->marker = (w >> 23) & 1;
+  rtp->type = (w >> 16) & 0x7f;
+  rtp->seq = w & 0xffff;
 
-  rtp->marker = (*dp >> 7) & 1;
-  rtp->type = *dp & 0x7f;
-  dp++;
+  rtp->timestamp = ntohl(*dp++);
+  rtp->ssrc = ntohl(*dp++);
 
-  rtp->seq = get16(dp);
-  dp += 2;
-
-  rtp->timestamp = get32(dp);
-  dp += 4;
-  
-  rtp->ssrc = get32(dp);
-  dp += 4;
-
-  for(int i=0; i<rtp->cc; i++){
-    rtp->csrc[i] = get32(dp);
-    dp += 4;
-  }
+  for(int i=0; i<rtp->cc; i++)
+    rtp->csrc[i] = ntohl(*dp++);
 
   if(rtp->extension){
-    // Ignore any extension, but skip over it
-    dp += 2; // skip over type
-    uint16_t ext_len = 4 + get16(dp); // grab length
-    dp += 2;
+    int ext_len = ntohl(*dp++) & 0xffff;    // Ignore any extension, but skip over it
     dp += ext_len;
   }
   return dp;
@@ -275,18 +263,17 @@ unsigned char *ntoh_rtp(struct rtp_header *rtp,unsigned char *data){
 
 // Convert RTP header from internal host structure to network (wire) big-endian format
 // Written to be insensitive to host byte order and C structure layout and padding
-unsigned char *hton_rtp(unsigned char *data, struct rtp_header *rtp){
-  rtp->cc &= 0xf; // Force it to be legal
-  rtp->type &= 0x7f;
-  *data++ = (RTP_VERS << 6) | (rtp->pad << 5) | (rtp->extension << 4) | rtp->cc; // Force version 2
-  *data++ = (rtp->marker << 7) | rtp->type;
-  data = put16(data,rtp->seq);
-  data = put32(data,rtp->timestamp);
-  data = put32(data,rtp->ssrc);
+void *hton_rtp(void *data, struct rtp_header *rtp){
+  uint32_t *dp = data;
+
+  *dp++ = htonl(RTP_VERS << 30 | rtp->pad << 29 | rtp->extension << 28 | (rtp->cc & 0xf) << 24 | rtp->marker << 23
+		| (rtp->type & 0x7f) << 16 | rtp->seq);
+  *dp++ = htonl(rtp->timestamp);
+  *dp++ = htonl(rtp->ssrc);
   for(int i=0; i < rtp->cc; i++)
-    data = put32(data,rtp->csrc[i]);
-  
-  return data;
+    *dp++ = htonl(rtp->csrc[i]);
+
+  return dp;
 }
 
 
