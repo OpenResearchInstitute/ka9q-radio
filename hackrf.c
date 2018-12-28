@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.32 2018/12/27 10:28:23 karn Exp karn $
+// $Id: hackrf.c,v 1.33 2018/12/28 07:34:52 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -69,7 +69,7 @@ int const stage_threshold = 8; // point at which to switch to filter f8
 #define BUFFERSIZE  (1<<19) // Upcalls seem to be 256KB; don't make too big or we may blow out of the cache
 
 // Variables set by command line options
-int Blocksize = 350;
+int Blocksize = 350; // Safe for 16-bit samples at 1500 byte MTU
 int Device = 0;      // Which of several to use
 char *Locale;
 int Offset=1;     // Default to offset high by +Fs/4 downconvert in software to avoid DC
@@ -78,6 +78,7 @@ int Mcast_ttl = 1; // Don't send fast IQ streams beyond the local network by def
 char *Data_dest = "239.1.6.10";
 char *Metadata_dest = "239.1.6.1"; // Default for testing
 double Frequency = 146e6;
+int Rtp_type = IQ_PT; // Default to old 16-bit little-endian with metadata
 
 struct sockaddr_storage Output_metadata_dest_address;
 
@@ -94,9 +95,10 @@ struct option Options[] =
    {"frequency", required_argument, NULL, 'f'},
    {"verbose", no_argument, NULL, 'v'},
    {"samprate", required_argument, NULL, 'r'},
+   {"rtp-type", required_argument, NULL, 't'},
    {NULL, 0, NULL, 0},
   };
-char Optstring[] = "DIRSTbdfvr";
+char Optstring[] = "D:I:R:S:T:b:df:vr:t:";
 
 
 // Global variables
@@ -184,6 +186,25 @@ int main(int argc,char *argv[]){
     case 'r':
       Out_samprate = strtol(optarg,NULL,0);
       break;
+    case 't':
+      {
+	int t = strtol(optarg,NULL,0);
+	switch(t){
+	case 12:
+	  Rtp_type = IQ_PT12;
+	  break;
+	case 16:
+	  Rtp_type = IQ_PT;
+	  break;
+	case 8:
+	  Rtp_type = IQ_PT8;
+	  break;
+	default:
+	  fprintf(stderr,"Valid arguments to -t are 8, 12 or 16\n");
+	  break;
+	}
+      }
+      break;
     case 'v':
       if(!Daemonize)
 	Status = stderr;
@@ -247,7 +268,14 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   // Fold in scaling from float to short integer
-  Filter_atten = 32767. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
+  switch(Rtp_type){
+  case IQ_PT8:
+    Filter_atten = 127. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
+    break;
+  default:
+    Filter_atten = 32767. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
+    break;
+  }
 
   if(Decimate == 1){
     errmsg("No spectrum shift without decimation");
@@ -376,11 +404,7 @@ int main(int argc,char *argv[]){
     struct rtp_header rtp;
     memset(&rtp,0,sizeof(rtp));
     rtp.version = RTP_VERS;
-#if 0
-    rtp.type = IQ_PT;
-#else
-    rtp.type = IQ_PT12;
-#endif 
+    rtp.type = Rtp_type;
     rtp.ssrc = Rtp.ssrc;
     rtp.seq = Rtp.seq++;
     rtp.timestamp = Rtp.timestamp;
@@ -389,9 +413,9 @@ int main(int argc,char *argv[]){
     unsigned char *dp = buffer;
 
     dp = hton_rtp(dp,&rtp);
-#if 0
-    dp = hton_status(dp,&sdr->status);
-#endif
+    if(Rtp_type == IQ_PT)
+      dp = hton_status(dp,&sdr->status); // old metadata header, will disappear someday
+
 
     float output_energy = 0;
     // NB: We assume that Decimate divides into BUFFERSIZE
@@ -405,7 +429,7 @@ int main(int argc,char *argv[]){
       pthread_cond_wait(&Buf_cond,&Buf_mutex);
     }
     pthread_mutex_unlock(&Buf_mutex);
-    short *sp = (short *)dp;
+
     
     int remain = Blocksize;
     while(remain > 0){
@@ -434,30 +458,60 @@ int main(int argc,char *argv[]){
       for(; j>=0;j--)
 	hb15_block(&hb15_state_imag[j], qp, qp, chunk<<j);
 
-      // Interleave real and imaginary samples
-      for(int i=0;i < chunk; i++){
-	short si = *ip++ * Filter_atten;
-	output_energy += si*si;
-	short sq = *qp++ * Filter_atten;
-	output_energy += sq*sq;
-
-	dp[0] = si >> 8;
-	dp[1] = (si & 0xf0) | ((sq >> 12) & 0xf);
-	dp[2] = sq >> 4;
-	dp += 3;
-
-#if 0
-	*sp++ = si; // Can this overflow an int?
-	*sp++ = sq;
-#endif
+      switch(Rtp_type){
+      case IQ_PT:	  // 16-bit integers, little endian with metadata; will eventually become PCM_STEREO (10)
+	{
+	  short *sp = (short *)dp;
+	  for(int i=0;i < chunk; i++){
+	    float s = *ip++ * Filter_atten;
+	    output_energy += s*s;
+	    *sp++ = s; // Clip?
+	    
+	    s = *qp++ * Filter_atten;
+	    output_energy += s*s;
+	    *sp++ = s; // Clip?
+	  }
+	  dp = (unsigned char *)sp;
+	}
+	break;
+      case IQ_PT12:	  // 12-bit integers, packed big-endian, no metadata header
+	{
+	  for(int i=0;i < chunk; i++){
+	    float s = *ip++ * Filter_atten;
+	    output_energy += s*s;
+	    short si = s; // Clip?
+	    
+	    s = *qp++ * Filter_atten;
+	    output_energy += s*s;
+	    short sq = s; // Clip?
+	    
+	    dp[0] = si >> 8;
+	    dp[1] = (si & 0xf0) | ((sq >> 12) & 0xf);
+	    dp[2] = sq >> 4;
+	    dp += 3;
+	  }
+	}
+	break;
+      case IQ_PT8:	  // 8 bit integers, no metadata
+	{
+	  char *cp = (char *)dp;
+	  for(int i=0;i < chunk; i++){
+	    float s = *ip++ * Filter_atten;
+	    output_energy += s*s;
+	    *cp++ = (char)s; // Clip?
+	    
+	    s = *qp++ * Filter_atten;
+	    output_energy += s*s;
+	    *cp++ = (char)s; // Clip?
+	  }
+	  dp = (unsigned char *)cp;
+	}
+	break;
       }
       samp_rp += chunk * Decimate;
       samp_rp &= (BUFFERSIZE-1);
       remain -= chunk;
     }
-#if 0
-    dp = (unsigned char *)sp;
-#endif
     // Remove scaling factor in power just once per block
     sdr->out_power = output_energy / (32767.0 * 32767.0 * Blocksize);
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
