@@ -513,7 +513,15 @@ int main(int argc,char *argv[]){
       remain -= chunk;
     }
     // Remove scaling factor in power just once per block
-    sdr->out_power = output_energy / (32767.0 * 32767.0 * Blocksize);
+    switch(Rtp_type){
+    case IQ_PT8:
+      sdr->out_power = output_energy / (127.0 * 127.0 * Blocksize);
+      break;
+    default:
+      sdr->out_power = output_energy / (32767.0 * 32767.0 * Blocksize);
+      break;
+    }
+
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
       errmsg("send: %s",strerror(errno));
       // If we're sending to a unicast address without a listener, we'll get ECONNREFUSED
@@ -742,7 +750,7 @@ void send_hackrf_status(struct sdrstate *sdr,int full){
   encode_float(&bp,LOW_EDGE,-0.47 * Out_samprate); // Should look at the actual filter curves
   encode_float(&bp,HIGH_EDGE,+0.47 * Out_samprate);
   
-  encode_float(&bp,OUTPUT_LEVEL,power2dB(sdr->in_power)); // Should be post-decimation
+  encode_float(&bp,OUTPUT_LEVEL,power2dB(sdr->out_power));
   
   float analog_gain = sdr->status.mixer_gain + sdr->status.if_gain + sdr->status.lna_gain;
   encode_float(&bp,GAIN,analog_gain);
