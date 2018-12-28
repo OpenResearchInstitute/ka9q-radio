@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.118 2018/12/20 12:49:14 karn Exp karn $
+// $Id: radio.c,v 1.120 2018/12/23 00:34:23 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -73,26 +73,31 @@ void *proc_samples(void *arg){
       size -= dp[size-1];
       pkt.rtp.pad = 0;
     }
-    // Old status information, now obsolete, replaced by TLV streams on port 5006. Ignore for now, eventually it'll go away entirely
-    // These are in host byte order, i.e., *little* endian because we don't have to interoperate with anything else
-    dp += 24;
-    size -= 24;
-
-    pkt.data = dp;
-    pkt.len = size;
-
     int sampcount;
 
     switch(pkt.rtp.type){
-    case IQ_PT:
-      sampcount = pkt.len / (2 * sizeof(signed short));
+    case IQ_PT: // Little-endian 16 bit ints with old metadata header
+      dp += 24;
+      size -= 24;
+      sampcount = size / (2 * sizeof(signed short));
       break;
-    case IQ_PT8:
-      sampcount = pkt.len / (2 * sizeof(signed char));
+    case IQ_PT8: // 8-bit ints with old metadata header
+      dp += 24;
+      size -= 24;
+      sampcount = size / (2 * sizeof(signed char));
+      break;
+    case PCM_STEREO_PT: // Big-endian 16 bits, no metadata header
+      sampcount = size / (2 * sizeof(signed short));
+      break;
+    case IQ_PT12:       // Big endian packed 12 bits, no metadata
+      sampcount = size / 3;
       break;
     default:
-      continue; // Wrong type; ignore
+      continue; // Unsupported type; ignore
     }
+    pkt.data = dp;
+    pkt.len = size;
+
     if(pkt.rtp.ssrc != demod->input.rtp.ssrc){
       // SSRC changed; reset sample count.
       // rtp_process will reset packet count
@@ -123,8 +128,7 @@ void *proc_samples(void *arg){
       }
     }
     // Process individual samples
-    signed short *sp = (signed short *)pkt.data;
-    signed char *cp = (signed char *)pkt.data;
+    signed short *sp = (signed short *)dp;
     demod->input.samples += sampcount;
 
     while(sampcount--){
@@ -133,13 +137,26 @@ void *proc_samples(void *arg){
 
       switch(pkt.rtp.type){
       default: // shuts up lint
+      case IQ_PT12:
+	// two 12-bit signed integers packed big-endian into 3 bytes
+	samp_i = SCALE16 * (short)(((dp[0] << 8) | dp[1]) & 0xfff0);
+	samp_q = SCALE16 * (short)(((dp[1] << 8) | dp[2]) << 4);
+	dp += 3;
+	break;
+      case PCM_STEREO_PT:
+	// Two 16-bit signed integers, BIG ENDIAN (network order)
+	samp_i = SCALE16 * ntohs(*sp++);
+	samp_q = SCALE16 * ntohs(*sp++);
+	break;
       case IQ_PT:
-	samp_i = *sp++ * SCALE16;
-	samp_q = *sp++ * SCALE16;
+	// Two 16-bit signed integers LITTLE ENDIAN
+	samp_i = SCALE16 * *sp++;
+	samp_q = SCALE16 * *sp++;
 	break;
       case IQ_PT8:
-	samp_i = *cp++ * SCALE8;
-	samp_q = *cp++ * SCALE8;
+	// Two signed 8-bit integers
+	samp_i = SCALE8 * *(char *)dp++;
+	samp_q = SCALE8 * *(char *)dp++;
 	break;
       }
       // Scale down according to analog gain from SDR front end
@@ -154,7 +171,7 @@ void *proc_samples(void *arg){
 
       // Apply 2nd LO
       samp *= step_osc(&demod->second_LO);
-      
+
       // Apply Doppler if active
       if(demod->doppler.freq != 0)
 	samp *= step_osc(&demod->doppler);

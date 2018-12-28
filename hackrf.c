@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.31 2018/12/22 02:27:08 karn Exp karn $
+// $Id: hackrf.c,v 1.32 2018/12/27 10:28:23 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -376,7 +376,11 @@ int main(int argc,char *argv[]){
     struct rtp_header rtp;
     memset(&rtp,0,sizeof(rtp));
     rtp.version = RTP_VERS;
+#if 0
     rtp.type = IQ_PT;
+#else
+    rtp.type = IQ_PT12;
+#endif 
     rtp.ssrc = Rtp.ssrc;
     rtp.seq = Rtp.seq++;
     rtp.timestamp = Rtp.timestamp;
@@ -385,7 +389,9 @@ int main(int argc,char *argv[]){
     unsigned char *dp = buffer;
 
     dp = hton_rtp(dp,&rtp);
+#if 0
     dp = hton_status(dp,&sdr->status);
+#endif
 
     float output_energy = 0;
     // NB: We assume that Decimate divides into BUFFERSIZE
@@ -430,19 +436,28 @@ int main(int argc,char *argv[]){
 
       // Interleave real and imaginary samples
       for(int i=0;i < chunk; i++){
-	float s = *ip++ * Filter_atten;
-	output_energy += s*s;
-	*sp++ = (short)s; // Can this overflow an int?
-	
-	s = *qp++ * Filter_atten;
-	output_energy += s*s;
-	*sp++ = (short)s;
+	short si = *ip++ * Filter_atten;
+	output_energy += si*si;
+	short sq = *qp++ * Filter_atten;
+	output_energy += sq*sq;
+
+	dp[0] = si >> 8;
+	dp[1] = (si & 0xf0) | ((sq >> 12) & 0xf);
+	dp[2] = sq >> 4;
+	dp += 3;
+
+#if 0
+	*sp++ = si; // Can this overflow an int?
+	*sp++ = sq;
+#endif
       }
       samp_rp += chunk * Decimate;
       samp_rp &= (BUFFERSIZE-1);
       remain -= chunk;
     }
+#if 0
     dp = (unsigned char *)sp;
+#endif
     // Remove scaling factor in power just once per block
     sdr->out_power = output_energy / (32767.0 * 32767.0 * Blocksize);
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
