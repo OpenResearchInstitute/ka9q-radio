@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.63 2018/12/10 11:54:23 karn Exp karn $
+// $Id: fm.c,v 1.64 2018/12/20 05:25:42 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -71,7 +71,7 @@ void *demod_fm(void *arg){
     pthread_mutex_unlock(&demod->demod_mutex);
 
     // Wait for next block of frequency domain data
-    execute_filter_output(filter);
+    execute_filter_output(filter,0);
     // Compute bb_power below along with average amplitude to save time
     //    demod->sig.bb_power = cpower(filter->output.c,filter->olen);
 
@@ -159,7 +159,7 @@ void *demod_fm(void *arg){
 
     // in FM flat mode there is no audio filter, and audio is already in samples[]
     if(!demod->opt.flat){
-      execute_filter_output(audio_filter);
+      execute_filter_output(audio_filter,0);
       assert(audio_master->ilen == audio_filter->olen);
       output_level = 0; // Level of filter output instead of input
       for(int n=0; n < audio_filter->olen; n++){
@@ -218,7 +218,7 @@ void *pltask(void *arg){
   int fft_ptr = 0;
   int last_fft = 0;
   while(1){
-    execute_filter_output(pl_filter);
+    execute_filter_output(pl_filter,0);
  
     // Determine PL tone frequency with a long FFT operating at the low PL filter sample rate
     int remain = pl_filter->olen;

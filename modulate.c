@@ -1,4 +1,4 @@
-// $Id: modulate.c,v 1.13 2018/08/29 01:34:15 karn Exp karn $
+// $Id: modulate.c,v 1.14 2018/12/05 09:07:18 karn Exp karn $
 // Simple I/Q AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
 #include <assert.h>
@@ -145,7 +145,7 @@ int main(int argc,char *argv[]){
     }
     // Form baseband signal (analytic for SSB, pure real for AM/DSB)
     execute_filter_input(filter_in);
-    execute_filter_output(filter_out);
+    execute_filter_output(filter_out,0);
     
     // Add carrier, if present
     if(carrier != 0){

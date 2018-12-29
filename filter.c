@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.32 2018/12/10 11:53:31 karn Exp karn $
+// $Id: filter.c,v 1.33 2018/12/25 12:00:23 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -171,7 +171,7 @@ int execute_filter_input(struct filter_in * const master){
   return 0;
 }
 
-int execute_filter_output(struct filter_out * const slave){
+int execute_filter_output(struct filter_out * const slave,int rotate){
   assert(slave != NULL);
   if(slave == NULL)
     return -1;
@@ -200,6 +200,75 @@ int execute_filter_output(struct filter_out * const slave){
   pthread_mutex_lock(&slave->response_mutex); // Protect access to response[] array
   assert(malloc_usable_size(slave->response) >= (N_dec/2+1) * sizeof(*slave->response));
   assert(slave->response != NULL);
+
+#define TEST 1
+#if TEST
+  // Experimental frequency rotating filter for eventual use in a demodulator channel bank
+
+  if(master->in_type != REAL && slave->out_type != REAL){
+    // Complex -> complex
+    int p = N_dec/2 + 1;
+    int m = N - N_dec/2 + 1 + rotate;
+    if(m >= N)
+      m -= N;
+    if(m < 0)
+      m += N;
+	      
+    for(int i=0; i < N_dec; i++){
+      slave->f_fdomain[p] = slave->response[p] * master->fdomain[m];
+      if(++p == N_dec)
+	p = 0;
+      if(++m == N)
+	m = 0;
+    }
+  } else if(master->in_type == REAL && slave->out_type == REAL){
+    // Real -> real
+    int m = rotate;
+    if(m < 0)
+      m += N;
+    for(int p=0; p <= N_dec/2; p++){
+      slave->f_fdomain[p] = slave->response[p] * master->fdomain[m];
+      if(++m == N)
+	m = 0;
+    }
+  } else if(master->in_type != REAL && slave->out_type == REAL){
+    // Complex -> real
+    int m = rotate;
+    if(m < 0)
+      m += N;
+    
+    slave->f_fdomain[0] = slave->response[0] * master->fdomain[m]; // DC
+    if(++m == N)
+      m = 0;
+
+    for(int p=1; p < N_dec/2; p++){
+      slave->f_fdomain[p] = slave->response[p] * master->fdomain[m]
+	+ conjf(slave->response[N_dec-p] * master->fdomain[m]);
+      if(++m == N)
+	m = 0;
+    }
+    // The sign of the Nyquist frequency is ambiguous, but we consider it positive
+    slave->f_fdomain[N_dec/2] = slave->response[N_dec/2] * master->fdomain[m];
+  } else if(master->in_type == REAL && slave->out_type != REAL){
+    // Real->complex 
+    int m = rotate;
+    if(m < 0)
+      m += N;
+    slave->f_fdomain[0] = slave->response[0] * master->fdomain[m]; // DC
+    if(++m == N)
+      m = 0;
+    
+    for(int p=1; ; p++){
+      slave->f_fdomain[p] = slave->response[p] * master->fdomain[m];
+      if(p == N_dec/2) // Do nyquist frequency only once
+	break;
+      slave->f_fdomain[N_dec-p] = slave->response[N_dec-p] * conj(master->fdomain[m]);
+      if(++m == N)
+	m = 0;
+    }
+  }
+
+#else
 
   // Positive frequencies up to half the nyquist rate are the same for all types
   for(int p=0; p <= N_dec/2; p++)
@@ -230,6 +299,7 @@ int execute_filter_output(struct filter_out * const slave){
 	slave->f_fdomain[p] += conjf(slave->response[dn] * master->fdomain[n]);
     }
   }
+#endif
   pthread_mutex_unlock(&slave->response_mutex); // release response[]
 
   if(slave->out_type == CROSS_CONJ){

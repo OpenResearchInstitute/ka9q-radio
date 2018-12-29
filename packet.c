@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.25 2018/12/02 09:16:45 karn Exp karn $
+// $Id: packet.c,v 1.26 2018/12/22 02:27:08 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -300,7 +300,7 @@ void *decode_task(void *arg){
   int ones = 0;
 
   while(1){
-    execute_filter_output(filter);    // Blocks until data appears
+    execute_filter_output(filter,0);    // Blocks until data appears
 
     for(int n=0; n<filter->olen; n++){
 

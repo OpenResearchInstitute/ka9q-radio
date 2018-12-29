@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.41 2018/12/20 05:25:42 karn Exp karn $
+// $Id: linear.c,v 1.42 2018/12/25 12:00:23 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -111,7 +111,7 @@ void *demod_linear(void *arg){
     pthread_mutex_unlock(&demod->demod_mutex);
 
     // Wait for new samples
-    execute_filter_output(filter);    
+    execute_filter_output(filter,0);
 
     // Carrier (or regenerated carrier) tracking in coherent mode
     if(demod->opt.pll){
