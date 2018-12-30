@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.144 2018/12/23 23:06:20 karn Exp karn $
+// $Id: main.c,v 1.146 2018/12/26 09:42:38 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -59,6 +59,7 @@ void *send_status(void *);
 
 struct option Options[] =
   {
+   {"iface", required_argument, NULL, 'A'},
    {"pcm-out", required_argument, NULL, 'D'},
    {"flat", no_argument, NULL, 'F'},
    {"agc-hangtime", required_argument, NULL, 'H'},
@@ -85,7 +86,7 @@ struct option Options[] =
    {NULL, 0, NULL, 0},
   };
 
-char Optstring[] = "D:FI:N:R:S:T:a:b:c:e:f:h:ik:l:m:pqr:s:t:";
+char Optstring[] = "A:D:FI:N:R:S:T:a:b:c:e:f:h:ik:l:m:pqr:s:t:";
 
 
 // The main program sets up the demodulator parameter defaults,
@@ -163,6 +164,9 @@ int main(int argc,char *argv[]){
   int c;
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
+    case 'A':
+      Default_mcast_iface = optarg;
+      break;
     case 'I':   // Multicast address to listen to for receiver metadata
       // Input socket for status from SDR
       demod->input.status_fd = setup_mcast(optarg,(struct sockaddr *)&demod->input.metadata_dest_address,0,0,2);
@@ -301,7 +305,7 @@ int main(int argc,char *argv[]){
     case 'H':
       demod->agc.hangtime = strtod(optarg,NULL) * demod->output.samprate;
       break;
-    case 'I': case 'R': case 'D': case 'S': case 'T':
+    case 'A': case 'I': case 'R': case 'D': case 'S': case 'T':
       break;
     case 'N':
       N = strtol(optarg,NULL,0);
