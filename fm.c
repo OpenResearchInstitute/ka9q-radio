@@ -109,7 +109,6 @@ void *demod_fm(void *arg){
     float output_level = 0;
     if(snr_below_threshold < 2){ // Squelch is (still) open
       // keep the squelch open an extra block to flush out the filters and buffers
-
       // Threshold extension by comparing sample amplitude to threshold
       // 0.55 is empirical constant, 0.5 to 0.6 seems to sound good
       // Square amplitudes are compared to avoid sqrt inside loop
@@ -120,6 +119,24 @@ void *demod_fm(void *arg){
       float pdev_pos = 0;
       float pdev_neg = 0;
       float avg_f = 0;
+
+#define TEST 1
+#if TEST
+      float g = 1/(avg_amp*avg_amp);
+      for(int n=0; n<filter->olen; n++){
+	complex float const samp = filter->output.c[n];
+	lastaudio = samples[n] = audio_master->input.r[n] = g * cimagf(samp * state); // Phase change from last sample
+	state = conjf(samp);
+	// Track of peak deviation only if signal is present
+	if(n == 0)
+	  pdev_pos = pdev_neg = lastaudio;
+	else if(lastaudio > pdev_pos)
+	  pdev_pos = lastaudio;
+	else if(lastaudio < pdev_neg)
+	  pdev_neg = lastaudio;
+	avg_f += lastaudio;
+      }
+#else
       for(int n=0; n<filter->olen; n++){
 	complex float const samp = filter->output.c[n];
 	if(cnrmf(samp) > min_ampl){ // Blank weak samples
@@ -138,6 +155,7 @@ void *demod_fm(void *arg){
 	}
 	avg_f += lastaudio;
       }
+#endif
       avg_f /= filter->olen;  // Average FM output is freq offset
       if(snr_below_threshold < 1){
 	// Squelch open; update frequency offset and peak deviation
