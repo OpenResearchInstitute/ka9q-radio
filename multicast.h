@@ -1,4 +1,4 @@
-// $Id: multicast.h,v 1.23 2018/12/28 07:34:35 karn Exp karn $
+// $Id: multicast.h,v 1.24 2018/12/28 10:17:18 karn Exp karn $
 // Multicast and RTP functions, constants and structures
 // Not every RTP module uses these yet, they need to be revised
 // Copyright 2018, Phil Karn, KA9Q
@@ -101,6 +101,8 @@ struct sockcache {
 // Convert between internal and wire representations of RTP header
 void *ntoh_rtp(struct rtp_header *,void *);
 void *hton_rtp(void *, struct rtp_header *);
+
+extern char *Default_mcast_iface;
 
 int setup_mcast(char const *target,struct sockaddr *,int output,int ttl,int offset);
 extern char Default_mcast_port[];

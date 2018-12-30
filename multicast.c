@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.37 2018/12/09 12:12:20 karn Exp karn $
+// $Id: multicast.c,v 1.38 2018/12/28 10:17:18 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -10,6 +10,10 @@
 #if defined(linux)
 #include <bsd/string.h>
 #endif
+#include <limits.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <ifaddrs.h>
 #include "multicast.h"
 
 #define EF_TOS 0x2e // Expedited Forwarding type of service, widely used for VoIP (which all this is, sort of)
@@ -119,13 +123,15 @@ static int join_group(int fd,struct sockaddr *sock,char *iface){
     return apple_join_group(fd,sock); // Apple workaround for default interface
 #endif  
 
+
   struct group_req group_req;
+  memcpy(&group_req.gr_group,sock,socklen);
+  
   if(iface)
     group_req.gr_interface = if_nametoindex(iface);
   else
     group_req.gr_interface = 0; // Default interface    
 
-  memcpy(&group_req.gr_group,sock,socklen);
   if(setsockopt(fd,IPPROTO_IP,MCAST_JOIN_GROUP,&group_req,sizeof(group_req)) != 0){
     perror("multicast join");
     return -1;
@@ -137,6 +143,8 @@ static int join_group(int fd,struct sockaddr *sock,char *iface){
 char Default_mcast_port[] = "5004";
 char Default_rtcp_port[] = "5005";
 
+char *Default_mcast_iface;
+
 // Set up multicast socket for input or output
 
 // Target is in the form of domain.name.com:5004 or 1.2.3.4:5004
@@ -146,7 +154,8 @@ char Default_rtcp_port[] = "5005";
 // (Can we just do both?)
 int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int offset){
   int fd = -1;
-  char *iface = NULL;
+  char *iface = Default_mcast_iface;
+  char host[256]; // Maximum legal DNS name length
 
   struct sockaddr_storage sbuf;
   memset(&sbuf,0,sizeof(sbuf));
@@ -156,14 +165,15 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
       sock = (struct sockaddr *)&sbuf; // Use local temporary
 
     // Target specified, resolve it
-    int len = strlen(target) + 1;  // Including terminal null
-    char host[len],*port;
+    char *port;
     
-    strlcpy(host,target,len);
+    strncpy(host,target,sizeof(host));
     if((iface = strrchr(host,',')) != NULL){
       // Interface specified
       *iface++ = '\0';
-    }
+    } else
+      iface = Default_mcast_iface;
+    
     if((port = strrchr(host,':')) != NULL){
       *port++ = '\0';
     } else {
@@ -210,17 +220,6 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
     return -1;
       
   soptions(fd,ttl);
-  if(output){
-    if(connect(fd,sock,sizeof(struct sockaddr)) != 0){
-      close(fd);
-      return -1;
-    }
-  } else { // input
-    if((bind(fd,sock,sizeof(struct sockaddr)) != 0)){
-      close(fd);
-      return -1;
-    }
-  }
   // Strictly speaking, it is not necessary to join a multicast group to which we only send.
   // But this creates a problem with brain-dead Netgear (and probably other) "smart" switches
   // that do IGMP snooping. There's a setting to handle what happens with multicast groups
@@ -229,6 +228,47 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
   // that aren't subscribed to by anybody are flooded everywhere! We avoid that by subscribing
   // to our own multicasts.
   join_group(fd,sock,iface);
+
+  if(output){
+    if(connect(fd,sock,sizeof(struct sockaddr)) != 0){
+      close(fd);
+      return -1;
+    }
+    // Select output interface
+    if(iface){
+      struct ifaddrs *ifap,*ifp;
+      getifaddrs(&ifap);
+      for(ifp = ifap; ifp != NULL; ifp = ifp->ifa_next){
+	if(strcmp(ifp->ifa_name,iface) == 0 && sock->sa_family == ifp->ifa_addr->sa_family)
+	  break;
+      }
+      if(ifp != NULL){
+	if(ifp->ifa_addr->sa_family == AF_INET){
+	  struct sockaddr_in *sin = (struct sockaddr_in *)ifp->ifa_addr;
+	  struct in_addr in_addr;
+	  memcpy(&in_addr,&sin->sin_addr,sizeof(in_addr));
+	  
+	  if(setsockopt(fd,IPPROTO_IP,IP_MULTICAST_IF,&in_addr,sizeof(in_addr)) != 0){
+	    perror("setsockopt IP_MULTICAST_IF");
+	  }
+	} else if(ifp->ifa_addr->sa_family == AF_INET6){
+	  struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifp->ifa_addr;
+	  struct in6_addr in_addr6;
+	  memcpy(&in_addr6,&sin6->sin6_addr,sizeof(in_addr6));
+	  
+	  if(setsockopt(fd,IPPROTO_IP,IP_MULTICAST_IF,&in_addr6,sizeof(in_addr6)) != 0){
+	    perror("setsockopt IP_MULTICAST_IF");
+	  }
+	}
+      }
+      freeifaddrs(ifap);
+    }
+  } else { // input
+    if((bind(fd,sock,sizeof(struct sockaddr)) != 0)){
+      close(fd);
+      return -1;
+    }
+  }
   return fd;
 }
 
