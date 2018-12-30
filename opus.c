@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.27 2018/12/02 09:16:45 karn Exp karn $
+// $Id: opus.c,v 1.28 2018/12/22 02:27:08 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -90,7 +90,7 @@ int main(int argc,char * const argv[]){
 
   int c;
   Mcast_ttl = 10; // By default, let Opus be routed
-  while((c = getopt(argc,argv,"f:I:vR:B:o:xT:")) != EOF){
+  while((c = getopt(argc,argv,"f:I:vA:R:B:o:xT:")) != EOF){
     switch(c){
     case 'f':
       Fec = strtol(optarg,NULL,0);
@@ -103,6 +103,9 @@ int main(int argc,char * const argv[]){
       break;
     case 'I':
       Mcast_input_address_text = optarg;
+      break;
+    case 'A':
+      Default_mcast_iface = optarg;
       break;
     case 'R':
       Mcast_output_address_text = optarg;
