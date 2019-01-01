@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.28 2018/12/22 02:27:08 karn Exp karn $
+// $Id: opus.c,v 1.29 2018/12/30 13:18:28 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -183,16 +183,17 @@ int main(int argc,char * const argv[]){
       usleep(500); // Avoid tight loop
       continue; // Too small to be valid RTP
     }
-    unsigned char *dp = buffer;
     // RTP header to host format
     struct rtp_header rtp_hdr;
-    dp = ntoh_rtp(&rtp_hdr,buffer);
+    unsigned char *dp = ntoh_rtp(&rtp_hdr,buffer);
     size -= (dp - buffer);
     if(rtp_hdr.pad){
       // Remove padding
       size -= dp[size-1];
       rtp_hdr.pad = 0;
     }
+    if(size < 0)
+      continue; // Bogus RTP header?
 
     int frame_size = 0;
     switch(rtp_hdr.type){

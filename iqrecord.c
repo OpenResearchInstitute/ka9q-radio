@@ -1,4 +1,4 @@
-// $Id: iqrecord.c,v 1.21 2018/09/08 06:06:21 karn Exp karn $
+// $Id: iqrecord.c,v 1.22 2018/12/02 09:16:45 karn Exp karn $
 // Read and record complex I/Q stream or PCM baseband audio
 // This version reverts to file I/O from an unsuccessful experiment to use mmap()
 // Copyright 2018 Phil Karn, KA9Q
@@ -177,6 +177,8 @@ void input_loop(){
       size -= dp[size-1];
       rtp.pad = 0;
     }
+    if(size <= 0)
+      continue; // Bogus RTP header
 
     // I/Q status header (if present) is in host byte order
     struct status status;

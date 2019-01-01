@@ -1,4 +1,4 @@
-// $Id: aprs.c,v 1.18 2018/09/08 06:06:21 karn Exp karn $
+// $Id: aprs.c,v 1.19 2018/12/02 09:16:45 karn Exp karn $
 // Process AX.25 frames containing APRS data, extract lat/long/altitude, compute az/el
 // INCOMPLETE, doesn't yet drive antenna rotors
 // Should also use RTP for AX.25 frames
@@ -142,20 +142,29 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   unsigned char packet[2048];
-  int pktlen;
+  int size;
 
-  while((pktlen = recv(Input_fd,packet,sizeof(packet),0)) > 0){
+  while((size = recv(Input_fd,packet,sizeof(packet),0)) > 0){
     struct rtp_header rtp_header;
     unsigned char *dp = packet;
 
     dp = ntoh_rtp(&rtp_header,dp);
-    pktlen -= dp - packet;
+    size -= dp - packet;
+
+    if(rtp_header.pad){
+      // Remove padding
+      size -= dp[size-1];
+      rtp_header.pad = 0;
+    }
+
+    if(size <= 0)
+      continue; // Bogus RTP header?
 
     if(rtp_header.type != AX25_PT)
       continue; // Wrong type
 
     struct ax25_frame frame;
-    if(ax25_parse(&frame,dp,pktlen) < 0)
+    if(ax25_parse(&frame,dp,size) < 0)
       continue;      // Unparseable AX25 header
 
     // Is this the droid we're looking for?

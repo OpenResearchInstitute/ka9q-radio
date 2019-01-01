@@ -1,4 +1,4 @@
-// $Id: aprsfeed.c,v 1.21 2018/09/17 19:01:01 karn Exp karn $
+// $Id: aprsfeed.c,v 1.22 2018/12/02 09:16:45 karn Exp karn $
 // Process AX.25 frames containing APRS data, feed to APRS2 network
 // Copyright 2018, Phil Karn, KA9Q
 
@@ -166,13 +166,22 @@ int main(int argc,char *argv[]){
       continue;
     }
     unsigned char packet[2048];
-    int pktlen;
-    while((pktlen = recv(Input_fd,packet,sizeof(packet),0)) > 0){
+    int size;
+    while((size = recv(Input_fd,packet,sizeof(packet),0)) > 0){
       struct rtp_header rtp_header;
       unsigned char *dp = packet;
       
       dp = ntoh_rtp(&rtp_header,dp);
-      pktlen -= dp - packet;
+      size -= dp - packet;
+      
+      if(rtp_header.pad){
+	// Remove padding
+	size -= dp[size-1];
+	rtp_header.pad = 0;
+      }
+
+      if(size <= 0)
+	continue;  // Bogus RTP header?
       
       if(rtp_header.type != AX25_PT)
 	continue; // Wrong type
@@ -189,7 +198,7 @@ int main(int argc,char *argv[]){
       
       // Parse incoming AX.25 frame
       struct ax25_frame frame;
-      if(ax25_parse(&frame,dp,pktlen) < 0){
+      if(ax25_parse(&frame,dp,size) < 0){
 	if(Logfile)
 	  fprintf(Logfile," Unparsable packet\n");
 	continue;

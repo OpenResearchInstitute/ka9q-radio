@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.122 2018/12/28 10:16:17 karn Exp karn $
+// $Id: radio.c,v 1.123 2019/01/01 03:34:07 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -64,8 +64,7 @@ void *proc_samples(void *arg){
     if(size < RTP_MIN_SIZE)
       continue; // Too small for RTP, ignore
 
-    unsigned char *dp = pkt.content;
-    dp = ntoh_rtp(&pkt.rtp,dp);
+    unsigned char *dp = ntoh_rtp(&pkt.rtp,pkt.content);
     size -= (dp - pkt.content);
     
     if(pkt.rtp.pad){
@@ -73,12 +72,16 @@ void *proc_samples(void *arg){
       size -= dp[size-1];
       pkt.rtp.pad = 0;
     }
+    if(size <= 0)
+      continue; // Bogus RTP header?
     int sampcount;
 
     switch(pkt.rtp.type){
     case IQ_PT: // Little-endian 16 bit ints with old metadata header
       dp += 24;
       size -= 24;
+      if(size <= 0)
+	continue; // bogus
       sampcount = size / (2 * sizeof(signed short));
       break;
     case IQ_PT8: // 8-bit ints no metadata
