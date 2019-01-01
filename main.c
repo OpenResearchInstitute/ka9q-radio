@@ -298,9 +298,6 @@ int main(int argc,char *argv[]){
       break;
     case 't':   // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);
-
-      fftwf_plan_with_nthreads(Nthreads);
-      fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
     case 'F':
       demod->opt.flat = 1;
@@ -318,6 +315,9 @@ int main(int argc,char *argv[]){
       break;
     }
   }
+  fftwf_plan_with_nthreads(Nthreads);
+  fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
+
   // Start emitting RTCP
   pthread_t rtcp_thread;
   if(demod->output.rtcp_fd != -1)
