@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.120 2018/12/23 00:34:23 karn Exp karn $
+// $Id: radio.c,v 1.122 2018/12/28 10:16:17 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -38,7 +38,7 @@ void *proc_samples(void *arg){
   pthread_setname("procsamp");
 
   struct demod *demod = (struct demod *)arg;
-  float complex block_energy = 0;
+  float block_energy = 0;
   int in_cnt = 0;
 
   while(1){
@@ -81,9 +81,7 @@ void *proc_samples(void *arg){
       size -= 24;
       sampcount = size / (2 * sizeof(signed short));
       break;
-    case IQ_PT8: // 8-bit ints with old metadata header
-      dp += 24;
-      size -= 24;
+    case IQ_PT8: // 8-bit ints no metadata
       sampcount = size / (2 * sizeof(signed char));
       break;
     case PCM_STEREO_PT: // Big-endian 16 bits, no metadata header
@@ -167,8 +165,8 @@ void *proc_samples(void *arg){
       {
 	float gain = SCALE8 * demod->sdr.gain_factor;
 	for(int i=0; i<sampcount; i++){
-	  __real__ sampbuf[i] = gain * *(char *)dp++;
-	  __imag__ sampbuf[i] = gain * *(char *)dp++;
+	  __real__ sampbuf[i] = gain * (char)*dp++;
+	  __imag__ sampbuf[i] = gain * (char)*dp++;
 	}
       }
       break;
