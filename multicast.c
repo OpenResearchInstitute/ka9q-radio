@@ -221,20 +221,19 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
       
   soptions(fd,ttl);
   // Strictly speaking, it is not necessary to join a multicast group to which we only send.
-  // But this creates a problem with brain-dead Netgear (and probably other) "smart" switches
-  // that do IGMP snooping. There's a setting to handle what happens with multicast groups
-  // to which no IGMP messages are seen. If set to discard them, IPv6 multicast breaks
-  // because there's no IPv6 multicast querier. But set to pass them, then IPv4 multicasts
-  // that aren't subscribed to by anybody are flooded everywhere! We avoid that by subscribing
-  // to our own multicasts.
+  // But this creates a problem with "smart" switches that do IGMP snooping.
+  // They have a setting to handle what happens with unregistered
+  // multicast groups (groups to which no IGMP messages are seen.)
+  // Discarding unregistered multicast breaks IPv6 multicast, which breaks ALL of IPv6
+  // because neighbor discovery uses multicast.
+  // It can also break IPv4 mDNS, though hardwiring 224.0.0.251 to flood can fix this.
+  // But if the switches are set to pass unregistered multicasts, then IPv4 multicasts
+  // that aren't subscribed to by anybody are flooded everywhere!
+  // We avoid that by subscribing to our own multicasts.
   join_group(fd,sock,iface);
 
   if(output){
-    if(connect(fd,sock,sizeof(struct sockaddr)) != 0){
-      close(fd);
-      return -1;
-    }
-    // Select output interface
+    // Select output interface - must be done before connect()
     if(iface){
       struct ifaddrs *ifap,*ifp;
       getifaddrs(&ifap);
@@ -262,6 +261,10 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
 	}
       }
       freeifaddrs(ifap);
+    }
+    if(connect(fd,sock,sizeof(struct sockaddr)) != 0){
+      close(fd);
+      return -1;
     }
   } else { // input
     if((bind(fd,sock,sizeof(struct sockaddr)) != 0)){

@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.146 2018/12/26 09:42:38 karn Exp karn $
+// $Id: main.c,v 1.147 2018/12/30 13:17:52 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -40,6 +40,7 @@ int Nthreads = 1;
 char const *Locale = "en_US.UTF-8";
 int Mcast_ttl = 1;
 int Blocktime = 20; // 20 milliseconds
+
 
 // Primary control blocks for downconvert/filter/demodulate and output
 // Note: initialized to all zeroes, like all global variables
@@ -121,13 +122,15 @@ int main(int argc,char *argv[]){
   setlocale(LC_ALL,Locale); // Set either the hardwired default or the value of $LANG if it exists
   fprintf(stderr,"General coverage software receiver\n");
   fprintf(stderr,"Copyright 2018 by Phil Karn, KA9Q; may be used under the terms of the GNU General Public License\n");
-  if(readmodes("modes.txt") != 0){
+  if(readmodes("modes.txt") != 0)
     fprintf(stderr,"Warning: can't read mode table; --modes won't work\n");
-  }
+
   
   // Must do this before first filter is created, otherwise a segfault can occur
-  fftwf_import_system_wisdom();
+  fftwf_init_threads();
   fftwf_make_planner_thread_safe();
+  int r = fftwf_import_system_wisdom();
+  fprintf(stderr,"fftwf_import_system_wisdom() returns %d\n",r);
 
   struct demod * const demod = &Demod; // Only one demodulator per program for now
   memset(demod,0,sizeof(*demod)); // Just in case it's ever dynamic
@@ -295,7 +298,7 @@ int main(int argc,char *argv[]){
       break;
     case 't':   // # of threads to use in FFTW3
       Nthreads = strtol(optarg,NULL,0);
-      fftwf_init_threads();
+
       fftwf_plan_with_nthreads(Nthreads);
       fprintf(stderr,"Using %d threads for FFTs\n",Nthreads);
       break;
@@ -439,6 +442,6 @@ void *rtcp_send(void *arg){
   }
 }
 void closedown(int a){
-  fprintf(stderr,"Signal %d\n",a);
+  fprintf(stderr,"Received signal %d, exiting\n",a);
   exit(1);
 }
