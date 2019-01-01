@@ -1,4 +1,4 @@
-# $Id: packet.service,v 1.5 2018/12/11 09:49:21 karn Exp karn $
+# $Id: packet.service,v 1.6 2018/12/17 00:46:09 karn Exp karn $
 # systemd service unit for AX.25 packet decoder
 # Listens to multiple audio groups, sends AX.25 packets to one multicast group distinguished by receiver SSRC
 
@@ -8,7 +8,7 @@ Requires=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/packet -I pcm.hackrf.mcast.local,eth0 -I pcm.hf.mcast.local,eth0 -I pcm.vhf.mcast.local,eth0 -R ax25.mcast.local,eth0 
+ExecStart=/usr/local/bin/packet --iface eth0 --ax25-out ax25.mcast.local pcm.hackrf.mcast.local pcm.hf.mcast.local pcm.vhf.mcast.local
 DynamicUser=1
 Restart=always
 RestartSec=1
