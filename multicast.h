@@ -1,4 +1,4 @@
-// $Id: multicast.h,v 1.24 2018/12/28 10:17:18 karn Exp karn $
+// $Id: multicast.h,v 1.25 2018/12/30 13:17:15 karn Exp karn $
 // Multicast and RTP functions, constants and structures
 // Not every RTP module uses these yet, they need to be revised
 // Copyright 2018, Phil Karn, KA9Q
@@ -31,9 +31,9 @@ struct rtp_header {
   uint16_t seq;
   uint32_t timestamp;
   uint32_t ssrc;
-  int marker:1;
-  int pad:1;
-  int extension:1;
+  unsigned int marker:1;
+  unsigned int pad:1;
+  unsigned int extension:1;
   int cc;
   uint32_t csrc[15];
 };
