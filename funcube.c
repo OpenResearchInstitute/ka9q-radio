@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.72 2018/12/20 02:30:13 karn Exp karn $
+// $Id: funcube.c,v 1.73 2018/12/22 02:27:08 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -83,6 +83,7 @@ char *Data_dest;
 
 struct option const Options[] =
   {
+   {"iface", required_argument, NULL, 'A'},
    {"pcm-out", required_argument, NULL, 'D'},
    {"device", required_argument, NULL, 'I'},
    {"status-out", required_argument, NULL, 'R'},
@@ -95,7 +96,7 @@ struct option const Options[] =
    {"samprate", required_argument, NULL, 'r'},
    {NULL, 0, NULL, 0},
   };
-char const Optstring[] = "b:c:dovD:i:LR:S:T:";
+char const Optstring[] = "A:D:I:R:S:T:b:df:vr:";
 
 
 // Global variables
@@ -145,6 +146,9 @@ int main(int argc,char *argv[]){
 
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
+    case 'A':
+      Default_mcast_iface = optarg;
+      break;
     case 'b':
       Blocksize = strtol(optarg,NULL,0);
       break;

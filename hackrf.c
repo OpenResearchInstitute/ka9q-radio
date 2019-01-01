@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.35 2018/12/28 10:30:44 karn Exp karn $
+// $Id: hackrf.c,v 1.36 2019/01/01 03:32:50 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -85,6 +85,7 @@ struct sockaddr_storage Output_metadata_dest_address;
 
 struct option Options[] =
   {
+   {"iface", required_argument, NULL, 'A'},
    {"pcm-out", required_argument, NULL, 'D'},
    {"device", required_argument, NULL, 'I'},
    {"status-out", required_argument, NULL, 'R'},
@@ -100,7 +101,7 @@ struct option Options[] =
    {"verbose", no_argument, NULL, 'v'},
    {NULL, 0, NULL, 0},
   };
-char Optstring[] = "D:I:R:S:T:b:c:df:o:r:t:v";
+char Optstring[] = "A:D:I:R:S:T:b:c:df:o:r:t:v";
 
 
 // Global variables
@@ -155,6 +156,9 @@ int main(int argc,char *argv[]){
   int c;
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
+    case 'A':
+      Default_mcast_iface = optarg;
+      break;
     case 'D':
       Data_dest = optarg;
       break;
