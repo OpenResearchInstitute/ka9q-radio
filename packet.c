@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.26 2018/12/22 02:27:08 karn Exp karn $
+// $Id: packet.c,v 1.27 2018/12/29 06:14:17 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -172,6 +172,8 @@ int main(int argc,char *argv[]){
 	size -= dp[size-1];
 	rtp_hdr.pad = 0;
       }
+      if(size < 0)
+	continue; // garbled RTP header?
       
       if(rtp_hdr.type != PCM_MONO_PT)
 	continue; // Only mono PCM for now
