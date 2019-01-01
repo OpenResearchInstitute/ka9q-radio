@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.27 2018/12/29 06:14:17 karn Exp karn $
+// $Id: packet.c,v 1.28 2019/01/01 07:11:37 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -13,6 +13,7 @@
 #include <string.h>
 #include <locale.h>
 #include <netdb.h>
+#include <getopt.h>
 
 #include "dsp.h"
 #include "osc.h"
@@ -66,8 +67,18 @@ pthread_mutex_t Output_mutex;
 struct session *lookup_session(const uint32_t ssrc);
 struct session *make_session(uint32_t ssrc);
 int close_session(struct session *sp);
-
 void *decode_task(void *arg);
+
+struct option Options[] =
+  {
+   {"iface", required_argument, NULL, 'A'},
+   {"ax25-out", required_argument, NULL, 'R'},
+   {"ttl", required_argument, NULL, 'T'},
+   {"verbose", no_argument, NULL, 'v'},
+   {NULL, 0, NULL, 0},
+  };
+char Optstring[] = "A:R:T:v";
+
 
 int main(int argc,char *argv[]){
   // Drop root if we have it
@@ -80,10 +91,10 @@ int main(int argc,char *argv[]){
   // packet in case we're redirected into a file
 
   int c;
-  while((c = getopt(argc,argv,"I:R:vT:")) != EOF){
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != EOF){
     switch(c){
-    case 'v':
-      Verbose++;
+    case 'A':
+      Default_mcast_iface = optarg;
       break;
     case 'I':
       if(Nfds == MAX_MCAST){
@@ -97,14 +108,26 @@ int main(int argc,char *argv[]){
     case 'T':
       Mcast_ttl = strtol(optarg,NULL,0);
       break;
+    case 'v':
+      Verbose++;
+      break;
     default:
       fprintf(stderr,"Usage: %s [-v] [-I input_mcast_address] [-R output_mcast_address] [-T mcast_ttl]\n",argv[0]);
       fprintf(stderr,"Defaults: %s -I [none] -R %s -T %d\n",argv[0],Decode_mcast_address_text,Mcast_ttl);
       exit(1);
     }
   }
+  // Also accept groups without -I option
+  for(int i=optind; i < argc; i++){
+    if(Nfds == MAX_MCAST){
+      fprintf(stderr,"Too many multicast addresses; max %d\n",MAX_MCAST);
+    } else 
+      Mcast_address_text[Nfds++] = argv[i];
+  }
+
+
   if(Nfds == 0){
-    fprintf(stderr,"At least one -I option required\n");
+    fprintf(stderr,"At least one input group required\n");
     exit(1);
   }
   // Set up multicast input, create mask for select()

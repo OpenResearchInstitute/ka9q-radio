@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.88 2018/12/25 12:00:23 karn Exp karn $
+// $Id: monitor.c,v 1.89 2018/12/27 10:28:14 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -184,7 +184,7 @@ int main(int argc,char * const argv[]){
     exit(0);
   }
   if(Nfds == 0){
-    fprintf(stderr,"At least one multicast group required\n");
+    fprintf(stderr,"At least one input group required\n");
     exit(1);
   }
 

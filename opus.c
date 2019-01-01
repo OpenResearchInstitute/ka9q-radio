@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.29 2018/12/30 13:18:28 karn Exp karn $
+// $Id: opus.c,v 1.30 2019/01/01 07:26:16 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <signal.h>
+#include <getopt.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -74,6 +75,22 @@ struct session *make_session(struct sockaddr const *r,uint32_t,uint16_t,uint32_t
 int close_session(struct session *);
 int send_samples(struct session *sp,float left,float right);
 
+struct option Options[] =
+  {
+   {"iface", required_argument, NULL, 'A'},
+   {"block-time", required_argument, NULL, 'B'},
+   {"pcm-in", required_argument, NULL, 'I'},
+   {"opus-out", required_argument, NULL, 'R'},
+   {"ttl", required_argument, NULL, 'T'},
+   {"fec", required_argument, NULL, 'f'},
+   {"bitrate", required_argument, NULL, 'o'},
+   {"verbose", no_argument, NULL, 'v'},
+   {"discontinuous", no_argument, NULL, 'x'},
+   {NULL, 0, NULL, 0},
+  };
+   
+char Optstring[] = "A:B:I:R:T:f:o:vx";
+
 
 int main(int argc,char * const argv[]){
 #if 0   // Better handled in systemd?
@@ -90,31 +107,33 @@ int main(int argc,char * const argv[]){
 
   int c;
   Mcast_ttl = 10; // By default, let Opus be routed
-  while((c = getopt(argc,argv,"f:I:vA:R:B:o:xT:")) != EOF){
+  char Optstring[] = "A:B:I:R:T:f:o:vx";
+
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != EOF){
     switch(c){
-    case 'f':
-      Fec = strtol(optarg,NULL,0);
-      break;
-    case 'T':
-      Mcast_ttl = strtol(optarg,NULL,0);
-      break;
-    case 'v':
-      Verbose++;
-      break;
-    case 'I':
-      Mcast_input_address_text = optarg;
-      break;
     case 'A':
       Default_mcast_iface = optarg;
-      break;
-    case 'R':
-      Mcast_output_address_text = optarg;
       break;
     case 'B':
       Opus_blocktime = strtod(optarg,NULL);
       break;
+    case 'I':
+      Mcast_input_address_text = optarg;
+      break;
+    case 'R':
+      Mcast_output_address_text = optarg;
+      break;
+    case 'T':
+      Mcast_ttl = strtol(optarg,NULL,0);
+      break;
+    case 'f':
+      Fec = strtol(optarg,NULL,0);
+      break;
     case 'o':
       Opus_bitrate = strtol(optarg,NULL,0);
+      break;
+    case 'v':
+      Verbose++;
       break;
     case 'x':
       Discontinuous = 1;
