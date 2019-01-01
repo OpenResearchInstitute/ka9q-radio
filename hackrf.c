@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.33 2018/12/28 07:34:52 karn Exp karn $
+// $Id: hackrf.c,v 1.35 2018/12/28 10:30:44 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -61,7 +61,7 @@ int Decimate = 64;
 int Log_decimate = 6; // Computed from Decimate
 const float SCALE8 = 1./127.;   // Scale 8-bit samples to unity range floats
 const int Bufsize = 16384;
-float const DC_alpha = 1.0e-7;  // high pass filter coefficient for DC offset estimates, per sample
+float const DC_alpha = 1.0e-1;  // high pass filter coefficient for DC offset estimates, per callback block
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
 char *Rundir = "/run/hackrf"; // Where 'status' and 'pid' get written
 float Filter_atten;
@@ -79,6 +79,7 @@ char *Data_dest = "239.1.6.10";
 char *Metadata_dest = "239.1.6.1"; // Default for testing
 double Frequency = 146e6;
 int Rtp_type = IQ_PT; // Default to old 16-bit little-endian with metadata
+int Verbose;
 
 struct sockaddr_storage Output_metadata_dest_address;
 
@@ -93,12 +94,13 @@ struct option Options[] =
    {"decimate", required_argument, NULL, 'c'},
    {"daemonize", no_argument, NULL, 'd'},
    {"frequency", required_argument, NULL, 'f'},
-   {"verbose", no_argument, NULL, 'v'},
+   {"offset", required_argument, NULL, 'o'},
    {"samprate", required_argument, NULL, 'r'},
    {"rtp-type", required_argument, NULL, 't'},
+   {"verbose", no_argument, NULL, 'v'},
    {NULL, 0, NULL, 0},
   };
-char Optstring[] = "D:I:R:S:T:b:df:vr:t:";
+char Optstring[] = "D:I:R:S:T:b:c:df:o:r:t:v";
 
 
 // Global variables
@@ -148,6 +150,7 @@ int main(int argc,char *argv[]){
   Locale = getenv("LANG");
   if(Locale == NULL || strlen(Locale) == 0)
     Locale = "en_US.UTF-8";
+  setlocale(LC_ALL,Locale);
 
   int c;
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
@@ -206,6 +209,7 @@ int main(int argc,char *argv[]){
       }
       break;
     case 'v':
+      Verbose++;
       if(!Daemonize)
 	Status = stderr;
       break;
@@ -313,7 +317,7 @@ int main(int argc,char *argv[]){
   assert(ret == HACKRF_SUCCESS);
   sdr->status.samprate = Out_samprate;
 
-  uint32_t bw = hackrf_compute_baseband_filter_bw_round_down_lt(ADC_samprate);
+  uint32_t bw = hackrf_compute_baseband_filter_bw_round_down_lt(ADC_samprate/2);
   ret = hackrf_set_baseband_filter_bandwidth(sdr->device,bw);
   assert(ret == HACKRF_SUCCESS);
 
@@ -345,9 +349,52 @@ int main(int argc,char *argv[]){
   time(&tt);
   if(Rtp.ssrc == 0)
     Rtp.ssrc = tt & 0xffffffff; // low 32 bits of clock time
-  errmsg("uid %d; device %d; dest %s; blocksize %d; RTP SSRC %lx; status file %s\n",getuid(),Device,Data_dest,Blocksize,Rtp.ssrc,Status_filename);
-  errmsg("A/D sample rate %'d Hz; decimation ratio %d; output sample rate %'d Hz; Offset %'+d\n",
-	 ADC_samprate,Decimate,Out_samprate,Offset * ADC_samprate/4);
+
+  int sampsize = 0;
+  switch(Rtp_type){
+  case IQ_PT12:
+    sampsize = 12;
+    break;
+  case IQ_PT:
+    sampsize = 16;
+    break;
+  case IQ_PT8:
+    sampsize = 8;
+    break;
+  default:
+    break;
+  }
+
+  // 7680 bytes data + 12 byte RTP + 8 byte UDP + 20 byte IP = 7720 bytes. MTU is 9000, overhead is 40 bytes
+  // 7680 bytes data + 14 bytes ethernet + 20 byte IP + 8 byte UDP + 12 byte RTP = 7738 (ip length 7720)
+  // Max sample bytes 8960: 2986.66667 @ 12 bits, 2240 @ 16 bits, 4480 @ 8 bits
+  // 8958 bytes = 2986 samples
+  // 8955 bytes = 2985 samples
+  // 8952 bytes = 2984 samples
+  // 6.144 MHz * 20 ms = 122,880 samples/20 ms frame
+  // 3 * 2^N = 1536 samples
+  // 5 * 2^N = 2560 samples; 48 packets/20 ms frame
+  // 3*5 * 2^N = 1920
+
+  errmsg("uid %d; device %d; dest %s; %d bit samples; blocksize %'d samples (%'d bytes, %'.3f ms); RTP SSRC %x; status file %s\n",
+	 getuid(),
+	 Device,
+	 Data_dest,
+	 sampsize,
+	 Blocksize,
+	 2*Blocksize*sampsize/8,
+	 1000.*(float)Blocksize/Out_samprate,
+	 Rtp.ssrc,
+	 Status_filename);
+  
+  errmsg("A/D sample rate %'d Hz; filter bw %'d Hz; decimation ratio %d; output sample rate %'d Hz (%'d bits/sec); Offset %'+d\n",
+	 ADC_samprate,
+	 bw,
+	 Decimate,
+	 Out_samprate,
+	 Out_samprate * sampsize * 2,
+	 Offset * ADC_samprate/4);
+
 
   ret = hackrf_start_rx(sdr->device,rx_callback,&HackCD);
   assert(ret == HACKRF_SUCCESS);
@@ -777,19 +824,20 @@ int rx_callback(hackrf_transfer *transfer){
 
   struct sdrstate *sdr = &HackCD;
 
-  int remain = transfer->valid_length; // Count of individual samples; divide by 2 to get complex samples
-  int samples = remain / 2;            // Complex samples
+  int samples = transfer->valid_length / 2; // divide by 2 to get complex samples
+  int remain = samples;
   char *dp = (char *)transfer->buffer;
 
-  complex float samp,samp_sum = 0;
+  complex float samp_sum = 0;
   float i_energy=0,q_energy=0;
   float dotprod = 0;                           // sum of I*Q, for phase balance
   float rate_factor = 1./(ADC_samprate * Power_alpha);
 
-  while(remain > 0){
+  while(remain-- > 0){
+    complex float samp;
+
     __real__ samp = SCALE8 * (float)*dp++;
     __imag__ samp = SCALE8 * (float)*dp++;
-    remain -= 2;
 
     if(__imag__ samp < -1){
       sdr->clips++;
@@ -856,7 +904,7 @@ int rx_callback(hackrf_transfer *transfer){
   pthread_cond_broadcast(&Buf_cond); // Wake him up only after we're done
   // Update every block
   // estimates of DC offset, signal powers and phase error
-  sdr->DC += DC_alpha * (samp_sum - samples*sdr->DC);
+  sdr->DC += DC_alpha * (samp_sum/samples - sdr->DC);
   float block_energy = i_energy + q_energy; // Normalize for complex pairs
   if(block_energy > 0){ // Avoid divisions by 0, etc
     //sdr->in_power += rate_factor * (block_energy - samples*sdr->in_power); // Average A/D output power per channel  
