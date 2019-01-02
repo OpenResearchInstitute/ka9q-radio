@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.147 2018/12/30 13:17:52 karn Exp karn $
+// $Id: main.c,v 1.149 2019/01/01 06:35:20 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -39,7 +39,7 @@ int DAC_samprate = 48000;
 int Nthreads = 1;
 char const *Locale = "en_US.UTF-8";
 int Mcast_ttl = 1;
-int Blocktime = 20; // 20 milliseconds
+float Blocktime = 20; // 20 milliseconds
 
 
 // Primary control blocks for downconvert/filter/demodulate and output
@@ -257,7 +257,7 @@ int main(int argc,char *argv[]){
       demod->agc.recovery_rate = powf(10.,demod->agc.recovery_rate/20.);
       break;
     case 'b': // FFT convolver block duration
-      Blocktime = strtol(optarg,NULL,0);
+      Blocktime = strtof(optarg,NULL);
       break;
     case 'c': // Output channels
       demod->output.channels = strtol(optarg,NULL,0);
