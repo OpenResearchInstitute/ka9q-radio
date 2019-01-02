@@ -199,7 +199,6 @@ void send_radio_status(struct demod *demod,int full){
     encode_float(&bp,DEMOD_SNR,power2dB(demod->sig.snr));
     encode_float(&bp,FREQ_OFFSET,demod->sig.foffset);
     encode_float(&bp,PEAK_DEVIATION,demod->sig.pdeviation);
-    encode_float(&bp,PL_TONE,demod->sig.plfreq);
     break;
   case LINEAR_DEMOD:
     encode_byte(&bp,INDEPENDENT_SIDEBAND,demod->filter.isb);
