@@ -1,4 +1,4 @@
-// $Id: osc.c,v 1.1 2018/12/02 09:16:45 karn Exp karn $
+// $Id: osc.c,v 1.2 2018/12/05 09:07:18 karn Exp karn $
 // Complex oscillator object routines
 
 #define _GNU_SOURCE 1
@@ -40,11 +40,10 @@ complex double step_osc(struct osc *osc){
   complex double r;
 
   r = osc->phasor;
-  if(osc->freq != 0){
-    osc->phasor *= osc->phasor_step;
-    if(osc->rate != 0)
-      osc->phasor_step *= osc->phasor_step_step;
-  }
+  if(osc->rate != 0)
+    osc->phasor_step *= osc->phasor_step_step;
+
+  osc->phasor *= osc->phasor_step;
   if(++osc->steps == Renorm_rate)
     renorm_osc(osc);
   return r;
@@ -56,5 +55,52 @@ void renorm_osc(struct osc *osc){
 
   if(osc->rate != 0)
     osc->phasor_step /= cabs(osc->phasor_step);
+}
+#include <stdio.h>
+#include <stdlib.h>
+
+
+// Initialize digital phase lock loop with bandwidth, damping factor, initial VCO frequency and sample rate
+void init_pll(struct pll *pll,float nf,float damping,double freq,float samprate){
+
+  pll->samptime = 1./samprate;
+  freq *= pll->samptime; // initial VCO frequency in cycles/sample
+  nf *= pll->samptime;  // natural frequency in cycles/sample
+
+  // Second-order PLL loop filter (see Gardner)
+  float const vcogain = 2*M_PI;            // 2 pi radians/sample per "volt"
+  float const pdgain = 1;                  // phase detector gain "volts" per radian (unity from atan2)
+  float const natfreq = nf * 2*M_PI;       // loop natural frequency in rad/sample
+  float const tau1 = vcogain * pdgain / (natfreq * natfreq);
+  float const tau2 = 2 * damping / natfreq;
+
+  pll->prop_gain = tau2 / tau1;
+  pll->integrator_gain = 1 / tau1;
+  pll->integrator = freq * pll->samptime / pll->integrator_gain; // To give specified frequency
+  fprintf(stderr,"init_pll(%p,%f,%f,%f,%f)\n",pll,nf,damping,freq,samprate);
+  fprintf(stderr,"natfreq %lg tau1 %lg tau2 %lg propgain %lg intgain %lg\n",
+	  natfreq,tau1,tau2,pll->prop_gain,pll->integrator_gain);
+}
+
+
+// Step the PLL through one sample, return VCO control voltage
+// Initial implementation, will probably be slow because of the atan2() and sincos() for every sample
+// Return PLL freq in cycles/sample
+float run_pll(struct pll *pll,complex float sample){
+  float phase = cargf(sample * conjf(pll->vco.phasor)); // Phase detector
+  float feedback = pll->integrator_gain * pll->integrator + pll->prop_gain * phase;
+  pll->integrator += phase;
+  
+  feedback = feedback > 0.49 ? 0.49 : feedback < -0.49 ? -0.49 : feedback;
+  set_osc(&pll->vco,feedback,0); // This may be a CPU problem on every sample
+  step_osc(&pll->vco);
+#if 0
+  if((random() & 0xffff) == 0){
+    fprintf(stderr,"phase %f integrator %g feedback %g pll_freq %g\n",
+	    phase,pll->integrator,feedback,feedback/pll->samptime);
+  }
+#endif
+   
+  return feedback;
 }
 

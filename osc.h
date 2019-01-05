@@ -15,10 +15,29 @@ struct osc {
   pthread_mutex_t mutex;
   int steps; // Steps since last normalize
 };
-#endif
+
+struct pll {
+  float samptime;
+  struct osc vco;
+  float integrator_gain;
+  float prop_gain;
+  float integrator;
+};
+
+
+
+
 
 // Osc functions
 void set_osc(struct osc *osc,double f,double r);
 complex double step_osc(struct osc *osc);
 void renorm_osc(struct osc *osc);
 int is_phasor_init(const complex double x);
+
+// PLL functions
+void init_pll(struct pll *pll,float bw,float damping,double freq,float samprate);
+float run_pll(struct pll *pll,complex float sample);
+
+
+#endif
+
