@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.66 2018/12/30 13:18:57 karn Exp karn $
+// $Id: fm.c,v 1.67 2019/01/02 11:29:01 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -82,10 +82,16 @@ void *demod_fm(void *arg){
       float avg_f = 0;
 
       for(int n=0; n < filter->olen; n++){
-	complex float const samp = filter->output.c[n];
-	complex float p = samp * conjf(state);
-	state = samp;
-	float ang = cargf(p); // frequency in radians/sample
+	complex float p = filter->output.c[n] * conjf(state);
+	state = filter->output.c[n];
+
+	float ang = cargf(p);
+	// Experimental threshold reduction per Fred Harris (if I understood him)
+	float amp = cabsf(p) / (2 * fm_variance);
+	if(amp > 1)
+	  amp = 1;
+
+
 	avg_f += ang; // Direct FM for frequency measurement
 	if(n == 0)
 	  pdev_pos = pdev_neg = ang;
@@ -95,16 +101,12 @@ void *demod_fm(void *arg){
 	  pdev_neg = ang;
 
 	if(demod->opt.flat){
-	  samples[n] = ang * gain; // Straight FM
+	  samples[n] = ang * gain; // Straight FM, no threshold extension
 	} else {
-	  // experimental threshold extension
-	  // weight FM audio sample by amplitude
-	  // (fred harris suggestion)
-	  float amp = cabsf(p) / (2*fm_variance); // could save the extra sqrt here by reusing the amplitudes
-	  amp = amp > 1 ? 1 : amp; // tanh() approximation
-	  
-	  // Integrate to turn FM to PM; de-emphasis -6dB/octave, -20dB/decade. 0.05 factor is empirical
-	  samples[n] = lastaudio += amp * ang * .05 * gain;
+	  // Integrate to turn FM to PM; de-emphasis -6dB/octave, -20dB/decade.
+	  // 0.135 factor is empirical; gives -15 dB audio with 400 Hz modulation and 5 kHz deviation in 16 kHz BW, 26 dB SNR
+	  // 400 Hz at +-5 kHz gives -22.5 dB in FLAT mode
+	  samples[n] = lastaudio += ang * .114 * gain * amp;
 	  lastaudio *= 0.99376949; // 1/e at 300 Hz - who knows what the actual "standard" is??
 	}
       }
