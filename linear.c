@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.42 2018/12/25 12:00:23 karn Exp karn $
+// $Id: linear.c,v 1.43 2018/12/29 06:14:17 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -244,6 +244,9 @@ void *demod_linear(void *arg){
 	  demod->sig.snr = 0; // Clamp to 0 so it'll show as -Inf dB
       } else
 	demod->sig.snr = NAN;
+    } else {
+      // Reset integrator
+      integrator = 0;
     }
     // Demodulation
     float samples[filter->olen]; // for mono output
