@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.33 2018/12/25 12:00:23 karn Exp karn $
+// $Id: filter.c,v 1.34 2018/12/29 06:14:17 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -340,10 +340,6 @@ int delete_filter_output(struct filter_out * const slave){
   return 0;
 }
 
-// Window shape factor for Kaiser window
-// Transition region is approx sqrt(1+Beta^2)
-float Kaiser_beta = 3.0;
-
 // Modified Bessel function of the 0th kind, used by the Kaiser window
 static const float i0(float const x){
   const float t = 0.25 * x * x;
@@ -443,11 +439,21 @@ int window_filter(int const L,int const M,complex float * const response,float c
   memcpy(buffer,response,N*sizeof(*buffer));
   fftwf_execute(rev_filter_plan);
   fftwf_destroy_plan(rev_filter_plan);
+#if 0
+  fprintf(stderr,"raw time domain\n");
+  for(int n=0; n < N; n++){
+    fprintf(stderr,"%d %lg %lg\n",n,crealf(buffer[n]),cimagf(buffer[n]));
+  }
+#endif  
   
 
   float kaiser_window[M];
   make_kaiser(kaiser_window,M,beta);
 
+#if 0
+  for(int m = 0; m < M; m++)
+    fprintf(stderr,"kaiser[%d] = %g\n",m,kaiser_window[m]);
+#endif  
 
   // Round trip through FFT/IFFT scales by N
   float const gain = 1./N;
@@ -459,7 +465,7 @@ int window_filter(int const L,int const M,complex float * const response,float c
 
 #if 0
   fprintf(stderr,"Filter impulse response, shifted, windowed and zero padded\n");
-  for(int n=0;n< N;n++)
+  for(int n=0;n< M;n++)
     fprintf(stderr,"%d %lg %lg\n",n,crealf(buffer[n]),cimagf(buffer[n]));
 #endif
   
@@ -470,8 +476,7 @@ int window_filter(int const L,int const M,complex float * const response,float c
 #if 0
   fprintf(stderr,"Filter response amplitude\n");
   for(int n=0;n<N;n++){
-    float f = n*192000./N;
-    fprintf(stderr,"%.1f %.1f\n",f,power2dB(cnrmf(buffer[n])));
+    fprintf(stderr,"%d %.1f\n",n,power2dB(cnrmf(buffer[n])));
   }
   fprintf(stderr,"\n");
 #endif
@@ -502,6 +507,12 @@ int window_rfilter(int const L,int const M,complex float * const response,float 
   memcpy(buffer,response,(N/2+1)*sizeof(*buffer));
   fftwf_execute(rev_filter_plan);
   fftwf_destroy_plan(rev_filter_plan);
+#if 0
+  printf("Filter impulse response after IFFT before windowing\n");
+  for(int n=0;n< M;n++)
+    printf("%d %lg\n",n,timebuf[n]);
+#endif
+
 
   // Shift to beginning of buffer, apply window and scale (N*N)
   float kaiser_window[M];

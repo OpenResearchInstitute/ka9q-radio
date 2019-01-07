@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.28 2019/01/01 07:11:37 karn Exp karn $
+// $Id: packet.c,v 1.29 2019/01/01 09:31:03 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -61,7 +61,6 @@ int Nfds;                     // Number of streams
 int Input_fd = -1;
 int Output_fd = -1;
 struct session *Session;
-extern float Kaiser_beta;
 pthread_mutex_t Output_mutex;
 
 struct session *lookup_session(const uint32_t ssrc);
