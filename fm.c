@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.67 2019/01/02 11:29:01 karn Exp karn $
+// $Id: fm.c,v 1.68 2019/01/05 23:16:55 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -87,7 +87,7 @@ void *demod_fm(void *arg){
 
 	float ang = cargf(p);
 	// Experimental threshold reduction per Fred Harris (if I understood him)
-	float amp = cabsf(p) / (2 * fm_variance);
+	float amp = cabsf(p) / fm_variance;
 	if(amp > 1)
 	  amp = 1;
 
