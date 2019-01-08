@@ -1,4 +1,4 @@
-// $Id: metadump.c,v 1.1 2018/12/10 11:53:31 karn Exp karn $
+// $Id: metadump.c,v 1.2 2018/12/12 08:38:42 karn Exp karn $
 // Utility to trace multicast SDR metadata
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -53,17 +53,21 @@ int main(int argc,char *argv[]){
   fprintf(stderr,"Listening to %s\n",argv[optind]);
   Status_sock = setup_mcast(argv[optind],NULL,0,0,2);
 
+  struct sockcache sc;
   for(;;){
     unsigned char buffer[8192];
 
     memset(buffer,0,sizeof(buffer));
-    int length = recv(Status_sock,buffer,sizeof(buffer),0);
+    struct sockaddr_storage source;
+    socklen_t len = sizeof(source);
+    int length = recvfrom(Status_sock,buffer,sizeof(buffer),0,(struct sockaddr *)&source,&len);
     if(length <= 0){
       sleep(1);
       continue;
     }
+    update_sockcache(&sc,(struct sockaddr *)&source);
     int cr = buffer[0]; // Command/response byte
-    printf("%s:",cr ? "CMD " : "STAT");
+    printf("%s:%s: %s",sc.host,sc.port,cr ? "CMD " : "STAT");
     dump_metadata(buffer+1,length-1);
   }
 }
