@@ -285,7 +285,7 @@ int main(int argc,char * const argv[]){
       int len = compact_packet(&State[0],packet,full_status_counter == 0);
       if(full_status_counter-- <= 0)
 	full_status_counter = 10;
-      if(len > 1)
+      if(len > 2)
 	send(Status_out_fd,packet,len,0);
     }
   }
