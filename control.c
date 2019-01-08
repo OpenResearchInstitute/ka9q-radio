@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.41 2018/12/24 02:40:38 karn Exp karn $
+// $Id: control.c,v 1.42 2019/01/05 23:06:56 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -306,9 +306,9 @@ int main(int argc,char *argv[]){
   // Third row
   col = 0;
   row += 12;
-  data = newwin(5,109,row,col);
+  data = newwin(6,109,row,col);
   col = 0;
-  row += 5;
+  row += 6;
   status = newwin(5,109,row,col);
   col = 0;
   row += 5;
@@ -334,6 +334,10 @@ int main(int argc,char *argv[]){
   struct sockcache output_metadata_source,output_metadata_dest;
   memset(&output_metadata_source,0,sizeof(output_metadata_source));
   memset(&output_metadata_dest,0,sizeof(output_metadata_dest));
+
+  struct sockcache opus_source,opus_dest;
+  memset(&opus_source,0,sizeof(opus_source));
+  memset(&opus_dest,0,sizeof(opus_dest));
 
   mmask_t mask = ALL_MOUSE_EVENTS;
   mousemask(mask,NULL);
@@ -749,25 +753,29 @@ int main(int argc,char *argv[]){
     update_sockcache(&input_metadata_dest,(struct sockaddr *)&demod->input.metadata_dest_address);
     update_sockcache(&output_metadata_source,(struct sockaddr *)&demod->output.metadata_source_address);
     update_sockcache(&output_metadata_dest,(struct sockaddr *)&demod->output.metadata_dest_address);
+    update_sockcache(&opus_source,(struct sockaddr *)&demod->opus.source_address);
+    update_sockcache(&opus_dest,(struct sockaddr *)&demod->opus.dest_address);
 
     wmove(data,0,0);
     wclrtobot(data);
     row = 2;  col = 1;
     mvwprintw(data,row++,col,"in");
-    mvwprintw(data,row,col,"out");
+    mvwprintw(data,row++,col,"out");
+    mvwprintw(data,row++,col,"opus");
     col += 4;
 
     row = 1;
     mvwprintw(data,row++,col,"%12s","packets");
     mvwprintw(data,row++,col,"%'12llu",demod->input.rtp.packets);
-    mvwprintw(data,row,col,"%'12llu",demod->output.rtp.packets);
+    mvwprintw(data,row++,col,"%'12llu",demod->output.rtp.packets);
+    mvwprintw(data,row++,col,"%'12llu",demod->opus.packets);
     col += 13;
 
     row = 1;
-    mvwprintw(data,row++,col,"%16s","samples");
-    mvwprintw(data,row++,col,"%'16llu",demod->input.samples);
-    mvwprintw(data,row,col,"%'16llu",demod->output.samples);
-    col += 17;
+    mvwprintw(data,row++,col,"%20s","samples");
+    mvwprintw(data,row++,col,"%'20llu",demod->input.samples);
+    mvwprintw(data,row,col,"%'20llu",demod->output.samples);
+    col += 21;
 
     row = 1;
     mvwprintw(data,row++,col,"%6s","drops");
@@ -790,10 +798,14 @@ int main(int argc,char *argv[]){
     mvwprintw(data,row++,col,"%s:%s -> %s:%s",
 	      input_data_source.host,input_data_source.port,
 	      input_data_dest.host,input_data_dest.port);
-    mvwprintw(data,row,col,"%s:%s -> %s:%s",
+    mvwprintw(data,row++,col,"%s:%s -> %s:%s",
 	      output_data_source.host,output_data_source.port,
 	      output_data_dest.host,output_data_dest.port);
-    
+    mvwprintw(data,row++,col,"%s:%s -> %s:%s",
+	       opus_source.host,opus_source.port,
+	       opus_dest.host,opus_dest.port);
+	       
+
     box(data,0,0);
     mvwaddstr(data,0,6,"Data");
 
@@ -807,7 +819,8 @@ int main(int argc,char *argv[]){
     row = 1;
     mvwprintw(status,row++,col,"%12s","packets");
     mvwprintw(status,row++,col,"%'12llu",demod->input.metadata_packets);
-    mvwprintw(status,row,col,"%'12llu",demod->output.metadata_packets);
+    mvwprintw(status,row++,col,"%'12llu",demod->output.metadata_packets);
+
     col += 13;
 
     row = 1;
@@ -1420,6 +1433,24 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
       break;
     case OUTPUT_SAMPLES:
       demod->output.samples = decode_int(cp,optlen);
+      break;
+    case OPUS_SOURCE_SOCKET:
+      decode_socket(&demod->opus.source_address,cp,optlen);
+      break;
+    case OPUS_DEST_SOCKET:
+      decode_socket(&demod->opus.dest_address,cp,optlen);
+      break;
+    case OPUS_SSRC:
+      demod->opus.ssrc = decode_int(cp,optlen);
+      break;
+    case OPUS_TTL:
+      demod->opus.ttl = decode_int(cp,optlen);
+      break;
+    case OPUS_BITRATE:
+      demod->opus.bitrate = decode_int(cp,optlen);
+      break;
+    case OPUS_PACKETS:
+      demod->opus.packets = decode_int(cp,optlen);
       break;
     default:
       break;
