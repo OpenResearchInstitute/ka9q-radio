@@ -1,4 +1,4 @@
-// $Id: dump.c,v 1.9 2018/12/24 02:40:11 karn Exp karn $
+// $Id: dump.c,v 1.10 2019/01/08 06:17:54 karn Exp karn $
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
@@ -183,6 +183,9 @@ void dump_metadata(unsigned char *buffer,int length){
     case INDEPENDENT_SIDEBAND:
       printf(" ISB %'llu;",(long long unsigned)decode_int(cp,optlen));
       break;
+    case FM_FLAT:
+      printf(" FM_flat %'llu;",(long long unsigned)decode_int(cp,optlen));
+      break;
     case DEMOD_SNR:
       printf(" Demod SNR %.1f dB;",decode_float(cp,optlen));
       break;
@@ -209,6 +212,9 @@ void dump_metadata(unsigned char *buffer,int length){
       break;
     case PLL_PHASE:
       printf(" PLL phase %g deg;",(180/M_PI)*decode_float(cp,optlen));
+      break;
+    case OUTPUT_LEVEL:
+      printf(" output level %lg dB;",decode_float(cp,optlen));
       break;
     case OUTPUT_CHANNELS:
       printf(" out channels %'llu;",(long long unsigned)decode_int(cp,optlen));
@@ -255,7 +261,7 @@ void dump_metadata(unsigned char *buffer,int length){
       printf(" opus ttl %d;",(int)decode_int(cp,optlen));
       break;
     case OPUS_BITRATE:
-      printf(" opus rate %d bps;",(int)decode_int(cp,optlen));
+      printf(" opus rate %'d bps;",(int)decode_int(cp,optlen));
       break;
     case OPUS_PACKETS:
       printf(" opus pkts %'llu;",(long long unsigned)decode_int(cp,optlen));
