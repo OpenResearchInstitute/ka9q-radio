@@ -90,6 +90,13 @@ enum status_type {
   GAIN,     // AM, Linear only
   OUTPUT_LEVEL,     // All modes
   OUTPUT_SAMPLES,
+
+  OPUS_SOURCE_SOCKET,
+  OPUS_DEST_SOCKET,
+  OPUS_SSRC,
+  OPUS_TTL,
+  OPUS_BITRATE,
+  OPUS_PACKETS,
 };
 
 
