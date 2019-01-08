@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.134 2019/01/01 09:57:50 karn Exp karn $
+# $Id: Makefile,v 1.135 2019/01/05 23:14:26 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -53,7 +53,7 @@ monitor: monitor.o libradio.a
 	$(CC) -g -o $@ $^ -lopus -lportaudio -lncurses -lbsd -lm -lpthread
 
 opus: opus.o libradio.a
-	$(CC) -g -o $@ $^ -lopus -lbsd -lm
+	$(CC) -g -o $@ $^ -lopus -lbsd -lm -lpthread
 
 opussend: opussend.o libradio.a
 	$(CC) -g -o $@ $^ -lopus -lportaudio -lbsd -lm
