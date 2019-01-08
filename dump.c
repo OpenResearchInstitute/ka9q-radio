@@ -1,4 +1,4 @@
-// $Id: dump.c,v 1.8 2018/12/20 02:30:38 karn Exp karn $
+// $Id: dump.c,v 1.9 2018/12/24 02:40:11 karn Exp karn $
 #define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
@@ -238,9 +238,30 @@ void dump_metadata(unsigned char *buffer,int length){
       printf(" direct conv %d;",(int)decode_int(cp,optlen));
       break;
     case OUTPUT_SAMPLES:
-      printf(" output samp %'llu",(long long unsigned)decode_int(cp,optlen));
+      printf(" output samp %'llu;",(long long unsigned)decode_int(cp,optlen));
+      break;
+    case OPUS_SOURCE_SOCKET:
+      dump_socket(host,port,cp,optlen);
+      printf(" opus src %s:%s;",host,port);
+      break;
+    case OPUS_DEST_SOCKET:
+      dump_socket(host,port,cp,optlen);
+      printf(" opus dst %s:%s;",host,port);
+      break;
+    case OPUS_SSRC:
+      printf(" opus ssrc %x;",(int)decode_int(cp,optlen));
+      break;
+    case OPUS_TTL:
+      printf(" opus ttl %d;",(int)decode_int(cp,optlen));
+      break;
+    case OPUS_BITRATE:
+      printf(" opus rate %d bps;",(int)decode_int(cp,optlen));
+      break;
+    case OPUS_PACKETS:
+      printf(" opus pkts %'llu;",(long long unsigned)decode_int(cp,optlen));
       break;
     default:
+      printf(" unknown type %d length %d;",type,optlen);
       break;
     }
     cp += optlen;
