@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.94 2018/12/20 06:57:49 karn Exp karn $
+// $Id: radio.h,v 1.95 2018/12/22 10:12:18 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -202,6 +202,7 @@ struct demod {
     
     struct sockaddr_storage data_source_address; // Source of I/Q data
     struct sockaddr_storage data_dest_address;   // Dest of I/Q data (typically multicast)
+    
     int data_fd;         // File descriptor for multicast output
     int rtcp_fd;    // File descriptor for RTP control protocol
     int status_fd;  // File descriptor for receiver status
@@ -212,6 +213,14 @@ struct demod {
     uint64_t samples;
     uint64_t commands;
   } output;
+  struct {
+    struct sockaddr_storage source_address; // when opus codec is used
+    struct sockaddr_storage dest_address; 
+    uint32_t ssrc; 
+    int ttl;
+    int bitrate;
+    int packets;
+  } opus;
 };
 extern char Libdir[];
 extern int Tunestep;
