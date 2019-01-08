@@ -1,4 +1,4 @@
-// $Id$
+// $Id: pl.c,v 1.2 2019/01/05 23:16:05 karn Exp karn $
 // PL tone decoder
 // Reads multicast PCM audio (mono only right now)
 // Copyright Jan 2019 Phil Karn, KA9Q
@@ -24,11 +24,13 @@
 #include "misc.h"
 #include "multicast.h"
 #include "osc.h"
+#include "filter.h"
 
 // Global config variables
 #define Pktsize 16384
 #define Samprate 48000   // Too hard to handle other sample rates right now
-#define Bufsize (Samprate/4)    // Integration time
+#define PL_blocksize (Samprate/4)    // Integration time
+#define DTMF_blocksize (Samprate/25)
 
 float const SCALE16 = 1./SHRT_MAX;
 
@@ -54,7 +56,8 @@ struct session {
 
   struct rtp_state rtp_state_in; // RTP input state
 
-  int audio_count;          // Number of samples integrated so far
+  int pl_audio_count;          // Number of samples integrated so far
+  int dtmf_audio_count;          // Number of samples integrated so far
 };
 
 void closedown(int);
@@ -70,7 +73,24 @@ struct option Options[] =
    {"ttl", required_argument, NULL, 'T'},
    {"verbose", no_argument, NULL, 'v'},
    {NULL, 0, NULL, 0},
-  };
+};
+
+struct result {
+  float energy;
+  int index;
+};
+
+// greater energy compares as "less" so list is sorted in descending order
+int compare(const void *ap,const void *bp){
+  const struct result *a = (struct result *)ap;
+  const struct result *b = (struct result *)bp;  
+  if(a->energy > b->energy)
+    return -1;
+  else if(a->energy < b->energy)
+    return +1;
+  return 0;
+}
+
 
 char Optstring[] = "A:I:T:v";
 
@@ -79,7 +99,8 @@ float PL_tones[] = {
     100.0, 103.5, 107.2, 110.9, 114.8, 118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2,
     150.0, 151.4, 156.7, 162.2, 167.9, 173.8, 179.9, 186.2, 192.8, 199.5, 206.5, 213.8,
     221.3, 229.1, 237.1, 245.5, 254.1, 159.8, 165.5, 171.3, 177.3, 183.5, 189.9, 196.6,
-    203.5, 210.7, 218.1, 225.7, 233.6, 241.8, 250.3, };
+    203.5, 210.7, 218.1, 225.7, 233.6, 241.8, 250.3,
+};
 
 #define N_tones (sizeof(PL_tones)/sizeof(float))
 struct osc PL_osc[N_tones];
@@ -102,8 +123,6 @@ int main(int argc,char * const argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  Mcast_ttl = 10;
-
   while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
     case 'A':
@@ -152,6 +171,8 @@ int main(int argc,char * const argv[]){
   signal(SIGTERM,closedown);
   signal(SIGPIPE,SIG_IGN);
 
+  // Set up kaiser window
+  
   // Set up PL tone steps and phasors
   complex float PL_integrators[N_tones];
   memset(PL_integrators,0,sizeof(PL_integrators));
@@ -220,7 +241,6 @@ int main(int argc,char * const argv[]){
       continue;
     
     short *sampp = (short *)dp;
-    sp->audio_count += sampcount;
     while(sampcount-- > 0){
       float samp = SCALE16 * (short)ntohs(*sampp++);
       for(int n=0; n < N_tones; n++)
@@ -229,38 +249,39 @@ int main(int argc,char * const argv[]){
 	DTMF_low_integrators[n] += samp * step_osc(&DTMF_low_osc[n]);
 	DTMF_high_integrators[n] += samp * step_osc(&DTMF_high_osc[n]);
       }
+      sp->pl_audio_count++;
+      sp->dtmf_audio_count++;
     }
-    if(sp->audio_count >= Bufsize){
-      sp->audio_count = 0;
+    if(sp->pl_audio_count >= PL_blocksize){
+      sp->pl_audio_count = 0;
 
       // Look for PL tone
       int pl_tone = -1;
       float pl_snr = 0;
       {
-	float maxenergy = 0;
-	float totenergy = 0;
+	struct result results[N_tones];
 	for(int n=0; n < N_tones; n++){
-	  float energy = cnrmf(PL_integrators[n]);
-	  totenergy += energy;
-	  if(energy >= maxenergy){
-	    maxenergy = energy;
-	    pl_tone = n;
-	  }
+	  results[n].energy = cnrmf(PL_integrators[n]);
+	  results[n].index = n;
 	}
 	memset(PL_integrators,0,sizeof(PL_integrators)); // Reset integrators
-	pl_snr = maxenergy / (totenergy - maxenergy);
-	if(pl_snr < 2) // 3 dB
-	  pl_tone = -1; // Not good enough
-	if(pl_tone != -1)
-	  printf("SSRC %x PL %.1f Hz %.1f dB total %.1f dB SNR %.1f dB\n",
-		 sp->rtp_state_in.ssrc,
-		 PL_tones[pl_tone],
-		 10*log10f(maxenergy),
-		 10*log10f(totenergy),
-		 10*log10f(maxenergy/(totenergy - maxenergy))
-		 );
+	qsort(results,N_tones,sizeof(results[0]),compare); // Descending energy order
+#if 0
+	printf("sort results\n");
+	for(int n=0; n < N_tones; n++)
+	  printf("%.1f Hz %.1f dB\n",PL_tones[results[n].index],power2dB(results[n].energy));
+#endif
 
+	pl_tone = results[0].index;
+	pl_snr = power2dB(results[0].energy) - power2dB(results[1].energy);
+	if(pl_snr < 6)
+		pl_tone = -1; // Not good enough */
+	if(pl_tone != -1)
+	  printf("SSRC %x PL %.1f Hz ratio %.1f dB\n",sp->rtp_state_in.ssrc,PL_tones[results[0].index],pl_snr);
       }
+    }
+    if(sp->dtmf_audio_count >= DTMF_blocksize){
+      sp->dtmf_audio_count = 0;
 
       // Look for DTMF
       int lowtone = -1;
@@ -278,7 +299,7 @@ int main(int argc,char * const argv[]){
 	}
 	memset(DTMF_low_integrators,0,sizeof(DTMF_low_integrators));
 	lowsnr = maxenergy / (totenergy - maxenergy);
-	if(lowsnr < 4) // 6 dB
+	if(lowsnr < 10) // 10 dB
 	  lowtone = -1; // Not good enough
       }
       int hightone = -1;
@@ -296,7 +317,7 @@ int main(int argc,char * const argv[]){
 	}
 	memset(DTMF_high_integrators,0,sizeof(DTMF_high_integrators));
 	highsnr = maxenergy / (totenergy - maxenergy);
-	if(highsnr < 4) // 6 dB
+	if(highsnr < 10) // 10 dB
 	  hightone = -1;
       }
       if(lowtone != -1 && hightone != -1)
