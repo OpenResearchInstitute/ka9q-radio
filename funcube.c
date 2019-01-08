@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.73 2018/12/22 02:27:08 karn Exp karn $
+// $Id: funcube.c,v 1.74 2019/01/01 09:57:37 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -168,6 +168,13 @@ int main(int argc,char *argv[]){
       break;
     case 'D':
       Data_dest = optarg;
+      Rtp_sock = setup_mcast(Data_dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
+      if(Rtp_sock == -1){
+	errmsg("Can't create multicast socket: %s\n",strerror(errno));
+	exit(1);
+      }
+      socklen_t len = sizeof(Output_data_source_address);
+      getsockname(Rtp_sock,(struct sockaddr *)&Output_data_source_address,&len);
       break;
     case 'I':
       Device = strtol(optarg,NULL,0);
@@ -177,6 +184,17 @@ int main(int argc,char *argv[]){
       break;
     case 'R':
       Metadata_dest = optarg;
+      Status_sock = setup_mcast(Metadata_dest,(struct sockaddr *)&Output_metadata_dest_address,1,Mcast_ttl,2); // For output
+      if(Status_sock <= 0){
+	errmsg("Can't create multicast socket: %s\n",strerror(errno));
+	exit(1);
+      }
+      // Set up new control socket on port 5006
+      Nctl_sock = setup_mcast(NULL,(struct sockaddr *)&Output_metadata_dest_address,0,Mcast_ttl,2); // For input
+      if(Nctl_sock <= 0){
+	errmsg("Can't create multicast socket: %s\n",strerror(errno));
+	exit(1);
+      }
       break;
     case 'S':
       Rtp.ssrc = strtol(optarg,NULL,0);
@@ -289,13 +307,6 @@ int main(int argc,char *argv[]){
   }
   // Set up RTP output socket
   sleep(1);
-  Rtp_sock = setup_mcast(Data_dest,(struct sockaddr *)&Output_data_dest_address,1,Mcast_ttl,0);
-  if(Rtp_sock == -1){
-    errmsg("Can't create multicast socket: %s\n",strerror(errno));
-    exit(1);
-  }
-  socklen_t len = sizeof(Output_data_source_address);
-  getsockname(Rtp_sock,(struct sockaddr *)&Output_data_source_address,&len);
     
   Pa_Initialize();
   if(front_end_init(sdr,Device,ADC_samprate,Blocksize) < 0){
@@ -432,16 +443,6 @@ void *ncmd(void *arg){
   memset(State,0,sizeof(State));
 
   // Set up status socket on port 5006
-  Status_sock = setup_mcast(Metadata_dest,(struct sockaddr *)&Output_metadata_dest_address,1,Mcast_ttl,2); // For output
-  if(Status_sock <= 0)
-    return NULL;
-
-  // Set up new control socket on port 5006
-  Nctl_sock = setup_mcast(NULL,(struct sockaddr *)&Output_metadata_dest_address,0,Mcast_ttl,2); // For input
-  if(Nctl_sock <= 0){
-    close(Status_sock);
-    return NULL; // Nothing to do
-  }
   struct timeval tv;
   tv.tv_sec = 0;
   tv.tv_usec = 100000; // 100 ms
