@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.31 2019/01/01 09:31:03 karn Exp karn $
+// $Id: opus.c,v 1.32 2019/01/05 23:14:56 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -19,9 +19,11 @@
 #include <sys/resource.h>
 #include <signal.h>
 #include <getopt.h>
+#include <pthread.h>
 
 #include "misc.h"
 #include "multicast.h"
+#include "status.h"
 
 struct session {
   struct session *prev;       // Linked list pointers
@@ -64,22 +66,29 @@ int Fec = 0;                  // Use forward error correction
 int Mcast_ttl = 10;           // our multicast output is frequently routed
 
 // Global variables
+int Status_fd = -1;           // Reading from radio status
+int Status_out_fd = -1;       // Writing to radio status
 int Input_fd = -1;            // Multicast receive socket
 int Output_fd = -1;           // Multicast receive socket
 int Opus_frame_size;
 struct session *Audio;
+struct state State[256];
+uint64_t Output_packets;
+
 
 void closedown(int);
 struct session *lookup_session(const struct sockaddr *,uint32_t);
 struct session *make_session(struct sockaddr const *r,uint32_t,uint16_t,uint32_t);
 int close_session(struct session *);
 int send_samples(struct session *sp,float left,float right);
+void *input(void *arg);
 
 struct option Options[] =
   {
    {"iface", required_argument, NULL, 'A'},
    {"block-time", required_argument, NULL, 'B'},
    {"pcm-in", required_argument, NULL, 'I'},
+   {"status-in", required_argument, NULL, 'S'},
    {"opus-out", required_argument, NULL, 'R'},
    {"ttl", required_argument, NULL, 'T'},
    {"fec", required_argument, NULL, 'f'},
@@ -89,19 +98,20 @@ struct option Options[] =
    {NULL, 0, NULL, 0},
   };
    
-char Optstring[] = "A:B:I:R:T:f:o:vx";
+char Optstring[] = "A:B:I:R:S:T:f:o:vx";
+
+struct sockaddr_storage Status_dest_address;
+struct sockaddr_storage Status_input_source_address;
+struct sockaddr_storage Local_status_source_address;
+struct sockaddr_storage PCM_dest_address;
+struct sockaddr_storage PCM_source_address;
+struct sockaddr_storage Opus_dest_address;
+struct sockaddr_storage Opus_source_address;
+
+struct sockcache SC; // TEMP
 
 
 int main(int argc,char * const argv[]){
-#if 0   // Better handled in systemd?
-  // Try to improve our priority
-  int prio = getpriority(PRIO_PROCESS,0);
-  prio = setpriority(PRIO_PROCESS,0,prio - 10);
-
-  // Drop root if we have it
-  if(seteuid(getuid()) != 0)
-    perror("setuid");
-#endif
 
   setlocale(LC_ALL,getenv("LANG"));
 
@@ -116,9 +126,37 @@ int main(int argc,char * const argv[]){
       break;
     case 'I':
       Mcast_input_address_text = optarg;
+      Input_fd = setup_mcast(Mcast_input_address_text,(struct sockaddr *)&PCM_dest_address,0,0,0);
+      if(Input_fd == -1){
+	fprintf(stderr,"Can't set up input on %s: %sn",Mcast_input_address_text,strerror(errno));
+	exit(1);
+      }
       break;
     case 'R':
       Mcast_output_address_text = optarg;
+      Output_fd = setup_mcast(Mcast_output_address_text,(struct sockaddr *)&Opus_dest_address,1,Mcast_ttl,0);
+      if(Output_fd == -1){
+	fprintf(stderr,"Can't set up output on %s: %s\n",Mcast_output_address_text,strerror(errno));
+	exit(1);
+      }
+      {
+	socklen_t len;
+	len = sizeof(Opus_source_address);
+	getsockname(Status_out_fd,(struct sockaddr *)&Opus_source_address,&len);
+      }
+      break;
+    case 'S':
+      Status_fd = setup_mcast(optarg,(struct sockaddr *)&Status_dest_address,0,0,2);
+      if(Status_fd == -1){
+	fprintf(stderr,"Can't set up input on %s: %s\n",optarg,strerror(errno));
+	exit(1);
+      }
+      Status_out_fd = setup_mcast(NULL,(struct sockaddr *)&Status_dest_address,1,Mcast_ttl,2);
+      {
+	socklen_t len;
+	len = sizeof(Local_status_source_address);
+	getsockname(Status_out_fd,(struct sockaddr *)&Local_status_source_address,&len);
+      }
       break;
     case 'T':
       Mcast_ttl = strtol(optarg,NULL,0);
@@ -155,26 +193,19 @@ int main(int argc,char * const argv[]){
     Opus_bitrate *= 1000; // Assume it was given in kb/s
 
   // Set up multicast
-  if(!Mcast_input_address_text || !Mcast_output_address_text){
-    fprintf(stderr,"Must specify -I and -R options\n");
+  if(Input_fd == -1 && Status_fd == -1){
+    fprintf(stderr,"Must specify either --status-in or --pcm-in\n");
     exit(1);
   }
-
-  Input_fd = setup_mcast(Mcast_input_address_text,NULL,0,0,0);
-  if(Input_fd == -1){
-    fprintf(stderr,"Can't set up input on %s: %sn",Mcast_input_address_text,strerror(errno));
-    exit(1);
-  }
-  Output_fd = setup_mcast(Mcast_output_address_text,NULL,1,Mcast_ttl,0);
   if(Output_fd == -1){
-    fprintf(stderr,"Can't set up output on %s: %s\n",Mcast_output_address_text,strerror(errno));
+    fprintf(stderr,"Must specify --opus-out\n");
     exit(1);
   }
 
   // Set up to receive PCM in RTP/UDP/IP
-
-  
-  struct sockaddr sender;
+  pthread_t input_thread;
+  if(Input_fd != -1)
+    pthread_create(&input_thread,NULL,input,NULL);
 
   // Graceful signal catch
   signal(SIGPIPE,closedown);
@@ -184,10 +215,92 @@ int main(int argc,char * const argv[]){
   signal(SIGTERM,closedown);
   signal(SIGPIPE,SIG_IGN);
 
+  // Radio status channel reception and transmission
+
+  while(Status_fd == -1)
+    sleep(1); // Status channel not specified
+
+  int full_status_counter = 0;
+  while(1){
+    socklen_t socklen = sizeof(Status_input_source_address);
+    unsigned char buffer[16384];
+    int length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Status_input_source_address,&socklen);
+
+    // We MUST ignore our own status packets, or we'll loop!
+    if(memcmp(&Status_input_source_address, &Local_status_source_address, sizeof(Local_status_source_address)) == 0)
+      continue;
+
+    if(length <= 0){
+      usleep(10000);
+      continue;
+    }
+    // Parse entries
+    {
+      int cr = buffer[0];
+      if(cr == 1)
+	continue; // Ignore commands
+      unsigned char *cp = buffer+1;
+
+      while(cp - buffer < length){
+	enum status_type type = *cp++;
+	
+	if(type == EOL)
+	  break;
+	
+	unsigned int optlen = *cp++;
+	if(cp - buffer + optlen > length)
+	  break;
+	
+	switch(type){
+	case EOL:
+	  goto done;
+	case OUTPUT_DATA_DEST_SOCKET:
+	  decode_socket(&PCM_dest_address,cp,optlen);
+	  update_sockcache(&SC,(struct sockaddr *)&PCM_dest_address);
+	  if(Input_fd == -1){
+	    Input_fd = setup_mcast(NULL,(struct sockaddr *)&PCM_dest_address,0,0,0);
+	    pthread_create(&input_thread,NULL,input,NULL);
+	  }
+	  break;
+	default:  // Ignore all others for now
+	  break;
+	}
+	cp += optlen;
+      }
+    done:;
+    }
+    // Announce ourselves
+    {
+      unsigned char packet[2048],*bp;
+      memset(packet,0,sizeof(packet));
+      bp = packet;
+      *bp++ = 0; // Response (not a command)
+      encode_socket(&bp,OPUS_SOURCE_SOCKET,&Opus_source_address);
+      encode_socket(&bp,OPUS_DEST_SOCKET,&Opus_dest_address);
+      encode_int(&bp,OPUS_BITRATE,Opus_bitrate);
+      encode_int(&bp,OPUS_PACKETS,Output_packets);
+      encode_int(&bp,OPUS_TTL,Mcast_ttl);
+      // Add more later
+      encode_eol(&bp);
+      int len = compact_packet(&State[0],packet,full_status_counter == 0);
+      if(full_status_counter-- <= 0)
+	full_status_counter = 10;
+      if(len > 1)
+	send(Status_out_fd,packet,len,0);
+    }
+  }
+}
+
+
+
+void *input(void *arg){
+  if(Verbose)
+    fprintf(stderr,"input thread running\n");
+
   while(1){
     unsigned char buffer[Bufsize];
-    socklen_t socksize = sizeof(sender);
-    int size = recvfrom(Input_fd,buffer,sizeof(buffer),0,&sender,&socksize);
+    socklen_t socksize = sizeof(PCM_source_address);
+    int size = recvfrom(Input_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&PCM_source_address,&socksize);
     if(size == -1){
       if(errno != EINTR){ // Happens routinely
 	perror("recvfrom");
@@ -223,14 +336,14 @@ int main(int argc,char * const argv[]){
       goto endloop; // Discard all but mono and stereo PCM to avoid polluting session table
     }
 
-    struct session *sp = lookup_session(&sender,rtp_hdr.ssrc);
+    struct session *sp = lookup_session((struct sockaddr *)&PCM_source_address,rtp_hdr.ssrc);
     if(sp == NULL){
       // Not found
-      if((sp = make_session(&sender,rtp_hdr.ssrc,rtp_hdr.seq,rtp_hdr.timestamp)) == NULL){
+      if((sp = make_session((struct sockaddr *)&PCM_source_address,rtp_hdr.ssrc,rtp_hdr.seq,rtp_hdr.timestamp)) == NULL){
 	fprintf(stderr,"No room!!\n");
 	goto endloop;
       }
-      getnameinfo((struct sockaddr *)&sender,sizeof(sender),sp->addr,sizeof(sp->addr),
+      getnameinfo((struct sockaddr *)&PCM_source_address,sizeof(PCM_source_address),sp->addr,sizeof(sp->addr),
 		    sp->port,sizeof(sp->port),NI_NOFQDN|NI_DGRAM);
       sp->audio_buffer = malloc(Channels * sizeof(float) * Opus_frame_size);
       sp->audio_index = 0;
@@ -407,6 +520,7 @@ int send_samples(struct session *sp,float left,float right){
       // ship it
       if(send(Output_fd,outbuffer,dp-outbuffer,0) < 0)
 	return -1;
+      Output_packets++; // all sessions
       sp->rtp_state_out.seq++; // Increment only if packet is sent
       sp->rtp_state_out.bytes += size;
       sp->rtp_state_out.packets++;
