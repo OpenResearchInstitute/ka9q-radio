@@ -1,4 +1,4 @@
-// $Id: status.c,v 1.15 2018/12/13 09:47:57 karn Exp karn $
+// $Id: status.c,v 1.16 2018/12/18 12:37:48 karn Exp karn $
 // Thread to emit receiver status packets
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -123,6 +123,9 @@ uint64_t decode_int(unsigned char *cp,int len){
 }
 
 float decode_float(unsigned char *cp,int len){
+  if(len == 0)
+    return 0;
+  
   if(len == 8)
     return (float)decode_double(cp,len);
 
@@ -131,6 +134,9 @@ float decode_float(unsigned char *cp,int len){
 }
 
 double decode_double(unsigned char *cp,int len){
+  if(len == 0)
+    return 0;
+  
   if(len == 4)
     return (double)decode_float(cp,len);
 
