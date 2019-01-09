@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.68 2019/01/05 23:16:55 karn Exp karn $
+// $Id: fm.c,v 1.69 2019/01/08 06:20:31 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -64,8 +64,9 @@ void *demod_fm(void *arg){
 
     fm_variance /= (filter->olen - 1);
 
-    // Approximate SNR because magnitude has a chi-squared distribution with 2 degrees of freedom
-    demod->sig.snr = avg_amp*avg_amp/(fm_variance) - 1;
+    // Magnitude has a chi-squared distribution with 2 degrees of freedom, so the mean noise amplitude is half the variance
+    // This is only approximate, the proper formula is much more complicated
+    demod->sig.snr = avg_amp*avg_amp/(2*fm_variance) - 1;
     demod->sig.snr = max(0.0f,demod->sig.snr); // Smoothed values can be a little inconsistent
 
     float samples[filter->olen];    // Demodulated FM samples
