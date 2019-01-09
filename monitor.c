@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.89 2018/12/27 10:28:14 karn Exp karn $
+// $Id: monitor.c,v 1.90 2019/01/01 09:31:03 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -80,7 +80,7 @@ struct session {
 // Global config variables
 #define SAMPRATE 48000        // Too hard to handle other sample rates right now
 #define SAMPPCALLBACK (SAMPRATE/50)     // 20 ms @ 48 kHz
-#define PLAYOUT (SAMPRATE/10) // Nominal playout buffer delay - 100 ms
+#define PLAYOUT (SAMPRATE/50) // Nominal playout buffer delay - 20 ms
 #define MAX_MCAST 20          // Maximum number of multicast addresses
 
 #define BUFFERSIZE (1<<19)    // about 10.92 sec at 48 kHz stereo - must be power of 2!!
@@ -471,10 +471,10 @@ void *decode_task(void *arg){
       sp->start_rptr = Rptr;
       sp->start_timestamp = pkt->rtp.timestamp; // Resynch as if new stream
       sp->timestamp_upper = 0;
-      //      sp->playout = PLAYOUT;
-      sp->playout = 0;
+      sp->playout = PLAYOUT;
       sp->wptr = Rptr + sp->playout;
     } else if(sp->wptr < Rptr){
+      // Increase playout when late - is this the right thing to do?
       sp->late++;
       sp->playout += Rptr - sp->wptr;
       sp->wptr = Rptr;
