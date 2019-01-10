@@ -1,4 +1,4 @@
-// $Id: fm.c,v 1.69 2019/01/08 06:20:31 karn Exp karn $
+// $Id: fm.c,v 1.70 2019/01/09 10:59:03 karn Exp karn $
 // FM demodulation and squelch
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -14,6 +14,8 @@
 #include "dsp.h"
 #include "filter.h"
 #include "radio.h"
+
+double fm_snr(double r);
 
 // FM demodulator thread
 void *demod_fm(void *arg){
@@ -64,9 +66,7 @@ void *demod_fm(void *arg){
 
     fm_variance /= (filter->olen - 1);
 
-    // Magnitude has a chi-squared distribution with 2 degrees of freedom, so the mean noise amplitude is half the variance
-    // This is only approximate, the proper formula is much more complicated
-    demod->sig.snr = avg_amp*avg_amp/(2*fm_variance) - 1;
+    demod->sig.snr = fm_snr(avg_amp*avg_amp/fm_variance);
     demod->sig.snr = max(0.0f,demod->sig.snr); // Smoothed values can be a little inconsistent
 
     float samples[filter->olen];    // Demodulated FM samples
@@ -139,3 +139,68 @@ void *demod_fm(void *arg){
     send_mono_output(demod,samples,filter->olen);
   }
 }
+// The amplitude of a noisy FM signal has a Rice distribution
+// Given the ratio 'r' of the mean and standard deviation measurements, find the
+// ratio 'theta' of the Ricean parameters 'nu' and 'sigma', the true
+// signal and noise amplitudes
+
+// Pure noise is Rayleigh, which has mean/stddev = sqrt(pi/(4-pi)) or meansq/variance = pi/(4-pi) = 5.63 dB
+
+// See Wikipedia article on "Rice Distribution"
+
+// Modified Bessel function of the 0th kind
+static double i0(double const z){
+  const double t = 0.25 * (z*z);
+  double sum = 1 + t;
+  double term = t;
+  for(int k=2; k<40; k++){
+    term *= t/(k*k);
+    sum += term;
+    if(term < 1e-12 * sum)
+      break;
+  }
+  return sum;
+}
+
+// Modified Bessel function of first kind
+static double i1(double const z){
+  const double t = 0.25 * (z*z);
+  double term = 0.5 * t;
+  double sum = 1 + term;
+
+  for(int k=2; k<40; k++){
+    term *= t / (k*(k+1));
+    sum += term;
+    if(term < 1e-12 * sum)
+      break;
+  }
+  double r = 0.5 * z * sum;
+  return r;
+}
+static double xi(double thetasq){
+
+  double t = (2 + thetasq)*i0(0.25*thetasq) + thetasq*i1(0.25*thetasq);
+  t *= t;
+  double r = 2 + thetasq - (0.125*M_PI) * exp(-0.5*thetasq) * t;
+  return r;
+}
+
+
+// Given apparent signal-to-noise power ratio, return corrected value
+double fm_snr(double r){
+  double thetasq = r;
+  double othetasq = r+10;
+
+  if(r <= M_PI/(4-M_PI)) // shouldn't be this low even on pure noise
+    return 0;
+
+  if(r > 100) // 20 dB
+    return r; // Formula blows up for large SNR, and correction is tiny anyway
+
+  while(fabs(thetasq-othetasq) > .001){
+    othetasq = thetasq;
+    thetasq = xi(thetasq)*(1+r) - 2;
+  }
+  return thetasq;
+}
+
