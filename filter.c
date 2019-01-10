@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.34 2018/12/29 06:14:17 karn Exp karn $
+// $Id: filter.c,v 1.35 2019/01/07 00:08:15 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -341,11 +341,11 @@ int delete_filter_output(struct filter_out * const slave){
 }
 
 // Modified Bessel function of the 0th kind, used by the Kaiser window
-static const float i0(float const x){
-  const float t = 0.25 * x * x;
+const float i0(float const z){
+  const float t = (z*z)/4;
   float sum = 1 + t;
   float term = t;
-  for(int k=2;k<40;k++){
+  for(int k=2; k<40; k++){
     term *= t/(k*k);
     sum += term;
     if(term < 1e-12 * sum)
@@ -353,6 +353,22 @@ static const float i0(float const x){
   }
   return sum;
 }
+
+// Modified Bessel function of first kind
+const float i1(float const z){
+  const float t = (z*z)/4;
+  float term = 1;
+  float sum = term;
+
+  for(int k=1; k<40; k++){
+    term *= t / (k*(k+1));
+    sum += term;
+    if(term < 1e-12 * sum)
+      break;
+  }
+  return 0.5 * z * sum;
+}
+
 
 
 #if 0 // Available if you ever want them
