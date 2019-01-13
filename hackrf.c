@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.36 2019/01/01 03:32:50 karn Exp karn $
+// $Id: hackrf.c,v 1.37 2019/01/01 09:57:37 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -143,6 +143,7 @@ int rx_callback(hackrf_transfer *);
 void *display(void *);
 void *ncmd(void *arg);
 void errmsg(const char *,...);
+double true_freq(uint64_t freq);
 
 
 int main(int argc,char *argv[]){
@@ -702,6 +703,7 @@ void *display(void *arg){
 
 void decode_hackrf_commands(struct sdrstate *sdr,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
+  uint64_t intfreq;
 
   while(cp - buffer < length){
     int ret __attribute__((unused)); // Won't be used when asserts are disabled
@@ -721,20 +723,11 @@ void decode_hackrf_commands(struct sdrstate *sdr,unsigned char *buffer,int lengt
       sdr->calibration = decode_double(cp,optlen);
       break;
     case RADIO_FREQUENCY:
-      sdr->status.frequency = decode_double(cp,optlen);
-      uint64_t intfreq = sdr->status.frequency;
-      intfreq += Offset * ADC_samprate/4; // Offset tune by +Fs/4
+      intfreq = round(decode_double(cp,optlen) + Offset * ADC_samprate/4); // Offset tune by +Fs/4
       ret = hackrf_set_freq(sdr->device,intfreq);
       assert(ret == HACKRF_SUCCESS);
-      
-      sdr->status.frequency = round(sdr->status.frequency/ (1 + sdr->calibration));
-      // LNA gain is frequency-dependent
-      if(sdr->status.lna_gain){
-	if(sdr->intfreq >= 420e6)
-	  sdr->status.lna_gain = 7;
-	else
-	  sdr->status.lna_gain = 24;
-      }
+      double tf = true_freq(intfreq) - Offset * ADC_samprate/4;
+      sdr->status.frequency = tf / (1 + sdr->calibration);
       break;
     case LNA_GAIN:	// Fill this in later
       sdr->status.lna_gain = decode_int(cp,optlen);
@@ -991,12 +984,6 @@ void do_hackrf_agc(struct sdrstate *sdr){
 }
 
 
-#if 0
-
-double  rffc5071_freq(uint16_t);
-uint32_t max2837_freq(uint32_t);
-
-
 #define FREQ_ONE_MHZ     (1000*1000)
 
 #define MIN_LP_FREQ_MHZ (0)
@@ -1015,137 +1002,139 @@ uint32_t max2837_freq(uint32_t);
 
 static uint32_t max2837_freq_nominal_hz=2560000000;
 
-uint64_t freq_cache = 100000000;
-/*
- * Set freq/tuning between 0MHz to 7250 MHz (less than 16bits really used)
- * hz between 0 to 999999 Hz (not checked)
- * return false on error or true if success.
- */
-bool set_freq(const uint64_t freq)
-{
-	bool success;
-	uint32_t RFFC5071_freq_mhz;
-	uint32_t MAX2837_freq_hz;
-	uint64_t real_RFFC5071_freq_hz;
-
-	const uint32_t freq_mhz = freq / 1000000;
-	const uint32_t freq_hz = freq % 1000000;
-
-	success = true;
-
-	const max2837_mode_t prior_max2837_mode = max2837_mode(&max2837);
-	max2837_set_mode(&max2837, MAX2837_MODE_STANDBY);
-	if(freq_mhz < MAX_LP_FREQ_MHZ)
-	{
-		rf_path_set_filter(&rf_path, RF_PATH_FILTER_LOW_PASS);
-		/* IF is graduated from 2650 MHz to 2343 MHz */
-		max2837_freq_nominal_hz = 2650000000 - (freq / 7);
-		RFFC5071_freq_mhz = (max2837_freq_nominal_hz / FREQ_ONE_MHZ) + freq_mhz;
-		/* Set Freq and read real freq */
-		real_RFFC5071_freq_hz = rffc5071_set_frequency(&rffc5072, RFFC5071_freq_mhz);
-		max2837_set_frequency(&max2837, real_RFFC5071_freq_hz - freq);
-		sgpio_cpld_stream_rx_set_q_invert(&sgpio_config, 1);
-	}else if( (freq_mhz >= MIN_BYPASS_FREQ_MHZ) && (freq_mhz < MAX_BYPASS_FREQ_MHZ) )
-	{
-		rf_path_set_filter(&rf_path, RF_PATH_FILTER_BYPASS);
-		MAX2837_freq_hz = (freq_mhz * FREQ_ONE_MHZ) + freq_hz;
-		/* RFFC5071_freq_mhz <= not used in Bypass mode */
-		max2837_set_frequency(&max2837, MAX2837_freq_hz);
-		sgpio_cpld_stream_rx_set_q_invert(&sgpio_config, 0);
-	}else if(  (freq_mhz >= MIN_HP_FREQ_MHZ) && (freq_mhz <= MAX_HP_FREQ_MHZ) )
-	{
-		if (freq_mhz < MID1_HP_FREQ_MHZ) {
-			/* IF is graduated from 2150 MHz to 2750 MHz */
-			max2837_freq_nominal_hz = 2150000000 + (((freq - 2750000000) * 60) / 85);
-		} else if (freq_mhz < MID2_HP_FREQ_MHZ) {
-			/* IF is graduated from 2350 MHz to 2650 MHz */
-			max2837_freq_nominal_hz = 2350000000 + ((freq - 3600000000) / 5);
-		} else {
-			/* IF is graduated from 2500 MHz to 2738 MHz */
-			max2837_freq_nominal_hz = 2500000000 + ((freq - 5100000000) / 9);
-		}
-		rf_path_set_filter(&rf_path, RF_PATH_FILTER_HIGH_PASS);
-		RFFC5071_freq_mhz = freq_mhz - (max2837_freq_nominal_hz / FREQ_ONE_MHZ);
-		/* Set Freq and read real freq */
-		real_RFFC5071_freq_hz = rffc5071_set_frequency(&rffc5072, RFFC5071_freq_mhz);
-		max2837_set_frequency(&max2837, freq - real_RFFC5071_freq_hz);
-		sgpio_cpld_stream_rx_set_q_invert(&sgpio_config, 0);
-	}else
-	{
-		/* Error freq_mhz too high */
-		success = false;
-	}
-	max2837_set_mode(&max2837, prior_max2837_mode);
-	if( success ) {
-		freq_cache = freq;
-	}
-	return success;
-}
-
 // extracted from hackRF firmware/common/rffc5071.c
-// Used to set RFFC5071 upconverter to multiples of 1 MHz
 // for future use in determining exact tuning frequency
 
 #define LO_MAX 5400.0
 #define REF_FREQ 50.0
-#define FREQ_ONE_MHZ (1000.0*1000.0)
 
 double  rffc5071_freq(uint16_t lo) {
-	uint8_t lodiv;
-	uint16_t fvco;
-	uint8_t fbkdiv;
-	
-	/* Calculate n_lo */
-	uint8_t n_lo = 0;
-	uint16_t x = LO_MAX / lo;
-	while ((x > 1) && (n_lo < 5)) {
-		n_lo++;
-		x >>= 1;
-	}
+  uint8_t lodiv;
+  uint16_t fvco;
+  uint8_t fbkdiv;
+  
+  /* Calculate n_lo */
+  uint8_t n_lo = 0;
+  uint16_t x = LO_MAX / lo;
+  while ((x > 1) && (n_lo < 5)) {
+    n_lo++;
+    x >>= 1;
+  }
+  
+  lodiv = 1 << n_lo;
+  fvco = lodiv * lo;
+  
+  if (fvco > 3200) {
+    fbkdiv = 4;
+  } else {
+    fbkdiv = 2;
+  }
+  
+  uint64_t tmp_n = ((uint64_t)fvco << 29ULL) / (fbkdiv*REF_FREQ) ;
 
-	lodiv = 1 << n_lo;
-	fvco = lodiv * lo;
-
-	if (fvco > 3200) {
-		fbkdiv = 4;
-	} else {
-		fbkdiv = 2;
-	}
-
-	uint64_t tmp_n = ((uint64_t)fvco << 29ULL) / (fbkdiv*REF_FREQ) ;
-
-	return (REF_FREQ * (tmp_n >> 5ULL) * fbkdiv * FREQ_ONE_MHZ)
-			/ (lodiv * (1 << 24ULL));
-}
-uint32_t max2837_freq(uint32_t freq){
-	uint32_t div_frac;
-	//	uint32_t div_int;
-	uint32_t div_rem;
-	uint32_t div_cmp;
-	int i;
-
-	/* ASSUME 40MHz PLL. Ratio = F*(4/3)/40,000,000 = F/30,000,000 */
-	//	div_int = freq / 30000000;
-       	div_rem = freq % 30000000;
-	div_frac = 0;
-	div_cmp = 30000000;
-	for( i = 0; i < 20; i++) {
-		div_frac <<= 1;
-		div_cmp >>= 1;
-		if (div_rem > div_cmp) {
-			div_frac |= 0x1;
-			div_rem -= div_cmp;
-		}
-	}
-	return div_rem;
-
+  errmsg("lo %'d fvco %'d fbkdiv %'d lodiv %'d tmp_n %'llu (%llu:%llu)\n",lo,fvco,fbkdiv,lodiv,tmp_n,
+	 (tmp_n >> 5ULL),tmp_n & 0xffffff);
+  
+  return (REF_FREQ * (tmp_n >> 5ULL) * fbkdiv * FREQ_ONE_MHZ)
+    / (lodiv * (1 << 24ULL));
 }
 
 
 
+//#define LOGFREQ 1
 
+// Return true max2837 frequency given requested frequency - taken from max2837.c
+double max2837_freq(uint64_t freq){
+  // ASSUME 40MHz PLL. Ratio = F*(4/3)/40,000,000 = F/30,000,000
+  const int fref = 30000000;
 
+  int div_int = freq / fref;
+  int div_rem = freq % fref;
+#if LOGFREQ
+  errmsg("requested %'llu div_int %'d div_rem %'d\n",freq,div_int,div_rem);
 #endif
+
+
+  int div_frac = 0;
+  int div_cmp = fref;
+  
+  for(int i = 0; i < 20; i++) {
+    div_frac <<= 1;
+    div_cmp >>= 1;
+    if (div_rem > div_cmp) {
+      div_frac |= 0x1;
+      div_rem -= div_cmp;
+    }
+  }
+  double r = fref * (div_int + (double)div_frac / (1<<20));
+
+#if LOGFREQ
+  errmsg("div_int %'d div_frac %'d freq %'lf\n",div_int,div_frac,r);
+#endif
+
+  return r;
+}
+
+
+
+// Determine true tuning frequency, adapted from hackrf firmware
+double true_freq(const uint64_t freq)
+{
+	uint32_t RFFC5071_freq_mhz;
+	double real_RFFC5071_freq_hz;
+	double real_MAX2837_freq;
+	
+
+	const uint32_t freq_mhz = freq / 1000000;
+	const uint32_t freq_hz = freq % 1000000;
+
+	if(freq_mhz < MAX_LP_FREQ_MHZ){
+	  // Low pass - use RFFC5071 as downconverter, flip spectrum
+	  /* IF is graduated from 2650 MHz to 2343 MHz */
+	  max2837_freq_nominal_hz = 2650000000 - (freq / 7);
+	  RFFC5071_freq_mhz = (max2837_freq_nominal_hz / FREQ_ONE_MHZ) + freq_mhz;
+	  /* Set Freq and read real freq */
+	  real_RFFC5071_freq_hz = rffc5071_freq(RFFC5071_freq_mhz);
+	  real_MAX2837_freq = max2837_freq((uint64_t)real_RFFC5071_freq_hz - freq);
+#if LOGFREQ
+	  errmsg("lowpass: rffc5071 %'lf, max2837 %'lf, total %'lf\n",
+		 real_RFFC5071_freq_hz,real_MAX2837_freq,real_RFFC5071_freq_hz - real_MAX2837_freq);
+#endif
+	  return real_RFFC5071_freq_hz - real_MAX2837_freq;
+	}else if( (freq_mhz >= MIN_BYPASS_FREQ_MHZ) && (freq_mhz < MAX_BYPASS_FREQ_MHZ) ){
+	  // Bypass - use 2837 directly, no spectrum flip
+	  real_MAX2837_freq = max2837_freq(freq_mhz * FREQ_ONE_MHZ + freq_hz);
+	  /* RFFC5071_freq_mhz <= not used in Bypass mode */
+#if LOGFREQ
+	  errmsg("bypass: max2837 %'lf\n",real_MAX2837_freq);
+#endif
+	  return real_MAX2837_freq;
+	}else if(  (freq_mhz >= MIN_HP_FREQ_MHZ) && (freq_mhz <= MAX_HP_FREQ_MHZ) ){
+	  // High pass mode, use RFFC5071 as downconverter, don't flip spectrum
+	  if (freq_mhz < MID1_HP_FREQ_MHZ) {
+	    /* IF is graduated from 2150 MHz to 2750 MHz */
+	    max2837_freq_nominal_hz = 2150000000 + (((freq - 2750000000) * 60) / 85);
+	  } else if (freq_mhz < MID2_HP_FREQ_MHZ) {
+	    /* IF is graduated from 2350 MHz to 2650 MHz */
+	    max2837_freq_nominal_hz = 2350000000 + ((freq - 3600000000) / 5);
+	  } else {
+	    /* IF is graduated from 2500 MHz to 2738 MHz */
+	    max2837_freq_nominal_hz = 2500000000 + ((freq - 5100000000) / 9);
+	  }
+	  RFFC5071_freq_mhz = freq_mhz - (max2837_freq_nominal_hz / FREQ_ONE_MHZ);
+	  /* Set Freq and read real freq */
+	  real_RFFC5071_freq_hz = rffc5071_freq(RFFC5071_freq_mhz);
+	  real_MAX2837_freq = max2837_freq(freq - real_RFFC5071_freq_hz);
+#if LOGFREQ
+	  errmsg("high pass: rffc5071 %'lf, max2837 %'lf, total %'ld\n",
+		 real_RFFC5071_freq_hz,real_MAX2837_freq,real_RFFC5071_freq_hz + real_MAX2837_freq);
+#endif
+	  return real_MAX2837_freq + real_RFFC5071_freq_hz;
+	} else
+	  return 0;
+
+}
+
 
 void closedown(int a){
   errmsg("caught signal %d: %s\n",a,strsignal(a));
@@ -1170,5 +1159,3 @@ void errmsg(const char *fmt,...){
   }
   va_end(ap);
 }
-
-
