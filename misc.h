@@ -1,4 +1,4 @@
-// $Id: misc.h,v 1.7 2018/08/04 22:19:11 karn Exp karn $
+// $Id: misc.h,v 1.8 2018/12/26 06:56:25 karn Exp karn $
 // Miscellaneous constants, macros and function prototypes
 // Copyright 2018 Phil Karn, KA9Q
 #ifndef _MISC_H
@@ -62,6 +62,8 @@ int pthread_barrier_wait(pthread_barrier_t *barrier);
 #include <malloc.h>
 #define pthread_setname(x) pthread_setname_np(pthread_self(),x)
 #endif
+
+double const parse_frequency(const char *);
 
 
 #endif // __APPLE__
