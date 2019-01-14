@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.37 2019/01/01 09:57:37 karn Exp karn $
+// $Id: hackrf.c,v 1.38 2019/01/13 02:13:02 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -703,7 +703,7 @@ void *display(void *arg){
 
 void decode_hackrf_commands(struct sdrstate *sdr,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
-  uint64_t intfreq;
+
 
   while(cp - buffer < length){
     int ret __attribute__((unused)); // Won't be used when asserts are disabled
@@ -716,6 +716,9 @@ void decode_hackrf_commands(struct sdrstate *sdr,unsigned char *buffer,int lengt
     if(cp - buffer + optlen >= length)
       break; // Invalid length
     
+    uint64_t intfreq;
+    double f,tf;
+    
     switch(type){
     case EOL: // Shouldn't get here
       break;
@@ -723,11 +726,12 @@ void decode_hackrf_commands(struct sdrstate *sdr,unsigned char *buffer,int lengt
       sdr->calibration = decode_double(cp,optlen);
       break;
     case RADIO_FREQUENCY:
-      intfreq = round(decode_double(cp,optlen) + Offset * ADC_samprate/4); // Offset tune by +Fs/4
+      f = decode_double(cp,optlen) + Offset * ADC_samprate/4; // Offset tune by +Fs/4
+      intfreq = round(f / (1 + sdr->calibration));
       ret = hackrf_set_freq(sdr->device,intfreq);
       assert(ret == HACKRF_SUCCESS);
-      double tf = true_freq(intfreq) - Offset * ADC_samprate/4;
-      sdr->status.frequency = tf / (1 + sdr->calibration);
+      tf = true_freq(intfreq) - Offset * ADC_samprate/4;
+      sdr->status.frequency = tf * (1 + sdr->calibration);
       break;
     case LNA_GAIN:	// Fill this in later
       sdr->status.lna_gain = decode_int(cp,optlen);
@@ -1000,13 +1004,14 @@ void do_hackrf_agc(struct sdrstate *sdr){
 #define MIN_LO_FREQ_HZ (84375000)
 #define MAX_LO_FREQ_HZ (5400000000ULL)
 
-static uint32_t max2837_freq_nominal_hz=2560000000;
 
 // extracted from hackRF firmware/common/rffc5071.c
 // for future use in determining exact tuning frequency
 
-#define LO_MAX 5400.0
-#define REF_FREQ 50.0
+#define LO_MAX 5400
+#define REF_FREQ 50
+
+//#define LOGFREQ 1
 
 double  rffc5071_freq(uint16_t lo) {
   uint8_t lodiv;
@@ -1031,17 +1036,24 @@ double  rffc5071_freq(uint16_t lo) {
   }
   
   uint64_t tmp_n = ((uint64_t)fvco << 29ULL) / (fbkdiv*REF_FREQ) ;
+  uint64_t n = tmp_n >> 5;
 
-  errmsg("lo %'d fvco %'d fbkdiv %'d lodiv %'d tmp_n %'llu (%llu:%llu)\n",lo,fvco,fbkdiv,lodiv,tmp_n,
-	 (tmp_n >> 5ULL),tmp_n & 0xffffff);
+#if 0
+  errmsg("lo %'d fvco %'d fbkdiv %'d lodiv %'d n (%llu.%llu)\n",lo,fvco,fbkdiv,lodiv,
+	 (tmp_n >> 29ULL) & 0xff,(tmp_n >> 5) & 0xffffff);
+#endif
   
-  return (REF_FREQ * (tmp_n >> 5ULL) * fbkdiv * FREQ_ONE_MHZ)
-    / (lodiv * (1 << 24ULL));
+  double r;
+
+
+  double const fstep = fbkdiv * (50000000. / 16777216.) / lodiv;
+  r =  fstep * (n + 0.5);  // Why does this empirical bias of 0.5 seem to work??
+#if 0
+  errmsg("rffc5071(%d): n = %'lu f = %lf\n",lo,n,r);
+#endif
+  return r;
 }
 
-
-
-//#define LOGFREQ 1
 
 // Return true max2837 frequency given requested frequency - taken from max2837.c
 double max2837_freq(uint64_t freq){
@@ -1050,7 +1062,7 @@ double max2837_freq(uint64_t freq){
 
   int div_int = freq / fref;
   int div_rem = freq % fref;
-#if LOGFREQ
+#if 0
   errmsg("requested %'llu div_int %'d div_rem %'d\n",freq,div_int,div_rem);
 #endif
 
@@ -1068,7 +1080,7 @@ double max2837_freq(uint64_t freq){
   }
   double r = fref * (div_int + (double)div_frac / (1<<20));
 
-#if LOGFREQ
+#if 0
   errmsg("div_int %'d div_frac %'d freq %'lf\n",div_int,div_frac,r);
 #endif
 
@@ -1091,13 +1103,13 @@ double true_freq(const uint64_t freq)
 	if(freq_mhz < MAX_LP_FREQ_MHZ){
 	  // Low pass - use RFFC5071 as downconverter, flip spectrum
 	  /* IF is graduated from 2650 MHz to 2343 MHz */
-	  max2837_freq_nominal_hz = 2650000000 - (freq / 7);
+	  uint32_t max2837_freq_nominal_hz = 2650000000 - (freq / 7);
 	  RFFC5071_freq_mhz = (max2837_freq_nominal_hz / FREQ_ONE_MHZ) + freq_mhz;
 	  /* Set Freq and read real freq */
 	  real_RFFC5071_freq_hz = rffc5071_freq(RFFC5071_freq_mhz);
 	  real_MAX2837_freq = max2837_freq((uint64_t)real_RFFC5071_freq_hz - freq);
 #if LOGFREQ
-	  errmsg("lowpass: rffc5071 %'lf, max2837 %'lf, total %'lf\n",
+	  errmsg("lowpass: rffc5071 %'lf - max2837 %'lf =  %'lf\n",
 		 real_RFFC5071_freq_hz,real_MAX2837_freq,real_RFFC5071_freq_hz - real_MAX2837_freq);
 #endif
 	  return real_RFFC5071_freq_hz - real_MAX2837_freq;
@@ -1106,11 +1118,12 @@ double true_freq(const uint64_t freq)
 	  real_MAX2837_freq = max2837_freq(freq_mhz * FREQ_ONE_MHZ + freq_hz);
 	  /* RFFC5071_freq_mhz <= not used in Bypass mode */
 #if LOGFREQ
-	  errmsg("bypass: max2837 %'lf\n",real_MAX2837_freq);
+	  errmsg("bypass: max2837 = %'lf\n",real_MAX2837_freq);
 #endif
 	  return real_MAX2837_freq;
 	}else if(  (freq_mhz >= MIN_HP_FREQ_MHZ) && (freq_mhz <= MAX_HP_FREQ_MHZ) ){
 	  // High pass mode, use RFFC5071 as downconverter, don't flip spectrum
+	  uint32_t max2837_freq_nominal_hz;
 	  if (freq_mhz < MID1_HP_FREQ_MHZ) {
 	    /* IF is graduated from 2150 MHz to 2750 MHz */
 	    max2837_freq_nominal_hz = 2150000000 + (((freq - 2750000000) * 60) / 85);
@@ -1126,7 +1139,7 @@ double true_freq(const uint64_t freq)
 	  real_RFFC5071_freq_hz = rffc5071_freq(RFFC5071_freq_mhz);
 	  real_MAX2837_freq = max2837_freq(freq - real_RFFC5071_freq_hz);
 #if LOGFREQ
-	  errmsg("high pass: rffc5071 %'lf, max2837 %'lf, total %'ld\n",
+	  errmsg("high pass: rffc5071 %'lf = max2837 %'lf = %'lf\n",
 		 real_RFFC5071_freq_hz,real_MAX2837_freq,real_RFFC5071_freq_hz + real_MAX2837_freq);
 #endif
 	  return real_MAX2837_freq + real_RFFC5071_freq_hz;
