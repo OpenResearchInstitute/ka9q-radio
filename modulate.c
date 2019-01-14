@@ -1,12 +1,13 @@
-// $Id: modulate.c,v 1.14 2018/12/05 09:07:18 karn Exp karn $
+// $Id: modulate.c,v 1.15 2018/12/29 06:14:17 karn Exp karn $
 // Simple I/Q AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
+#define _GNU_SOURCE 1
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <math.h>
 #include <complex.h>
+#include <math.h>
 #include <limits.h>
 #include <fftw3.h>
 #include <string.h>
