@@ -1,4 +1,4 @@
-// $Id: osc.c,v 1.2 2018/12/05 09:07:18 karn Exp karn $
+// $Id: osc.c,v 1.3 2019/01/05 23:15:16 karn Exp karn $
 // Complex oscillator object routines
 
 #define _GNU_SOURCE 1
@@ -77,17 +77,19 @@ void init_pll(struct pll *pll,float nf,float damping,double freq,float samprate)
   pll->prop_gain = tau2 / tau1;
   pll->integrator_gain = 1 / tau1;
   pll->integrator = freq * pll->samptime / pll->integrator_gain; // To give specified frequency
+#if 0
   fprintf(stderr,"init_pll(%p,%f,%f,%f,%f)\n",pll,nf,damping,freq,samprate);
   fprintf(stderr,"natfreq %lg tau1 %lg tau2 %lg propgain %lg intgain %lg\n",
 	  natfreq,tau1,tau2,pll->prop_gain,pll->integrator_gain);
+#endif
 }
 
 
 // Step the PLL through one sample, return VCO control voltage
 // Initial implementation, will probably be slow because of the atan2() and sincos() for every sample
 // Return PLL freq in cycles/sample
-float run_pll(struct pll *pll,complex float sample){
-  float phase = cargf(sample * conjf(pll->vco.phasor)); // Phase detector
+float run_pll(struct pll *pll,float phase){
+
   float feedback = pll->integrator_gain * pll->integrator + pll->prop_gain * phase;
   pll->integrator += phase;
   

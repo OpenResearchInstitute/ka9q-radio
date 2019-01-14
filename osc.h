@@ -36,7 +36,7 @@ int is_phasor_init(const complex double x);
 
 // PLL functions
 void init_pll(struct pll *pll,float bw,float damping,double freq,float samprate);
-float run_pll(struct pll *pll,complex float sample);
+float run_pll(struct pll *pll,float phase);
 
 
 #endif
