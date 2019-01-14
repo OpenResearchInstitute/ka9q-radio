@@ -1,7 +1,15 @@
-// $Id: dsp.h,v 1.20 2018/12/11 11:42:11 karn Exp karn $
-// Low-level, ostly math functions useful for digital signal processing
+// $Id: dsp.h,v 1.21 2019/01/14 12:41:57 karn Exp karn $
+// Low-level, mostly math functions useful for digital signal processing
 #ifndef _DSP_H
 #define _DSP_H 1
+
+// Note: files that include <math.h> before us must define _GNU_SOURCE prior to including math.h
+// or Linux will generate warnings about a lack of declarations for sincos and sincosf.
+// Apparently they are defined in math.h only when _GNU_SOURCE is defined.
+// Our re-defining _GNU_SOURCE and re-including math.h doesn't help if it has already been included
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 
 #include <complex.h>
 #undef I
@@ -19,7 +27,6 @@
 #define sincospi(x,s,c) sincos(x*M_PI,s,c)
 #define sincospif(x,s,c) sincosf(x*M_PI,s,c)
 #endif
-
 
 // Cos(x) + j*sin(x)
 #define cisf(x) csincosf(x)
