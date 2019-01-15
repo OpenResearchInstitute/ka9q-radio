@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.137 2019/01/13 02:12:58 karn Exp karn $
+# $Id: Makefile,v 1.138 2019/01/14 13:06:06 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -98,7 +98,7 @@ opussend.o: opussend.c misc.h multicast.h
 packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h osc.h
 pcmcat.o: pcmcat.c multicast.h
 pcmsend.o: pcmsend.c misc.h multicast.h
-pl.o: pl.c misc.h multicast.h dsp.h
+pl.o: pl.c multicast.h dsp.h osc.h
 
 
 # Components of libfcd.a
