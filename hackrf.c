@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.38 2019/01/13 02:13:02 karn Exp karn $
+// $Id: hackrf.c,v 1.39 2019/01/14 10:32:53 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -56,12 +56,13 @@ struct sdrstate {
 float AGC_upper = -15;
 float AGC_lower = -25;
 int ADC_samprate; // Computed from Out_samprate * Decimate
+float Rate_factor; // Computed from ADC_samprate and Power_alpha
 int Out_samprate = 192000;
 int Decimate = 64;
 int Log_decimate = 6; // Computed from Decimate
 const float SCALE8 = 1./127.;   // Scale 8-bit samples to unity range floats
 const int Bufsize = 16384;
-float const DC_alpha = 1.0e-1;  // high pass filter coefficient for DC offset estimates, per callback block
+float const DC_alpha = .001;  // high pass filter coefficient for DC offset estimates, per callback block
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
 char *Rundir = "/run/hackrf"; // Where 'status' and 'pid' get written
 float Filter_atten;
@@ -271,6 +272,7 @@ int main(int argc,char *argv[]){
   }
   
   ADC_samprate = Decimate * Out_samprate;
+  Rate_factor = 1./(ADC_samprate * Power_alpha);
   Log_decimate = (int)round(log2(Decimate));
   if(1<<Log_decimate != Decimate){
     errmsg("Decimation ratios must currently be a power of 2\n");
@@ -468,20 +470,14 @@ int main(int argc,char *argv[]){
     if(Rtp_type == IQ_PT)
       dp = hton_status(dp,&sdr->status); // old metadata header, will disappear someday
 
-
     float output_energy = 0;
     // NB: We assume that Decimate divides into BUFFERSIZE
     // They will since both are powers of 2
     // Wait for enough to be available to send a full packet
     pthread_mutex_lock(&Buf_mutex);
-    while(1){
-      int avail = (Samp_wp - samp_rp) & (BUFFERSIZE-1);
-      if(avail >= Decimate * Blocksize)
-	break;
+    while(((Samp_wp - samp_rp) & (BUFFERSIZE-1)) < Decimate * Blocksize)
       pthread_cond_wait(&Buf_cond,&Buf_mutex);
-    }
     pthread_mutex_unlock(&Buf_mutex);
-
     
     int remain = Blocksize;
     while(remain > 0){
@@ -518,7 +514,7 @@ int main(int argc,char *argv[]){
 	    float s = *ip++ * Filter_atten;
 	    output_energy += s*s;
 	    *sp++ = s; // Clip?
-	    
+
 	    s = *qp++ * Filter_atten;
 	    output_energy += s*s;
 	    *sp++ = s; // Clip?
@@ -532,11 +528,11 @@ int main(int argc,char *argv[]){
 	    float s = *ip++ * Filter_atten;
 	    output_energy += s*s;
 	    short si = s; // Clip?
-	    
+
 	    s = *qp++ * Filter_atten;
 	    output_energy += s*s;
 	    short sq = s; // Clip?
-	    
+
 	    dp[0] = si >> 8;
 	    dp[1] = (si & 0xf0) | ((sq >> 12) & 0xf);
 	    dp[2] = sq >> 4;
@@ -550,11 +546,11 @@ int main(int argc,char *argv[]){
 	  for(int i=0;i < chunk; i++){
 	    float s = *ip++ * Filter_atten;
 	    output_energy += s*s;
-	    *cp++ = (char)s; // Clip?
-	    
+	    *cp++ = s; // Clip?
+
 	    s = *qp++ * Filter_atten;
 	    output_energy += s*s;
-	    *cp++ = (char)s; // Clip?
+	    *cp++ = s; // Clip?
 	  }
 	  dp = (unsigned char *)cp;
 	}
@@ -832,7 +828,7 @@ int rx_callback(hackrf_transfer *transfer){
   complex float samp_sum = 0;
   float i_energy=0,q_energy=0;
   float dotprod = 0;                           // sum of I*Q, for phase balance
-  float rate_factor = 1./(ADC_samprate * Power_alpha);
+
 
   while(remain-- > 0){
     complex float samp;
@@ -908,15 +904,14 @@ int rx_callback(hackrf_transfer *transfer){
   sdr->DC += DC_alpha * (samp_sum/samples - sdr->DC);
   float block_energy = i_energy + q_energy; // Normalize for complex pairs
   if(block_energy > 0){ // Avoid divisions by 0, etc
-    //sdr->in_power += rate_factor * (block_energy - samples*sdr->in_power); // Average A/D output power per channel  
     sdr->in_power = block_energy/samples; // Average A/D output power per channel  
-    sdr->imbalance += rate_factor * samples * ((i_energy / q_energy) - sdr->imbalance);
+    sdr->imbalance += Rate_factor * samples * ((i_energy / q_energy) - sdr->imbalance);
     float dpn = 2 * dotprod / block_energy;
-    sdr->sinphi += rate_factor  * samples * (dpn - sdr->sinphi);
+    sdr->sinphi += Rate_factor * samples * (dpn - sdr->sinphi);
     gain_q = sqrtf(0.5 * (1 + sdr->imbalance));
     gain_i = sqrtf(0.5 * (1 + 1./sdr->imbalance));
     secphi = 1/sqrtf(1 - sdr->sinphi * sdr->sinphi); // sec(phi) = 1/cos(phi)
-    tanphi = sdr->sinphi * secphi;                     // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
+    tanphi = sdr->sinphi * secphi;             // tan(phi) = sin(phi) * sec(phi) = sin(phi)/cos(phi)
   }
   return 0;
 }
