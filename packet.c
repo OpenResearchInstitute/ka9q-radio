@@ -1,4 +1,4 @@
-// $Id: packet.c,v 1.29 2019/01/01 09:31:03 karn Exp karn $
+// $Id: packet.c,v 1.30 2019/01/07 00:07:46 karn Exp karn $
 // AFSK/FM packet demodulator
 // Reads RTP PCM audio stream, emits decoded frames in multicast RTP
 // Copyright 2018, Phil Karn, KA9Q
@@ -21,6 +21,7 @@
 #include "misc.h"
 #include "multicast.h"
 #include "ax25.h"
+#include "status.h"
 
 // Needs to be redone with common RTP receiver module
 struct session {
@@ -40,7 +41,7 @@ struct session {
 // Config constants
 #define MAX_MCAST 20          // Maximum number of multicast addresses
 float const SCALE = 1./32768;
-int const Bufsize = 16384;
+int const PKTSIZE = 16384;
 int const AN = 2048; // Should be power of 2 for FFT efficiency
 int const AL = 1000; // 25 bit times
 //int const AM = AN - AL + 1; // should be >= Samppbit, i.e., samprate / bitrate
@@ -51,32 +52,43 @@ float const Bitrate = 1200;
 int const Samppbit = 40;
 
 // Command line params
-char *Mcast_address_text[MAX_MCAST];
-char *Decode_mcast_address_text = "ax25.mcast.local";
 int Verbose;
 int Mcast_ttl = 10;           // Very low intensity output
 
 // Global variables
-int Nfds;                     // Number of streams
-int Input_fd = -1;
+int Nfds;          // Number of PCM streams
+fd_set Fdset_template; // Mask for select()
+int Max_fd = 2;        // Highest number fd for select()
+int Input_fd[MAX_MCAST];    // Multicast receive sockets
+pthread_t Input_thread;
+
 int Output_fd = -1;
+int Status_fd = -1;
+int Status_out_fd = -1; // Not used yet
 struct session *Session;
 pthread_mutex_t Output_mutex;
+struct sockaddr_storage Status_dest_address;
+struct sockaddr_storage Status_input_source_address;
+struct sockaddr_storage Local_status_source_address;
+struct sockaddr_storage PCM_dest_address; // From incoming status messages (max 1)
 
 struct session *lookup_session(const uint32_t ssrc);
 struct session *make_session(uint32_t ssrc);
 int close_session(struct session *sp);
+void *input(void *arg);
 void *decode_task(void *arg);
 
 struct option Options[] =
   {
    {"iface", required_argument, NULL, 'A'},
+   {"pcm-in", required_argument, NULL, 'I'},
    {"ax25-out", required_argument, NULL, 'R'},
+   {"status-in", required_argument, NULL, 'S'},
    {"ttl", required_argument, NULL, 'T'},
    {"verbose", no_argument, NULL, 'v'},
    {NULL, 0, NULL, 0},
   };
-char Optstring[] = "A:R:T:v";
+char Optstring[] = "A:I:R:S:T:v";
 
 
 int main(int argc,char *argv[]){
@@ -85,6 +97,7 @@ int main(int argc,char *argv[]){
     fprintf(stderr,"seteuid: %s\n",strerror(errno));
 
   setlocale(LC_ALL,getenv("LANG"));
+  FD_ZERO(&Fdset_template);
   // Unlike aprs and aprsfeed, stdout is not line buffered because each packet
   // generates a multi-line dump. So we have to be sure to fflush(stdout) after each
   // packet in case we're redirected into a file
@@ -98,11 +111,45 @@ int main(int argc,char *argv[]){
     case 'I':
       if(Nfds == MAX_MCAST){
 	fprintf(stderr,"Too many multicast addresses; max %d\n",MAX_MCAST);
-      } else 
-	Mcast_address_text[Nfds++] = optarg;
+	break;
+      }
+      Input_fd[Nfds] = setup_mcast(optarg,NULL,0,0,0);
+      if(Input_fd[Nfds] == -1){
+	fprintf(stderr,"Can't set up input %s\n",optarg);
+	break;
+      }
+      Max_fd = max(Max_fd,Input_fd[Nfds]);
+      FD_SET(Input_fd[Nfds],&Fdset_template);
+      Nfds++;
+      if(Status_fd != -1)
+	fprintf(stderr,"warning: --status-in ignored when --pcm-in specified\n");
       break;
     case 'R':
-      Decode_mcast_address_text = optarg;
+      Output_fd = setup_mcast(optarg,NULL,1,Mcast_ttl,0);
+      break;
+    case 'S':
+      if(Nfds != 0){
+	fprintf(stderr,"--status-in ignored when --pcm-in specified\n");
+	break;
+      }
+      if(Status_fd != -1){
+	fprintf(stderr,"Warning: only last --status-in is used\n");
+	close(Status_fd);
+	Status_fd = -1;
+      }
+      Status_fd = setup_mcast(optarg,(struct sockaddr *)&Status_dest_address,0,0,2);
+      if(Status_fd == -1){
+	fprintf(stderr,"Can't set up status input on %s: %s\n",optarg,strerror(errno));
+	exit(1);
+      }
+#if 0 // Later use?
+      Status_out_fd = setup_mcast(NULL,(struct sockaddr *)&Status_dest_address,1,Mcast_ttl,2);
+      {
+	socklen_t len;
+	len = sizeof(Local_status_source_address);
+	getsockname(Status_out_fd,(struct sockaddr *)&Local_status_source_address,&len);
+      }
+#endif
       break;
     case 'T':
       Mcast_ttl = strtol(optarg,NULL,0);
@@ -111,79 +158,144 @@ int main(int argc,char *argv[]){
       Verbose++;
       break;
     default:
-      fprintf(stderr,"Usage: %s [-v] [-I input_mcast_address] [-R output_mcast_address] [-T mcast_ttl]\n",argv[0]);
-      fprintf(stderr,"Defaults: %s -I [none] -R %s -T %d\n",argv[0],Decode_mcast_address_text,Mcast_ttl);
+      fprintf(stderr,"Usage: %s [--verbose|-v] [--ttl|-T mcast_ttl] [--pcm-in|-I input_mcast_address [--pcm-in|-I address2]] [--ax25-out|-R output_mcast_address] [input_address ...]\n",argv[0]);
       exit(1);
     }
   }
+  if(Output_fd == -1){
+    fprintf(stderr,"Must specify --ax25-out\n");
+    exit(1);
+  }
+
   // Also accept groups without -I option
   for(int i=optind; i < argc; i++){
     if(Nfds == MAX_MCAST){
       fprintf(stderr,"Too many multicast addresses; max %d\n",MAX_MCAST);
-    } else 
-      Mcast_address_text[Nfds++] = argv[i];
-  }
-
-
-  if(Nfds == 0){
-    fprintf(stderr,"At least one input group required\n");
-    exit(1);
-  }
-  // Set up multicast input, create mask for select()
-  fd_set fdset_template; // Mask for select()
-  FD_ZERO(&fdset_template);
-  int max_fd = 2;        // Highest number fd for select()
-  int input_fd[Nfds];    // Multicast receive sockets
-
-  for(int i=0;i<Nfds;i++){
-    input_fd[i] = setup_mcast(Mcast_address_text[i],NULL,0,0,0);
-    if(input_fd[i] == -1){
-      fprintf(stderr,"Can't set up input %s\n",Mcast_address_text[i]);
+      break;
+    }
+    Input_fd[Nfds] = setup_mcast(argv[i],NULL,0,0,0);
+    if(Input_fd[Nfds] == -1){
+      fprintf(stderr,"Can't set up input %s\n",argv[i]);
       continue;
     }
-    if(input_fd[i] > max_fd)
-      max_fd = input_fd[i];
-    FD_SET(input_fd[i],&fdset_template);
+    Max_fd = max(Max_fd,Input_fd[Nfds]);
+    FD_SET(Input_fd[Nfds],&Fdset_template);
+    Nfds++;
+    if(Status_fd != -1)
+      fprintf(stderr,"warning: --status-in ignored when --pcm-in specified\n");
   }
-  Output_fd = setup_mcast(Decode_mcast_address_text,NULL,1,Mcast_ttl,0);
-  if(Output_fd == -10){
-    fprintf(stderr,"Can't set up output to %s\n",
-	    Decode_mcast_address_text);
+
+  if(Nfds == 0  && Status_fd == -1){
+    fprintf(stderr,"Must specify either --status-in or --pcm-in\n");
     exit(1);
   }
+
   pthread_mutex_init(&Output_mutex,NULL);
+
+  if(Nfds > 0)
+    pthread_create(&Input_thread,NULL,input,NULL);
+
+  while(Status_fd == -1)
+    sleep(10000); // Status channel not specified; sleep indefinitely
+
+  // Process status messages that may tell us the PCM input
+  while(1){
+    socklen_t socklen = sizeof(Status_input_source_address);
+    unsigned char buffer[16384];
+    int length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Status_input_source_address,&socklen);
+
+    // We MUST ignore our own status packets, or we'll loop!
+    if(memcmp(&Status_input_source_address, &Local_status_source_address, sizeof(Local_status_source_address)) == 0)
+      continue;
+
+    if(length <= 0){
+      usleep(10000);
+      continue;
+    }
+    // Parse entries
+    {
+      int cr = buffer[0];
+      if(cr == 1)
+	continue; // Ignore commands
+      unsigned char *cp = buffer+1;
+
+      while(cp - buffer < length){
+	enum status_type type = *cp++;
+	
+	if(type == EOL)
+	  break;
+	
+	unsigned int optlen = *cp++;
+	if(cp - buffer + optlen > length)
+	  break;
+	
+	switch(type){
+	case EOL:
+	  goto done;
+	case OUTPUT_DATA_DEST_SOCKET:
+	  decode_socket(&PCM_dest_address,cp,optlen);
+	  if(Nfds == 0){
+	    // For now, process at most one source in status messages only if not explicitly given with --pcm-in
+	    if(Verbose){
+	      struct sockcache sc;
+	      update_sockcache(&sc,(struct sockaddr *)&PCM_dest_address);
+	      fprintf(stderr,"joining pcm input channel %s:%s\n",sc.host,sc.port);
+	    }
+
+	    Input_fd[Nfds] = setup_mcast(NULL,(struct sockaddr *)&PCM_dest_address,0,0,0);
+	    if(Input_fd[Nfds] != -1){
+	      Max_fd = max(Max_fd,Input_fd[Nfds]);
+	      FD_SET(Input_fd[Nfds],&Fdset_template);
+	      Nfds++;
+	      pthread_create(&Input_thread,NULL,input,NULL);
+	    }
+	  }
+	  break;
+	default:  // Ignore all others for now
+	  break;
+	}
+	cp += optlen;
+      }
+    done:;
+    }
+  }
+}
+
+// Process input PCM
+void *input(void *arg){
+
+  // audio input thread
+  // Receive audio multicasts, multiplex into sessions, execute filter front end (which wakes up decoder thread)
 
   struct rtp_header rtp_hdr;
   struct sockaddr sender;
-  // audio input thread
-  // Receive audio multicasts, multiplex into sessions, execute filter front end (which wakes up decoder thread)
+
   while(1){
     // Wait for traffic to arrive
-    fd_set fdset = fdset_template;
-    int s = select(max_fd+1,&fdset,NULL,NULL,NULL);
+    fd_set fdset = Fdset_template;
+    int s = select(Max_fd+1,&fdset,NULL,NULL,NULL);
     if(s < 0 && errno != EAGAIN && errno != EINTR)
       break;
     if(s == 0)
       continue; // Nothing arrived; probably just an ignored signal
 
     for(int fd_index = 0;fd_index < Nfds;fd_index++){
-      if(input_fd[fd_index] == -1 || !FD_ISSET(input_fd[fd_index],&fdset))
+      if(Input_fd[fd_index] == -1 || !FD_ISSET(Input_fd[fd_index],&fdset))
 	continue;
 
-      unsigned char buffer[Bufsize];
+      unsigned char buffer[PKTSIZE];
       socklen_t socksize = sizeof(sender);
-      int size = recvfrom(input_fd[fd_index],buffer,sizeof(buffer),0,&sender,&socksize);
+      int size = recvfrom(Input_fd[fd_index],buffer,sizeof(buffer),0,&sender,&socksize);
       if(size == -1){
 	if(errno != EINTR){ // Happens routinely
 	  perror("recvfrom");
-	  usleep(1000);
+	  usleep(1000); // avoid tight loop
 	}
 	continue;
       }
-      if(size < RTP_MIN_SIZE){
-	usleep(1000); // Avoid tight loop
+      if(size < RTP_MIN_SIZE)
 	continue; // Too small to be valid RTP
-      }
+
       // Extract RTP header
       unsigned char *dp = buffer;
       dp = ntoh_rtp(&rtp_hdr,dp);
@@ -209,11 +321,11 @@ int main(int argc,char *argv[]){
 	  continue;
 	}
 	sp->rtp_state_out.ssrc = sp->rtp_state_in.ssrc = rtp_hdr.ssrc;
-	update_sockcache(&sp->source,&sender);
 	sp->input_pointer = 0;
 	sp->filter_in = create_filter_input(AL,AM,REAL);
 	pthread_create(&sp->decode_thread,NULL,decode_task,sp); // One decode thread per stream
 	if(Verbose){
+	  update_sockcache(&sp->source,&sender); // Not needed except for verbose debugging
 	  fprintf(stdout,"New session from %s:%s, ssrc %x\n",sp->source.host,sp->source.port,sp->rtp_state_in.ssrc);
 	  fflush(stdout);
 	}
@@ -236,8 +348,7 @@ int main(int argc,char *argv[]){
       }
     }
   }
-  // Need to kill decoder threads? Or will ordinary signals reach them?
-  exit(0);
+  return NULL; // Never gets here
 }
 
 
