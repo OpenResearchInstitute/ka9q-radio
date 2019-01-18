@@ -1,4 +1,4 @@
-// $Id: opus.c,v 1.32 2019/01/05 23:14:56 karn Exp karn $
+// $Id: opus.c,v 1.34 2019/01/08 06:48:18 karn Exp karn $
 // Opus compression relay
 // Read PCM audio from one multicast group, compress with Opus and retransmit on another
 // Currently subject to memory leaks as old group states aren't yet aged out
@@ -56,8 +56,6 @@ int const Channels = 2;       // Stereo - no penalty if the audio is actually mo
 float const SCALE = 1./SHRT_MAX;
 
 // Command line params
-char *Mcast_input_address_text;     // Multicast address we're listening to
-char *Mcast_output_address_text;    // Multicast address we're sending to
 int Verbose;                  // Verbosity flag (currently unused)
 int Opus_bitrate = 32;        // Opus stream audio bandwidth; default 32 kb/s
 int Discontinuous = 0;        // Off by default
@@ -125,27 +123,30 @@ int main(int argc,char * const argv[]){
       Opus_blocktime = strtod(optarg,NULL);
       break;
     case 'I':
-      Mcast_input_address_text = optarg;
-      Input_fd = setup_mcast(Mcast_input_address_text,(struct sockaddr *)&PCM_dest_address,0,0,0);
-      if(Input_fd == -1){
-	fprintf(stderr,"Can't set up input on %s: %sn",Mcast_input_address_text,strerror(errno));
-	exit(1);
-      }
+      Input_fd = setup_mcast(optarg,(struct sockaddr *)&PCM_dest_address,0,0,0);
+      if(Input_fd == -1)
+	fprintf(stderr,"Can't set up input on %s: %sn",optarg,strerror(errno));
+
       break;
     case 'R':
-      Mcast_output_address_text = optarg;
-      Output_fd = setup_mcast(Mcast_output_address_text,(struct sockaddr *)&Opus_dest_address,1,Mcast_ttl,0);
-      if(Output_fd == -1){
-	fprintf(stderr,"Can't set up output on %s: %s\n",Mcast_output_address_text,strerror(errno));
-	exit(1);
-      }
+      Output_fd = setup_mcast(optarg,(struct sockaddr *)&Opus_dest_address,1,Mcast_ttl,0);
+      if(Output_fd == -1)
+	fprintf(stderr,"Can't set up output on %s: %s\n",optarg,strerror(errno));
       {
-	socklen_t len;
-	len = sizeof(Opus_source_address);
-	getsockname(Status_out_fd,(struct sockaddr *)&Opus_source_address,&len);
+	socklen_t len = sizeof(Opus_source_address);
+	getsockname(Output_fd,(struct sockaddr *)&Opus_source_address,&len);
       }
       break;
     case 'S':
+      if(Status_fd != -1){
+	fprintf(stderr,"warning: only last --status-in is used\n");
+	close(Status_fd);
+	Status_fd = -1;
+	if(Status_out_fd != -1){
+	  close(Status_out_fd);
+	  Status_out_fd = -1;
+	}
+      }
       Status_fd = setup_mcast(optarg,(struct sockaddr *)&Status_dest_address,0,0,2);
       if(Status_fd == -1){
 	fprintf(stderr,"Can't set up input on %s: %s\n",optarg,strerror(errno));
@@ -258,8 +259,14 @@ int main(int argc,char * const argv[]){
 	  decode_socket(&PCM_dest_address,cp,optlen);
 	  update_sockcache(&SC,(struct sockaddr *)&PCM_dest_address);
 	  if(Input_fd == -1){
+	    if(Verbose){
+	      struct sockcache sc;
+	      update_sockcache(&sc,(struct sockaddr *)&PCM_dest_address);
+	      fprintf(stderr,"Listening for PCM on %s:%s\n",sc.host,sc.port);
+	    }
 	    Input_fd = setup_mcast(NULL,(struct sockaddr *)&PCM_dest_address,0,0,0);
-	    pthread_create(&input_thread,NULL,input,NULL);
+	    if(Input_fd != -1)
+	      pthread_create(&input_thread,NULL,input,NULL);
 	  }
 	  break;
 	default:  // Ignore all others for now
