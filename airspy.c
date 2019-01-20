@@ -34,6 +34,7 @@
 
 #define N_serials 20
 uint64_t Serials[N_serials];
+uint32_t Sample_rates[1000];
 
 
 struct sdrstate {
@@ -91,6 +92,7 @@ struct option Options[] =
   {
    {"iface", required_argument, NULL, 'A'},
    {"pcm-out", required_argument, NULL, 'D'},
+   {"iq-out", required_argument, NULL, 'D'},
    {"device", required_argument, NULL, 'I'},
    {"status-out", required_argument, NULL, 'R'},
    {"ssrc", required_argument, NULL, 'S'},
@@ -101,6 +103,7 @@ struct option Options[] =
    {"frequency", required_argument, NULL, 'f'},
    {"offset", required_argument, NULL, 'o'},
    {"samprate", required_argument, NULL, 'r'},
+   {"sample-rate", required_argument, NULL, 'r'},
    {"rtp-type", required_argument, NULL, 't'},
    {"verbose", no_argument, NULL, 'v'},
    {NULL, 0, NULL, 0},
@@ -279,11 +282,7 @@ int main(int argc,char *argv[]){
     exit(1);
   }
   // Fold in scaling from float to short integer
-  switch(Rtp_type){
-  default:
-    Filter_atten = 32767. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
-    break;
-  }
+  Filter_atten = 32767. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
 
   if(Decimate == 1){
     errmsg("No spectrum shift without decimation");
@@ -308,13 +307,37 @@ int main(int argc,char *argv[]){
     errmsg("airspy_init() failed: %s\n",airspy_error_name(ret));
     exit(1);
   }
-  // Enumerate devices
+
+#if 0
+  // Enumerate devices - seems to require latest version of libusb
   airspy_list_devices(Serials,N_serials);
 
-  if((ret = airspy_open_sn(&sdr->device,Serials[Device])) != AIRSPY_SUCCESS){
+  if((ret = airspy_open_sn(sdr->device,Serials[Device])) != AIRSPY_SUCCESS){
     errmsg("airspy_open(%d) failed: %s\n",Device,airspy_error_name(ret));
     exit(1);
   }
+#else
+  if((ret = airspy_open(&sdr->device)) != AIRSPY_SUCCESS){
+    errmsg("airspy_open(%d) failed: %s\n",Device,airspy_error_name(ret));    
+    exit(1);
+  }
+    
+#endif  
+
+  // See how many there are
+  ret = airspy_get_samplerates(sdr->device,Sample_rates,0);
+  int number_sample_rates = Sample_rates[0];
+  assert(ret == AIRSPY_SUCCESS);
+  fprintf(stderr,"Number of sample rates: %d\n",number_sample_rates);
+
+  ret = airspy_get_samplerates(sdr->device,Sample_rates,number_sample_rates);
+  assert(ret == AIRSPY_SUCCESS);
+  for(int n = 0; n < number_sample_rates; n++){
+    fprintf(stderr,"%d\n",Sample_rates[n]);
+    if(Sample_rates[n] < 1)
+      break;
+  }
+
 
   ret = airspy_set_samplerate(sdr->device,(uint32_t)ADC_samprate);
   assert(ret == AIRSPY_SUCCESS);
