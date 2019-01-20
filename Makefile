@@ -1,11 +1,11 @@
-# $Id: Makefile,v 1.139 2019/01/15 08:05:58 karn Exp karn $
+# $Id: Makefile,v 1.140 2019/01/18 12:22:31 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LDLIBS=-lpthread -lbsd -lm
-EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio pcmcat control metadump pl
+EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend radio pcmcat control metadump pl airspy
 AFILES=bandplan.txt help.txt modes.txt
 SYSTEMD_FILES=funcube0.service funcube1.service hackrf0.service radio34.service radio39.service packet.service aprsfeed.service opus-hf.service opus-vhf.service opus-hackrf.service opus-uhf.service
 UDEV_FILES=66-hackrf.rules 68-funcube-dongle-proplus.rules 68-funcube-dongle.rules 69-funcube-ka9q.rules
@@ -30,6 +30,8 @@ clean:
 .PHONY: clean all install
 
 # Executables
+airspy: airspy.o libradio.a
+	$(CC) -g -o $@ $^ -lairspy -lm -lpthread	
 aprs: aprs.o ax25.o libradio.a
 aprsfeed: aprsfeed.o libradio.a
 control: control.o modes.o misc.o multicast.o bandplan.o status.o
@@ -83,6 +85,7 @@ libradio.a: attr.o ax25.o decimate.o filter.o misc.o multicast.o rtcp.o status.o
 	ranlib $@
 
 # Main programs
+airspy.o: airspy.c sdr.h misc.h multicast.h decimate.h status.h dsp.h
 aprs.o: aprs.c ax25.h multicast.h misc.h dsp.h
 aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 control.o: control.c radio.h osc.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h status.h

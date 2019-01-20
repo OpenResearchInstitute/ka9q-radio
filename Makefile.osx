@@ -1,9 +1,9 @@
-# $Id: Makefile.osx,v 1.71 2019/01/15 08:05:58 karn Exp karn $
+# $Id: Makefile.osx,v 1.72 2019/01/18 12:22:31 karn Exp karn $
 CFLAGS=-g -O3 -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
 LD_FLAGS=-lpthread -lm
-EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend pcmcat radio control metadump pl
+EXECS=aprs aprsfeed funcube hackrf iqplay iqrecord modulate monitor opus opussend packet pcmsend pcmcat radio control metadump pl airspy
 AFILES=bandplan.txt help.txt modes.txt
 
 all: $(EXECS) $(AFILES)
@@ -19,6 +19,9 @@ clean:
 	rcsclean
 
 # Executables
+airspy: airspy.o libradio.a
+	$(CC) -g -o $@ $^ -lairspy -lm -lpthread
+
 aprs: aprs.o ax25.o libradio.a
 	$(CC) -g -o $@ $^ -lm
 
@@ -83,6 +86,7 @@ libradio.a: attr.o ax25.o decimate.o filter.o misc.o multicast.o rtcp.o status.o
 	ranlib $@
 
 # Main programs
+airspy.o: airspy.c sdr.h misc.h multicast.h decimate.h status.h dsp.h
 aprs.o: aprs.c ax25.h multicast.h misc.h dsp.h
 aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h misc.h multicast.h status.h
