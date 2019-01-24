@@ -1,4 +1,4 @@
-# $Id: Makefile.osx,v 1.72 2019/01/18 12:22:31 karn Exp karn $
+# $Id: Makefile.osx,v 1.73 2019/01/20 02:00:03 karn Exp karn $
 CFLAGS=-g -O3 -std=gnu11 -pthread -Wall -funsafe-math-optimizations `pkg-config --cflags fftw3`
 BINDIR=/usr/local/bin
 LIBDIR=/usr/local/share/ka9q-radio
@@ -100,7 +100,7 @@ packet.o: packet.c filter.h misc.h multicast.h ax25.h dsp.h osc.h status.h
 pcmcat.o: pcmcat.c multicast.h
 pcmsend.o: pcmsend.c misc.h multicast.h
 pl.o: pl.c multicast.h dsp.h osc.h
-control.o: control.c radio.h osc.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h status.h
+control.o: control.c control.h osc.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h status.h
 hackrf.o: hackrf.c sdr.h misc.h multicast.h decimate.h status.h dsp.h
 metadump.o: metadump.c multicast.h dsp.h status.h misc.h
 dmr.o: dmr.c filter.h
@@ -134,7 +134,7 @@ fm.o: fm.c misc.h filter.h radio.h osc.h sdr.h dsp.h multicast.h
 linear.o: linear.c misc.h filter.h radio.h osc.h sdr.h dsp.h multicast.h
 main.o: main.c radio.h osc.h sdr.h filter.h misc.h  multicast.h dsp.h status.h
 misc.o: misc.c radio.h osc.h sdr.h
-modes.o: modes.c radio.h sdr.h osc.h misc.h
+modes.o: modes.c modes.h radio.h sdr.h osc.h misc.h
 radio.o: radio.c radio.h sdr.h osc.h filter.h misc.h
 radio_status.o: radio_status.c status.h radio.h misc.h dsp.h filter.h multicast.h
 
