@@ -1,4 +1,4 @@
-// $Id: modes.c,v 1.34 2018/12/16 10:59:00 karn Exp karn $
+// $Id: modes.c,v 1.35 2019/01/14 13:07:28 karn Exp karn $
 // Load and search mode definition table in /usr/local/share/ka9q-radio/modes.txt
 
 // Copyright 2018, Phil Karn, KA9Q
@@ -14,6 +14,7 @@
 #endif
 #include <string.h>
 
+#include "modes.h"
 #include "misc.h"
 #include "radio.h"
 #include "dsp.h"
@@ -24,11 +25,18 @@ int Nmodes;
 
 extern char Libdir[];
 
-struct demodtab Demodtab[] = {
-      {LINEAR_DEMOD, "Linear", demod_linear}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
-      {FM_DEMOD,     "FM",     demod_fm},     // NBFM and noncoherent PM
+struct demodtab {
+  enum demod_type demod_type;
+  char name[16];
+} Demodtab[] = {
+      {LINEAR_DEMOD, "Linear"}, // Coherent demodulation of AM, DSB, BPSK; calibration on WWV/WWVH/CHU carrier
+      {FM_DEMOD,     "FM",   },     // NBFM and noncoherent PM
 };
 int Ndemod = sizeof(Demodtab)/sizeof(struct demodtab);
+
+char *demod_name(enum demod_type type){
+  return Demodtab[type].name;
+}
 
 int readmodes(char *file){
   char pathname[PATH_MAX];

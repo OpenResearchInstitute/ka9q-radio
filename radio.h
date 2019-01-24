@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.96 2019/01/08 06:18:13 karn Exp karn $
+// $Id: radio.h,v 1.97 2019/01/24 05:00:00 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -12,43 +12,13 @@
 #undef I
 
 #include <sys/socket.h>
+#include <stdint.h>
+#include <stdbool.h>
 
+#include "modes.h"
 #include "sdr.h"
 #include "multicast.h"
 #include "osc.h"
-
-enum demod_type {
-  LINEAR_DEMOD = 0,     // Linear demodulation, i.e., everything else: SSB, CW, DSB, CAM, IQ
-  FM_DEMOD,             // Frequency demodulation
-};
-
-struct demodtab {
-  enum demod_type demod_type;
-  char name[16];
-  void *(*demod)(void *); // Address of demodulator routine
-};
-extern struct demodtab Demodtab[];
-extern int Ndemod;
-
-// Internal format of entries in /usr/local/share/ka9q-radio/modes.txt
-struct modetab {
-  char name[16];
-  enum demod_type demod_type;
-  int pll;
-  int square;
-  int channels;     // 1 or 2
-  int isb;
-  int flat;
-  int env;
-  double shift;      // Audio frequency shift, Hz (mainly for CW/RTTY)
-  float tunestep;   // Default tuning step
-  float low;        // Lower edge of IF passband, Hz
-  float high;       // Upper edge of IF passband, Hz
-  float attack_rate; // dB/sec
-  float recovery_rate; // dB/sec
-  float hangtime;    // sec
-  float headroom;    // dB
-};
 
 #define PKTSIZE 16384
 // Incoming RTP packets
@@ -63,6 +33,8 @@ struct packet {
 
 // Demodulator state block
 struct demod {
+
+  // Multicast network connection with SDR front end
   struct {
     char description[256]; // Free-form text
     int data_fd;           // Socket for raw incoming I/Q data
@@ -76,28 +48,22 @@ struct demod {
     struct sockaddr_storage data_source_address; // Source of I/Q data
     struct sockaddr_storage data_dest_address;   // Dest of I/Q data (typically multicast)
     struct rtp_state rtp; // State of the I/Q RTP receiver
-    long long samples;    // Count of raw I/Q samples received
+    uint64_t samples;    // Count of raw I/Q samples received
     int samprate;
     uint32_t command_tag;  // Our tag for pending command to front end
     uint64_t commands;
   } input;
 
-  // Front end hardware information
+  // Front end hardware information (some of it is ignored by us, used only by control)
   struct {
     struct status status;           // Last status from FCD
-    int direct_conversion;          // Avoid 0 Hz if set
-    double calibration;
-    // I/Q correction parameters
-    float DC_i,DC_q;       // Average DC offsets
-    float sinphi;          // smoothed estimate of I/Q phase error
-    float imbalance;       // Ratio of I power to Q power
-    float ad_level;        // A/D signal level, dBFS
+    bool direct_conversion;          // Avoid 0 Hz if set
     
     // Limits on usable IF due to aliasing, filtering, etc
     // Less than or equal to +/- samprate/2
     float min_IF;
     float max_IF;
-    
+
     float gain_factor;     // Multiply by incoming samples to scale by analog AGC settings
 
     // 'status' is written by the input thread and read by set_first_LO, etc, so it's protected by a mutex
@@ -107,19 +73,16 @@ struct demod {
   
   // Tuning parameters
   struct {
-    int lock;       // When set, don't try to command tuner
     double freq;    // Desired carrier frequency
     double shift;   // Post-demod frequency shift
-    int step;       // Tuning column, log10(); e.g., 3 -> thousands
-    int item;       // Tuning entry index
+    double second_LO;
+    double doppler;
+    double doppler_rate;
   } tune;
 
   struct osc doppler;
   struct osc second_LO;
   struct osc shift;
-
-  // Experimental notch filter
-  struct notchfilter *nf;
 
   // Zero IF pre-demod filter params
   struct {
@@ -136,16 +99,8 @@ struct demod {
     // 0 => rectangular window; increasing values widens main lobe and decreases ripple
     float kaiser_beta;
     float noise_bandwidth; // noise bandwidth relative to sample rate
-    int isb;     // Independent sideband mode
+    bool isb;     // Independent sideband mode
   } filter;
-
-  // Demodulator threads
-  // All three threads now run continuously, but only the selected one processes input
-  // Run output half of pre-detection filter and pass through AM, FM or linear demodulator
-  // The AM and linear demodulators send baseband audio directly to the network;
-  // the FM demodulator performs further audio filtering
-  pthread_t fm_demod_thread;
-  pthread_t linear_demod_thread;
 
   // Protect demod_type
   pthread_mutex_t demod_mutex;
@@ -153,12 +108,12 @@ struct demod {
   enum demod_type demod_type;            // Index into demodulator table (AM, FM, Linear)
 
   struct {
-    int flat;    // Flat FM frequency response
-    int env;     // Envelope detection in linear mode
-    int pll;     // Linear mode PLL tracking of carrier
-    int square;  // Squarer on PLL input
+    bool flat;    // Flat FM frequency response
+    bool env;     // Envelope detection in linear mode
+    bool pll;     // Linear mode PLL tracking of carrier
+    bool square;  // Squarer on PLL input
     float loop_bw;    // Loop bw (coherent modes)
-    int agc;
+    bool agc;     // Automatic gain control enabled
   } opt;
 
   // AGC (AM and linear modes)
@@ -181,16 +136,14 @@ struct demod {
     float cphase;     // Carrier phase change radians (DSB/PSK)
     float plfreq;     // PL tone frequency Hz (FM)
     float lock_timer; // PLL lock timer
-    int pll_lock;
+    bool pll_lock;    // PLL is locked
   } sig;
   
-  struct filter_in *audio_master; // FM only
-
   // Output
   struct {
     int samprate;       // Audio D/A sample rate (usually 48 kHz)
     // RTP network streaming
-    int silent; // last packet was suppressed (used to generate RTP mark bit)
+    bool silent; // last packet was suppressed (used to generate RTP mark bit)
     struct rtp_state rtp;
     struct sockaddr_storage metadata_source_address; // Source of SDR metadata
     struct sockaddr_storage metadata_dest_address;   // Dest of metadata (typically multicast)
@@ -209,30 +162,17 @@ struct demod {
     uint64_t samples;
     uint64_t commands;
   } output;
-  struct {
-    struct sockaddr_storage source_address; // when opus codec is used
-    struct sockaddr_storage dest_address; 
-    uint32_t ssrc; 
-    int ttl;
-    int bitrate;
-    int packets;
-  } opus;
 };
 extern char Libdir[];
-extern int Tunestep;
-extern struct modetab Modes[];
-extern int Nmodes;
 extern int Verbose;
-extern int SDR_correct;
 
 // Functions/methods to control a demod instance
-void *filtert(void *arg);
 int LO2_in_range(struct demod *,double f,int);
 double get_freq(struct demod *);
 double set_freq(struct demod *,double,double);
 double get_shift(struct demod *);
 double set_shift(struct demod *,double);
-const double get_first_LO(struct demod const *);
+double get_first_LO(struct demod const *);
 double set_first_LO(struct demod *,double);
 double get_second_LO(struct demod *);
 double set_second_LO(struct demod *,double);
@@ -240,32 +180,16 @@ double get_doppler(struct demod *);
 double get_doppler_rate(struct demod *);
 int set_doppler(struct demod *,double,double);
 int preset_mode(struct demod *,const char *);
-int set_cal(struct demod *,double);
+
 void *proc_samples(void *);
 const float compute_n0(struct demod const *);
 
-// Load mode definition table
-int readmodes(char *);
-
-// Save and load (most) receiver state
-int savestate(struct demod *,char const *);
-int loadstate(struct demod *,char const *);
-
-// Thread entry points
-void *display(void *);
-void *keyboard(void *);
-void *doppler(void *);
-void *status(void *);
-
-
 // Demodulator thread entry points
 void *demod_fm(void *);
-void *demod_am(void *);
 void *demod_linear(void *);
 
 int send_mono_output(struct demod *,const float *,int);
 int send_stereo_output(struct demod *,const float *,int);
-int setup_output(struct demod *,int);
 void output_cleanup(void *);
 
 extern int Mcast_ttl;

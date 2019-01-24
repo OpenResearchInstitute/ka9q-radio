@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.74 2019/01/01 09:57:37 karn Exp karn $
+// $Id: funcube.c,v 1.75 2019/01/08 06:17:25 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -133,6 +133,7 @@ int get_adc(short *,int);
 void *display(void *);
 void *ncmd(void *);
 void errmsg(const char *fmt,...);
+static void closedown(int a);
 
 int main(int argc,char *argv[]){
   struct sdrstate * const sdr = &FCD;
@@ -837,7 +838,7 @@ double fcd_actual(unsigned int u32Freq){
 
 // If we don't stop the A/D, it'll take several seconds to overflow and stop by itself,
 // and during that time we can't restart
-void closedown(int a){
+static void closedown(int a){
   errmsg("funcube: caught signal %d: %s\n",a,strsignal(a));
   unlink(Pid_filename);
   Pa_Terminate();

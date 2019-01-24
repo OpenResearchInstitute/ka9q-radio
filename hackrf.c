@@ -1,4 +1,4 @@
-// $Id: hackrf.c,v 1.39 2019/01/14 10:32:53 karn Exp karn $
+// $Id: hackrf.c,v 1.40 2019/01/16 18:25:12 karn Exp karn $
 // Read from HackRF
 // Multicast raw 8-bit I/Q samples
 // Accept control commands from UDP socket
@@ -9,6 +9,7 @@
 #include <complex.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -60,7 +61,7 @@ float Rate_factor; // Computed from ADC_samprate and Power_alpha
 int Out_samprate = 192000;
 int Decimate = 64;
 int Log_decimate = 6; // Computed from Decimate
-const float SCALE8 = 1./127.;   // Scale 8-bit samples to unity range floats
+const float SCALE8 = 1./INT8_MAX;   // Scale 8-bit samples to unity range floats
 const int Bufsize = 16384;
 float const DC_alpha = .001;  // high pass filter coefficient for DC offset estimates, per callback block
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
@@ -145,6 +146,7 @@ void *display(void *);
 void *ncmd(void *arg);
 void errmsg(const char *,...);
 double true_freq(uint64_t freq);
+static void closedown(int a);
 
 
 int main(int argc,char *argv[]){
@@ -281,10 +283,10 @@ int main(int argc,char *argv[]){
   // Fold in scaling from float to short integer
   switch(Rtp_type){
   case IQ_PT8:
-    Filter_atten = 127. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
+    Filter_atten = INT8_MAX * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
     break;
   default:
-    Filter_atten = 32767. * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
+    Filter_atten = INT16_MAX * powf(.5, Log_decimate); // Compensate for +6dB gain in each decimation stage
     break;
   }
 
@@ -563,10 +565,10 @@ int main(int argc,char *argv[]){
     // Remove scaling factor in power just once per block
     switch(Rtp_type){
     case IQ_PT8:
-      sdr->out_power = output_energy / (127.0 * 127.0 * Blocksize);
+      sdr->out_power = output_energy / (INT8_MAX * INT8_MAX * Blocksize);
       break;
     default:
-      sdr->out_power = output_energy / (32767.0 * 32767.0 * Blocksize);
+      sdr->out_power = output_energy / (INT16_MAX * INT16_MAX * Blocksize);
       break;
     }
 
@@ -1144,7 +1146,7 @@ double true_freq(const uint64_t freq)
 }
 
 
-void closedown(int a){
+static void closedown(int a){
   errmsg("caught signal %d: %s\n",a,strsignal(a));
   hackrf_close(HackCD.device);
   hackrf_exit();

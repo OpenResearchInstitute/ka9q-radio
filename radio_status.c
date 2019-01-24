@@ -159,19 +159,6 @@ void send_radio_status(struct demod *demod,int full){
   
   encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency); // Hz
 
-#if 0
-  // Remainder of front end data is not needed by radio
-  encode_double(&bp,AD_LEVEL,demod->sdr.ad_level);
-  encode_byte(&bp,LNA_GAIN,demod->sdr.status.lna_gain); // dB
-  encode_byte(&bp,MIXER_GAIN,demod->sdr.status.mixer_gain); // dB
-  encode_byte(&bp,IF_GAIN,demod->sdr.status.if_gain); // dB
-  encode_float(&bp,DC_I_OFFSET,demod->sdr.DC_i); // relative 1
-  encode_float(&bp,DC_Q_OFFSET,demod->sdr.DC_q); // relative 1
-  encode_float(&bp,IQ_IMBALANCE,demod->sdr.imbalance); // dB
-  encode_float(&bp,IQ_PHASE,demod->sdr.sinphi); // sine - dimensionless
-  encode_double(&bp,CALIBRATE,demod->sdr.calibration); // dimensionless
-#endif
-  
   // Doppler info
   encode_double(&bp,DOPPLER_FREQUENCY,get_doppler(demod));
   encode_double(&bp,DOPPLER_FREQUENCY_RATE,get_doppler_rate(demod));
@@ -265,11 +252,6 @@ void decode_radio_commands(struct demod *demod,unsigned char *buffer,int length)
 	pthread_cond_broadcast(&demod->demod_cond);
 	pthread_mutex_unlock(&demod->demod_mutex);
       }
-      break;
-    case CALIBRATE:
-      d = decode_double(cp,optlen); // dimensionless
-      if(!isnan(d))
-	demod->sdr.calibration = d;
       break;
     case RADIO_FREQUENCY:  // Hz
       nrf = decode_double(cp,optlen);
@@ -408,19 +390,26 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       // Becomes our data input socket
       decode_socket(&demod->input.data_dest_address,cp,optlen);
       break;
-    case RADIO_FREQUENCY:
+    case RADIO_FREQUENCY: // Radio frequency at zero frequency in the IF
       nfreq = decode_double(cp,optlen);
       break;
     case OUTPUT_SAMPRATE:
       nsamprate = decode_int(cp,optlen);
       if(nsamprate != demod->input.samprate){
 	demod->input.samprate = nsamprate;
+	// Oscillator and filter frequencies are fractions of the sample rate
+	set_osc(&demod->second_LO,demod->tune.second_LO/nsamprate,0);
+	set_osc(&demod->doppler,demod->tune.doppler/nsamprate,demod->tune.doppler_rate/((double)nsamprate*nsamprate));
+	set_osc(&demod->shift,demod->tune.shift/nsamprate,0);
+
 	demod->filter.decimate = demod->input.samprate / demod->output.samprate;
-	if(demod->filter.out)
+	if(demod->filter.out){
+	  // this probably doesn't actually change
 	  set_filter(demod->filter.out,
 		     demod->filter.low/demod->output.samprate,
 		     demod->filter.high/demod->output.samprate,
 		     demod->filter.kaiser_beta);
+	}
       }
       break;
     case GPS_TIME:
@@ -436,49 +425,9 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
       if(!isnan(f))
 	demod->sdr.max_IF = f;
       break;
-#if 0
-      // These SDR parameters are not needed by radio; control can fetch them directly
-    case INPUT_SAMPRATE:
-      demod->sdr.status.samprate = decode_int(cp,optlen);
-      break;
-    case AD_LEVEL:
-      demod->sdr.ad_level = decode_float(cp,optlen);
-      break;
-    case LNA_GAIN:
-      demod->sdr.status.lna_gain = decode_int(cp,optlen);
-      break;
-    case MIXER_GAIN:
-      demod->sdr.status.mixer_gain = decode_int(cp,optlen);
-      break;
-    case IF_GAIN:
-      demod->sdr.status.if_gain = decode_int(cp,optlen);
-      break;
-    case DC_I_OFFSET:
-      f = decode_float(cp,optlen);
-      if(!isnan(f))
-	demod->sdr.DC_i = f;
-      break;
-    case DC_Q_OFFSET:
-      f = decode_float(cp,optlen);
-      if(!isnan(f))
-	demod->sdr.DC_q = f;
-      break;
-    case IQ_IMBALANCE:
-      f = decode_float(cp,optlen);
-      if(!isnan(f))
-	demod->sdr.imbalance = f;
-      break;
-    case IQ_PHASE:
-      f = decode_float(cp,optlen);
-      if(!isnan(f))
-	demod->sdr.sinphi = f;
-      break;
-    case CALIBRATE:
-      d = decode_float(cp,optlen);
-      if(!isnan(d))
-	demod->sdr.calibration = d;
-      break;
-#endif
+
+      // Note: SDR parameters are not needed by radio; control can fetch them directly
+
     case GAIN: // Overall SDR gain (entirely analog)
       f = decode_float(cp,optlen);
       demod->sdr.gain_factor = powf(10.,-f/20); // Amplitude ratio to make overall gain unity

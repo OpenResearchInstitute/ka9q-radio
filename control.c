@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.42 2019/01/05 23:06:56 karn Exp karn $
+// $Id: control.c,v 1.43 2019/01/08 06:20:20 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -24,9 +24,10 @@
 #include <netdb.h>
 #include <locale.h>
 
+#include "modes.h"
 #include "misc.h"
 #include "dsp.h"
-#include "radio.h"
+#include "control.h"
 #include "filter.h"
 #include "multicast.h"
 #include "bandplan.h"
@@ -54,12 +55,8 @@ int Ctl_fd = -1;
 
 int Verbose,Dump;
 
-// Dummy stubs to satisfy Demodtab in modes.c
-void *demod_am(void *f){return NULL;}
-void *demod_fm(void *f){return NULL;}
-void *demod_linear(void *f){return NULL;}
-
-void decode_radio_status(struct demod *demod,unsigned char *buffer,int length);
+void decode_radio_status(struct control *demod,unsigned char *buffer,int length);
+int preset_mode(struct control * const demod,const char * const mode); // Different from one in radio.c
 
 
 // Pop up a temporary window with the contents of a file in the
@@ -142,7 +139,7 @@ static int Frequency_lock;
 
 
 // Adjust the selected item up or down one step
-void adjust_item(struct demod *demod,int direction){
+void adjust_item(struct control *demod,int direction){
   double tunestep;
   
   tunestep = pow(10., (double)demod->tune.step);
@@ -163,7 +160,7 @@ void adjust_item(struct demod *demod,int direction){
     demod->sdr.status.frequency += tunestep;
     break;
   case 3: // IF
-    demod->second_LO.freq -= tunestep;
+    demod->tune.second_LO -= tunestep;
     break;
   case 4: // Filter low edge
     demod->filter.low += tunestep;
@@ -185,15 +182,15 @@ void adjust_item(struct demod *demod,int direction){
 // Hooks for knob.c (experimental)
 // It seems better to just use the Griffin application to turn knob events into keystrokes or mouse events
 void adjust_up(void *arg){
-  struct demod *demod = arg;
+  struct control *demod = arg;
   adjust_item(demod,1);
 }
 void adjust_down(void *arg){
-  struct demod *demod = arg;
+  struct control *demod = arg;
   adjust_item(demod,0);
 }
 void toggle_lock(void *arg){
-  struct demod *demod = arg;
+  struct control *demod = arg;
   switch(demod->tune.item){
   case 0:
   case 1:
@@ -205,11 +202,11 @@ void toggle_lock(void *arg){
 }
 
 
-struct demod Demod;
+struct control Demod;
 
 float Noise_bandwidth = NAN;
 
-void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length);
+void decode_sdr_status(struct control *demod,unsigned char *buffer,int length);
 
 
 // Thread to display receiver state, updated at 10Hz by default
@@ -244,13 +241,13 @@ int main(int argc,char *argv[]){
     exit(1);
   }
 
-  struct demod * const demod = &Demod;
+  struct control * const demod = &Demod;
   // Set all floating point fields to NAN so they won't be displayed unless set at least once
   demod->sdr.calibration = demod->sdr.status.frequency = demod->sdr.DC_i = demod->sdr.DC_q =
-    demod->sdr.sinphi = demod->sdr.imbalance = demod->sdr.min_IF = demod->sdr.max_IF = demod->sdr.gain_factor = NAN;
+    demod->sdr.sinphi = demod->sdr.imbalance = demod->sdr.min_IF = demod->sdr.max_IF = NAN;
 
   demod->tune.freq = demod->tune.shift = NAN;
-  demod->second_LO.freq = NAN;
+  demod->tune.second_LO = NAN;
   demod->filter.low = demod->filter.high = demod->filter.kaiser_beta = demod->filter.noise_bandwidth = NAN;
   demod->agc.headroom = demod->agc.hangtime = demod->agc.recovery_rate = demod->agc.attack_rate = NAN;
   demod->sig.if_power = demod->sig.bb_power = demod->sig.n0 = demod->sig.snr = demod->sig.foffset = NAN;
@@ -370,7 +367,7 @@ int main(int argc,char *argv[]){
       if(cr == 1)
 	continue;     // Ignore commands
 
-      struct demod ndemod;
+      struct control ndemod;
       memcpy(&ndemod,demod,sizeof(ndemod));
       decode_radio_status(&ndemod,buffer+1,length-1);
       // Listen directly to the front end once we know who it is
@@ -427,17 +424,17 @@ int main(int argc,char *argv[]){
       mvwaddstr(tuning,row++,col,"First LO");
       wattroff(tuning,A_UNDERLINE);
     }
-    if(!isnan(demod->second_LO.freq)){
-      mvwprintw(tuning,row,col,"%'28.3f Hz",-demod->second_LO.freq);
+    if(!isnan(demod->tune.second_LO)){
+      mvwprintw(tuning,row,col,"%'28.3f Hz",-demod->tune.second_LO);
       mvwaddstr(tuning,row++,col,"IF");
     }
 
     // Doppler info displayed only if active
-    double dopp = demod->doppler.freq;
+    double dopp = demod->tune.doppler;
     if(!isnan(dopp) && dopp != 0){
       mvwprintw(tuning,row,col,"%'28.3f Hz",dopp);
       mvwaddstr(tuning,row++,col,"Doppler");
-      mvwprintw(tuning,row,col,"%'28.3f Hz/s",demod->doppler.rate);
+      mvwprintw(tuning,row,col,"%'28.3f Hz/s",demod->tune.doppler_rate);
       mvwaddstr(tuning,row++,col,"Dop rate");
     }
     wmove(tuning,row,0);
@@ -648,7 +645,7 @@ int main(int argc,char *argv[]){
       break;
     }
     box(demodulator,0,0);
-    mvwprintw(demodulator,0,5,"%s demodulator",Demodtab[demod->demod_type].name);
+    mvwprintw(demodulator,0,5,"%s demodulator",demod_name(demod->demod_type));
 
     // SDR hardware status: sample rate, tcxo offset, I/Q offset and imbalance, gain settings
     row = 1;
@@ -894,7 +891,7 @@ int main(int argc,char *argv[]){
     if(c == ERR)
       continue;   // no key; timed out. Do nothing.
 
-    struct demod old_demod;
+    struct control old_demod;
     memcpy(&old_demod,demod,sizeof(old_demod));
 
     switch(c){
@@ -1141,8 +1138,8 @@ int main(int argc,char *argv[]){
       if(demod->sdr.status.frequency != old_demod.sdr.status.frequency)
 	encode_double(&bp,FIRST_LO_FREQUENCY,demod->sdr.status.frequency);
 
-      if(demod->second_LO.freq != old_demod.second_LO.freq)
-	encode_double(&bp,SECOND_LO_FREQUENCY,demod->second_LO.freq);
+      if(demod->tune.second_LO != old_demod.tune.second_LO)
+	encode_double(&bp,SECOND_LO_FREQUENCY,demod->tune.second_LO);
 
       if(demod->filter.high != old_demod.filter.high)
 	encode_float(&bp,HIGH_EDGE,demod->filter.high);
@@ -1217,7 +1214,7 @@ void touchitem(void *arg,int x,int y,int ev){
 
 
 
-void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
+void decode_radio_status(struct control *demod,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
 
   while(cp - buffer < length){
@@ -1304,18 +1301,17 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
       demod->sdr.status.frequency = decode_double(cp,optlen);
       break;
     case SECOND_LO_FREQUENCY:
-      demod->second_LO.freq = decode_double(cp,optlen);
+      demod->tune.second_LO = decode_double(cp,optlen);
       break;
     case SHIFT_FREQUENCY:
       demod->tune.shift = decode_double(cp,optlen);
       break;
     case DOPPLER_FREQUENCY:
-      demod->doppler.freq = decode_double(cp,optlen);
+      demod->tune.doppler = decode_double(cp,optlen);
       break;
     case DOPPLER_FREQUENCY_RATE:
-      demod->doppler.rate = decode_double(cp,optlen);
+      demod->tune.doppler_rate = decode_double(cp,optlen);
       break;
-
       // Process SDR parameters in case we're looking at it directly
     case AD_LEVEL:
       demod->sdr.ad_level = decode_float(cp,optlen);
@@ -1460,8 +1456,8 @@ void decode_radio_status(struct demod *demod,unsigned char *buffer,int length){
  done:;
 }
 // Set major operating mode
-// Adapted from the version in radio,c, but simpler
-int preset_mode(struct demod * const demod,const char * const mode){
+// Adapted from the version in radio,c, but simpler -- note it's different!!
+int preset_mode(struct control * const demod,const char * const mode){
   assert(demod != NULL);
   if(demod == NULL)
     return -1;
@@ -1498,7 +1494,7 @@ int preset_mode(struct demod * const demod,const char * const mode){
 
 
 // Adapted from the one in radio_status.c
-void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
+void decode_sdr_status(struct control *demod,unsigned char *buffer,int length){
   unsigned char *cp = buffer;
   double nfreq = NAN;
   int nsamprate = 0;
@@ -1553,9 +1549,11 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
     case IF_GAIN:
       demod->sdr.status.if_gain = decode_int(cp,optlen);
       break;
+#if 0 // Ignored, redundant to LNA/Mixer/IF gain
     case GAIN:
       demod->sdr.gain_factor = powf(10.,-0.05*decode_float(cp,optlen));
       break;
+#endif
     case DC_I_OFFSET:
       demod->sdr.DC_i = decode_float(cp,optlen);
       break;

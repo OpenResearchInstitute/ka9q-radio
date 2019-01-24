@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.123 2019/01/01 03:34:07 karn Exp karn $
+// $Id: radio.c,v 1.124 2019/01/01 07:26:16 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdint.h>
 #if defined(linux)
 #include <bsd/string.h>
 #endif
@@ -31,7 +32,7 @@
 // Update power measurement, estimate noise level
 
 float const SCALE16 = 1./SHRT_MAX; // Scale signed 16-bit int to float in range -1, +1
-float const SCALE8 = 1./127;       // Scale signed 8-bit int to float in range -1, +1
+float const SCALE8 = 1./INT8_MAX;       // Scale signed 8-bit int to float in range -1, +1
 
 void *proc_samples(void *arg){
   assert(arg);
@@ -204,7 +205,7 @@ void *proc_samples(void *arg){
 }
 
 // Get true first LO frequency, with TCXO offset applied
-double const get_first_LO(const struct demod * const demod){
+double get_first_LO(const struct demod * const demod){
   if(demod == NULL)
     return NAN;
 	 
@@ -216,10 +217,7 @@ double const get_first_LO(const struct demod * const demod){
 double get_second_LO(struct demod * const demod){
   if(demod == NULL)
     return NAN;
-  pthread_mutex_lock(&demod->second_LO.mutex);
-  double f = demod->second_LO.freq * demod->input.samprate;
-  pthread_mutex_unlock(&demod->second_LO.mutex);  
-  return f;
+  return demod->tune.second_LO;
 }
 
 // Return actual radio frequency
@@ -233,22 +231,19 @@ double get_freq(struct demod * const demod){
 // Set a Doppler offset and sweep rate
 int set_doppler(struct demod * const demod,double freq,double rate){
   assert(demod != NULL);
-  set_osc(&demod->doppler, -freq/demod->input.samprate, -rate/(demod->input.samprate * demod->input.samprate));
+  demod->tune.doppler = freq;
+  demod->tune.doppler_rate = rate;
+  if(demod->input.samprate != 0)
+    set_osc(&demod->doppler, -freq/demod->input.samprate, -rate/(demod->input.samprate * demod->input.samprate));
   return 0;
 }
 double get_doppler(struct demod * const demod){
   assert(demod != NULL);
-  pthread_mutex_lock(&demod->doppler.mutex);
-  double f = demod->doppler.freq * demod->input.samprate;
-  pthread_mutex_unlock(&demod->doppler.mutex);  
-  return f;
+  return demod->tune.doppler;
 }
 double get_doppler_rate(struct demod * const demod){
   assert(demod != NULL);
-  pthread_mutex_lock(&demod->doppler.mutex);
-  double f = demod->doppler.rate * demod->input.samprate * demod->input.samprate;
-  pthread_mutex_unlock(&demod->doppler.mutex);  
-  return f;
+  return demod->tune.doppler_rate;
 }
 
 // Set receiver frequency with optional first IF selection
@@ -307,7 +302,7 @@ double set_first_LO(struct demod * const demod,double first_LO){
   double current_lo1 = get_first_LO(demod);
 
   // Just return actual frequency without changing anything
-  if(first_LO == current_lo1 || first_LO <= 0 || demod->tune.lock)
+  if(first_LO == current_lo1 || first_LO <= 0)
     return first_LO;
 
   unsigned char packet[8192],*bp;
@@ -349,9 +344,8 @@ double set_second_LO(struct demod * const demod,double const second_LO){
     return NAN;
 
   // In case sample rate isn't set yet, just remember the frequency but don't divide by zero
-  if(second_LO == 0)
-    set_osc(&demod->second_LO, 0.0, 0.0);
-  else
+  demod->tune.second_LO = second_LO;
+  if(demod->input.samprate != 0)
     set_osc(&demod->second_LO,second_LO/demod->input.samprate, 0.0);
   return second_LO;
 }
@@ -360,9 +354,7 @@ double set_second_LO(struct demod * const demod,double const second_LO){
 double set_shift(struct demod * const demod,double const shift){
   assert(demod != NULL);
   demod->tune.shift = shift;
-  if(shift == 0)
-    set_osc(&demod->shift, 0.0, 0.0);
-  else 
+  if(demod->output.samprate != 0)
     set_osc(&demod->shift,shift / (double)demod->output.samprate, 0.0);
   return shift;
 }

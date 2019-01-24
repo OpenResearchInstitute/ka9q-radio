@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.150 2019/01/02 11:28:36 karn Exp karn $
+// $Id: main.c,v 1.151 2019/01/24 05:00:00 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -33,32 +33,26 @@
 
 // Config constants
 char Libdir[] = "/usr/local/share/ka9q-radio";
-int DAC_samprate = 48000;
+static int DAC_samprate = 48000;
 
 // Command line Parameters with default values
-int Nthreads = 1;
-char const *Locale = "en_US.UTF-8";
+static int Nthreads = 1;
+static char const *Locale = "en_US.UTF-8";
 int Mcast_ttl = 1;
-float Blocktime = 20; // 20 milliseconds
-
+static float Blocktime = 20; // 20 milliseconds
 
 // Primary control blocks for downconvert/filter/demodulate and output
 // Note: initialized to all zeroes, like all global variables
 struct demod Demod;
 
-struct timeval Starttime;      // System clock at timestamp 0, for RTCP
+static struct timeval Starttime;      // System clock at timestamp 0, for RTCP
 
-extern uint64_t Commands;
-
-void output_cleanup(void *);
-void closedown(int);
 void *rtp_recv(void *);
 void *rtcp_send(void *);
-void cleanup(void);
-void closedown(int);
 void *send_status(void *);
+static void closedown(int);
 
-struct option Options[] =
+static struct option Options[] =
   {
    {"iface", required_argument, NULL, 'A'},
    {"pcm-out", required_argument, NULL, 'D'},
@@ -87,7 +81,7 @@ struct option Options[] =
    {NULL, 0, NULL, 0},
   };
 
-char Optstring[] = "A:D:FI:N:R:S:T:a:b:c:e:f:h:ik:l:m:pqr:s:t:";
+static char Optstring[] = "A:D:FI:N:R:S:T:a:b:c:e:f:h:ik:l:m:pqr:s:t:";
 
 
 // The main program sets up the demodulator parameter defaults,
@@ -140,7 +134,6 @@ int main(int argc,char *argv[]){
   // Set receiver defaults, can be overridden by command line args
   demod->filter.kaiser_beta = 3.0; // Reasonable compromise
   demod->agc.headroom = pow(10.,-15./20); // -15 dB
-  demod->sdr.imbalance = 1; // 0 dB
   demod->demod_type = 1; // FM
   demod->opt.agc = 1; // AGC is on by default
   demod->agc.gain = dB2voltage(80.); // Empirical starting point
@@ -230,7 +223,6 @@ int main(int argc,char *argv[]){
   // Start status thread - will also listen for SDR commands
   pthread_t status_thread;
   pthread_create(&status_thread,NULL,send_status,demod);
-
 
   fprintf(stderr,"Waiting for SDR metadata..."); fflush(stderr);
   pthread_mutex_lock(&demod->sdr.status_mutex);
@@ -359,17 +351,16 @@ int main(int argc,char *argv[]){
   set_shift(demod,demod->tune.shift);
   set_freq(demod,demod->tune.freq,NAN);
   // Start demodulators
-  pthread_create(&demod->fm_demod_thread,NULL,demod_fm,demod);  
-  pthread_create(&demod->linear_demod_thread,NULL,demod_linear,demod);
+  pthread_t fm_demod_thread,linear_demod_thread;
+
+  pthread_create(&fm_demod_thread,NULL,demod_fm,demod);  
+  pthread_create(&linear_demod_thread,NULL,demod_linear,demod);
 
   while(1){
     usleep(1000000); // probably get rid of this
   }
   exit(0);
 }
-
-
-
 
 // RTP control protocol sender task
 void *rtcp_send(void *arg){
@@ -443,7 +434,7 @@ void *rtcp_send(void *arg){
     usleep(1000000);
   }
 }
-void closedown(int a){
+static void closedown(int a){
   fprintf(stderr,"Received signal %d, exiting\n",a);
   exit(1);
 }

@@ -1,4 +1,4 @@
-// $Id$
+// $Id: airspy.c,v 1.2 2019/01/20 11:32:28 karn Exp karn $
 // Read from Airspy SDR
 // Accept control commands from UDP socket
 #define _GNU_SOURCE 1
@@ -64,7 +64,6 @@ float Rate_factor; // Computed from ADC_samprate and Power_alpha
 int Out_samprate = 192000;
 int Decimate = 64;
 int Log_decimate = 6; // Computed from Decimate
-const float SCALE8 = 1./127.;   // Scale 8-bit samples to unity range floats
 const int Bufsize = 16384;
 float const DC_alpha = .001;  // high pass filter coefficient for DC offset estimates, per callback block
 float const Power_alpha= 1.0; // time constant (seconds) for smoothing power and I/Q imbalance estimates
@@ -88,7 +87,7 @@ int Verbose;
 
 struct sockaddr_storage Output_metadata_dest_address;
 
-struct option Options[] =
+static struct option Options[] =
   {
    {"iface", required_argument, NULL, 'A'},
    {"pcm-out", required_argument, NULL, 'D'},
@@ -108,7 +107,7 @@ struct option Options[] =
    {"verbose", no_argument, NULL, 'v'},
    {NULL, 0, NULL, 0},
   };
-char Optstring[] = "A:D:I:R:S:T:b:c:df:o:r:t:v";
+static char Optstring[] = "A:D:I:R:S:T:b:c:df:o:r:t:v";
 
 
 // Global variables
@@ -151,6 +150,7 @@ void *display(void *);
 void *ncmd(void *arg);
 void errmsg(const char *,...);
 double true_freq(uint64_t freq);
+static void closedown(int a);
 
 
 int main(int argc,char *argv[]){
@@ -972,7 +972,7 @@ double true_freq(uint64_t intfreq){
 
 
 
-void closedown(int a){
+static void closedown(int a){
   errmsg("caught signal %d: %s\n",a,strsignal(a));
   airspy_close(AirCD.device);
   airspy_exit();
