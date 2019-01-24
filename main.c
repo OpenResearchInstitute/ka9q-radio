@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.149 2019/01/01 06:35:20 karn Exp karn $
+// $Id: main.c,v 1.150 2019/01/02 11:28:36 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -336,6 +336,8 @@ int main(int argc,char *argv[]){
   demod->filter.M = N - demod->filter.L + 1;
 
   demod->filter.in = create_filter_input(demod->filter.L,demod->filter.M,COMPLEX);
+  // experimental forward filter that puts frequency domain data in filesystem
+  //  demod->filter.in = create_filter_input_file(demod->filter.L,demod->filter.M,COMPLEX,"/run/user/1000/filter");
   demod->filter.out = create_filter_output(demod->filter.in,NULL,demod->filter.decimate,demod->filter.isb ? CROSS_CONJ : COMPLEX);
   set_filter(demod->filter.out,
 	     demod->filter.low/demod->output.samprate,

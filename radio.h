@@ -1,4 +1,4 @@
-// $Id: radio.h,v 1.95 2018/12/22 10:12:18 karn Exp karn $
+// $Id: radio.h,v 1.96 2019/01/08 06:18:13 karn Exp karn $
 // Internal structures and functions of the 'radio' program
 // Nearly all internal state is in the 'demod' structure
 // More than one can exist in the same program,
@@ -65,11 +65,10 @@ struct packet {
 struct demod {
   struct {
     char description[256]; // Free-form text
-    int data_fd;       // Socket for raw incoming I/Q data
-    int ctl_fd;   // Socket for commands to front end
-    int status_fd; // Socket for status from front end
+    int data_fd;           // Socket for raw incoming I/Q data
+    int ctl_fd;            // Socket for commands to front end
+    int status_fd;         // Socket for status from front end
 
-    char dest_address_text[256];
     struct sockaddr_storage metadata_source_address; // Source of SDR metadata
     struct sockaddr_storage metadata_dest_address;   // Dest of metadata (typically multicast)
     uint64_t metadata_packets;
@@ -145,7 +144,6 @@ struct demod {
   // Run output half of pre-detection filter and pass through AM, FM or linear demodulator
   // The AM and linear demodulators send baseband audio directly to the network;
   // the FM demodulator performs further audio filtering
-  pthread_t am_demod_thread;
   pthread_t fm_demod_thread;
   pthread_t linear_demod_thread;
 
@@ -194,16 +192,14 @@ struct demod {
     // RTP network streaming
     int silent; // last packet was suppressed (used to generate RTP mark bit)
     struct rtp_state rtp;
-    char data_dest_address_text[256];
-    char metadata_dest_address_text[256];
     struct sockaddr_storage metadata_source_address; // Source of SDR metadata
     struct sockaddr_storage metadata_dest_address;   // Dest of metadata (typically multicast)
     uint64_t metadata_packets;
     
-    struct sockaddr_storage data_source_address; // Source of I/Q data
-    struct sockaddr_storage data_dest_address;   // Dest of I/Q data (typically multicast)
+    struct sockaddr_storage data_source_address; // Source address of our data output
+    struct sockaddr_storage data_dest_address;   // Dest of our data outputg (typically multicast)
     
-    int data_fd;         // File descriptor for multicast output
+    int data_fd;    // File descriptor for multicast output
     int rtcp_fd;    // File descriptor for RTP control protocol
     int status_fd;  // File descriptor for receiver status
     int ctl_fd;     // File descriptor for receiving user commands

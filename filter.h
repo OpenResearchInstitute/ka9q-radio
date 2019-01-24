@@ -1,4 +1,4 @@
-// $Id: filter.h,v 1.18 2018/12/29 06:14:17 karn Exp karn $
+// $Id: filter.h,v 1.19 2019/01/07 00:08:15 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -63,6 +63,7 @@ struct filter_in {
   unsigned int blocknum;                      // Data sequence number, used to notify slaves of new data
   pthread_mutex_t filter_mutex;      // Synchronization for sequence number
   pthread_cond_t filter_cond;
+  int fd;                            // Experimental: fd for shared frequency representation file
 
 };
 struct filter_out {
@@ -83,6 +84,7 @@ int window_filter(int L,int M,complex float *response,float beta);
 int window_rfilter(int L,int M,complex float *response,float beta);
 
 struct filter_in *create_filter_input(unsigned int const L,unsigned int const M, enum filtertype const in_type);
+struct filter_in *create_filter_input_file(unsigned int const L,unsigned int const M, enum filtertype const in_type,char *file);
 struct filter_out *create_filter_output(struct filter_in * master,complex float * response,unsigned int decimate, enum filtertype out_type);
 int execute_filter_input(struct filter_in *);
 int execute_filter_output(struct filter_out *,int);

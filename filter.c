@@ -1,4 +1,4 @@
-// $Id: filter.c,v 1.36 2019/01/10 11:43:19 karn Exp karn $
+// $Id: filter.c,v 1.37 2019/01/14 12:41:57 karn Exp karn $
 // General purpose filter package using fast convolution (overlap-save)
 // and the FFTW3 FFT package
 // Generates transfer functions using Kaiser window
@@ -14,6 +14,9 @@
 #include <complex.h>
 #include <math.h>
 #include <fftw3.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include "misc.h"
 #include "dsp.h"
@@ -80,6 +83,69 @@ struct filter_in *create_filter_input(unsigned int const L,unsigned int const M,
   case REAL:
     master->fdomain = fftwf_alloc_complex(N/2+1); // Only N/2+1 will be filled in by the r2c FFT
     assert(master->fdomain != NULL);
+    master->input_buffer.r = fftwf_alloc_real(N);
+    assert(malloc_usable_size(master->input_buffer.r) >= N * sizeof(*master->input_buffer.r));
+    memset(master->input_buffer.r,0,(M-1)*sizeof(*master->input_buffer.r)); // Clear earlier state
+    master->input.r = master->input_buffer.r + M - 1;
+    master->fwd_plan = fftwf_plan_dft_r2c_1d(N,master->input_buffer.r,master->fdomain,FFTW_ESTIMATE);
+    break;
+  }
+  return master;
+}
+// Experimental version of create_filter_input that puts frequency domain data in file
+struct filter_in *create_filter_input_file(unsigned int const L,unsigned int const M, enum filtertype const in_type, char *file){
+
+  int const N = L + M - 1;
+
+  struct filter_in * const master = calloc(1,sizeof(*master));
+
+  pthread_mutex_init(&master->filter_mutex,NULL);
+  master->blocknum = 0;
+  pthread_cond_init(&master->filter_cond,NULL);
+
+  master->in_type = in_type;
+  master->ilen = L;
+  master->impulse_length = M;
+
+  switch(in_type){
+  default:
+    fprintf(stderr,"Filter input type %d, assuming complex\n",in_type); // Note fall-thru
+  case COMPLEX:
+    master->fd = open(file,O_CREAT|O_TRUNC|O_RDWR,0644);
+#if __linux__
+    fallocate(master->fd,0,0LL,sizeof(complex float)*N);
+#else    
+    lseek(master->fd,sizeof(complex float)*N,SEEK_SET);
+    write(master->fd,&master->impulse_length,sizeof(master->impulse_length)); // arbitrary write to extend file
+    //    posix_fallocate(master->fd,0,0LL,sizeof(complex float)*N); // Not on osx
+#endif
+    master->fdomain = mmap(NULL,sizeof(complex float)*N,
+			   PROT_READ|PROT_WRITE,
+			   MAP_FILE|MAP_SHARED,
+			   master->fd,0LL);
+
+    assert(master->fdomain != MAP_FAILED);
+    master->input_buffer.c = fftwf_alloc_complex(N);
+    assert(malloc_usable_size(master->input_buffer.c) >= N * sizeof(*master->input_buffer.c));
+    memset(master->input_buffer.c,0,(M-1)*sizeof(*master->input_buffer.c)); // Clear earlier state
+    master->input.c = master->input_buffer.c + M - 1;
+    master->fwd_plan = fftwf_plan_dft_1d(N,master->input_buffer.c,master->fdomain,FFTW_FORWARD,FFTW_ESTIMATE);
+    break;
+  case REAL:
+    master->fd = open(file,O_CREAT|O_TRUNC|O_RDWR,0644);
+#if __linux__
+    fallocate(master->fd,0,0LL,sizeof(complex float)*(N/2+1));
+
+#else    
+    lseek(master->fd,sizeof(complex float)*(N/2+1),SEEK_SET);
+    write(master->fd,&master->impulse_length,sizeof(master->impulse_length)); // arbitrary write to extend file
+    // posix_fallocate(master->fd,0,0LL,sizeof(complex float)*(N/2+1)); // Not on osx
+#endif
+    master->fdomain = mmap(NULL,sizeof(complex float)*(N/2+1),
+			   PROT_READ|PROT_WRITE,
+			   MAP_FILE|MAP_SHARED,
+			   master->fd,0LL);
+    assert(master->fdomain != MAP_FAILED);
     master->input_buffer.r = fftwf_alloc_real(N);
     assert(malloc_usable_size(master->input_buffer.r) >= N * sizeof(*master->input_buffer.r));
     memset(master->input_buffer.r,0,(M-1)*sizeof(*master->input_buffer.r)); // Clear earlier state
