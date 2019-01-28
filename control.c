@@ -1,4 +1,4 @@
-// $Id: control.c,v 1.43 2019/01/08 06:20:20 karn Exp karn $
+// $Id: control.c,v 1.44 2019/01/24 13:25:14 karn Exp karn $
 // Thread to display internal state of 'radio' and accept single-letter commands
 // Why are user interfaces always the biggest, ugliest and buggiest part of any program?
 // Copyright 2017 Phil Karn, KA9Q
@@ -244,7 +244,7 @@ int main(int argc,char *argv[]){
   struct control * const demod = &Demod;
   // Set all floating point fields to NAN so they won't be displayed unless set at least once
   demod->sdr.calibration = demod->sdr.status.frequency = demod->sdr.DC_i = demod->sdr.DC_q =
-    demod->sdr.sinphi = demod->sdr.imbalance = demod->sdr.min_IF = demod->sdr.max_IF = NAN;
+    demod->sdr.sinphi = demod->sdr.imbalance = demod->sdr.min_IF = demod->sdr.max_IF = demod->sdr.ad_level = NAN;
 
   demod->tune.freq = demod->tune.shift = NAN;
   demod->tune.second_LO = NAN;
@@ -652,8 +652,10 @@ int main(int argc,char *argv[]){
     col = 1;
     mvwprintw(sdr,row,col,"%'23d Hz",demod->sdr.status.samprate); // Nominal
     mvwaddstr(sdr,row++,col,"Samprate");
-    mvwprintw(sdr,row,col,"%'23.1f dBFS",demod->sdr.ad_level);
-    mvwprintw(sdr,row++,col,"A/D Level");
+    if(!isnan(demod->sdr.ad_level)){
+      mvwprintw(sdr,row,col,"%'23.1f dBFS",demod->sdr.ad_level);
+      mvwprintw(sdr,row++,col,"A/D Level");
+    }
     mvwprintw(sdr,row++,col,"Analog gain    %02d+%02d+%02d dB",demod->sdr.status.lna_gain,
 	      demod->sdr.status.mixer_gain,
 	      demod->sdr.status.if_gain);
