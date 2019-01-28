@@ -1,4 +1,4 @@
-// $Id: modulate.c,v 1.15 2018/12/29 06:14:17 karn Exp karn $
+// $Id: modulate.c,v 1.16 2019/01/14 13:03:14 karn Exp karn $
 // Simple I/Q AM modulator - will eventually support other modes
 // Copyright 2017, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -90,6 +90,11 @@ int main(int argc,char *argv[]){
     carrier = 1;
     high = +3000;
     low = 0;
+  } else if(strcasecmp(modtype,"dsb") == 0){
+    // Double sideband AM, no carrier
+    carrier = 0;
+    high = +5000;
+    low = -5000;
   } else {
     fprintf(stderr,"Unknown modulation %s\n",modtype);
     exit(1);
