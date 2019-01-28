@@ -1,4 +1,4 @@
-// $Id: osc.c,v 1.4 2019/01/14 10:32:24 karn Exp karn $
+// $Id: osc.c,v 1.5 2019/01/14 12:41:57 karn Exp karn $
 // Complex oscillator object routines
 
 #define _GNU_SOURCE 1
@@ -86,7 +86,7 @@ void init_pll(struct pll *pll,float nf,float damping,double freq,float samprate)
 
 
 // Step the PLL through one sample, return VCO control voltage
-// Initial implementation, will probably be slow because of the atan2() and sincos() for every sample
+// Initial implementation, will probably be slow because of the sincos() for every sample
 // Return PLL freq in cycles/sample
 float run_pll(struct pll *pll,float phase){
 
