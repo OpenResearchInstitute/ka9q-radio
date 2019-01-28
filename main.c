@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.151 2019/01/24 05:00:00 karn Exp karn $
+// $Id: main.c,v 1.152 2019/01/24 13:25:14 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -316,6 +316,8 @@ int main(int argc,char *argv[]){
     pthread_create(&rtcp_thread,NULL,rtcp_send,demod);
 
 
+  demod->sdr.gain_factor = 1; // In case it's never sent by front end
+  
   // Create filter now that we know the parameters
   // FFT and filter sizes now computed from specified block duration and sample rate
   // L = data block size
