@@ -1,4 +1,4 @@
-// $Id: linear.c,v 1.44 2019/01/07 00:07:32 karn Exp karn $
+// $Id: linear.c,v 1.45 2019/01/14 10:33:42 karn Exp karn $
 
 // General purpose linear demodulator
 // Handles USB/IQ/CW/etc, basically all modes but FM and envelope-detected AM
@@ -81,10 +81,12 @@ void *demod_linear(void *arg){
       for(int n=0;n<filter->olen;n++){
 	complex float s = filter->output.c[n];
 	s *= conjf(pll.vco.phasor);
-	float phase = cargf(s); // Phase detector - could be more efficient
-	if(demod->opt.square)
-	  phase *= 2;
-
+	float phase;
+	if(demod->opt.square){
+	  phase = cargf(s*s);
+	} else {
+	  phase = cargf(s);
+	}
 	run_pll(&pll,phase);
 	filter->output.c[n] = s;
 	
