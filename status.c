@@ -15,6 +15,14 @@
 #include "misc.h"
 #include "status.h"
 
+union result {
+  uint64_t ll;
+  uint32_t l;
+  float f;
+  double d;
+};
+
+
 // Encode 64-bit integer, byte swapped, leading zeroes suppressed
 int encode_int64(unsigned char **buf,enum status_type type,uint64_t x){
   unsigned char *cp = *buf;
@@ -73,19 +81,18 @@ int encode_float(unsigned char **buf,enum status_type type,float x){
   if(isnan(x))
     return 0; // Never encode a NAN
 
-  uint32_t data;
-
-  memcpy(&data,&x,sizeof(data));
-  return encode_int32(buf,type,(uint64_t)data);
+  union result r;
+  r.f = x;
+  return encode_int32(buf,type,r.l);
 }
 
 int encode_double(unsigned char **buf,enum status_type type,double x){
   if(isnan(x))
     return 0; // Never encode a NAN
 
-  uint64_t data;
-  memcpy(&data,&x,sizeof(data));
-  return encode_int64(buf,type,data);
+  union result r;
+  r.d = x;
+  return encode_int64(buf,type,r.ll);
 }
 
 // Encode byte string without byte swapping
@@ -122,12 +129,6 @@ uint64_t decode_int(unsigned char *cp,int len){
   return result;
 }
 
-union result {
-  uint64_t i;
-  float f;
-  double d;
-};
-
 
 float decode_float(unsigned char *cp,int len){
   if(len == 0)
@@ -137,7 +138,7 @@ float decode_float(unsigned char *cp,int len){
     return (float)decode_double(cp,len);
 
   union result r;
-  r.i = decode_int(cp,len);
+  r.ll = decode_int(cp,len);
   return r.f;
 }
 
@@ -149,7 +150,7 @@ double decode_double(unsigned char *cp,int len){
     return (double)decode_float(cp,len);
 
   union result r;
-  r.i = decode_int(cp,len);
+  r.ll = decode_int(cp,len);
   return r.d;
 }
 
