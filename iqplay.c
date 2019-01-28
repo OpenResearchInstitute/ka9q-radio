@@ -1,4 +1,4 @@
-// $Id: iqplay.c,v 1.30 2018/12/02 09:16:45 karn Exp karn $
+// $Id: iqplay.c,v 1.31 2019/01/28 10:52:12 karn Exp karn $
 // Read from IQ recording, multicast in (hopefully) real time
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1 // allow bind/connect/recvfrom without casting sockaddr_in6
@@ -41,104 +41,16 @@ struct sockaddr_storage Output_metadata_source_address;
 uint64_t Commands;
 struct state State[256];
 uint64_t Output_metadata_packets;
-uint32_t Ssrc;
 float Power;
 struct rtp_state Rtp_state;
-
 int Status_sock = -1;
 int Rtp_sock = -1; // Socket handle for sending real time stream
 int Nctl_sock = -1;
 
 
-
 void send_iqplay_status(int full);
-
-// Play I/Q file with descriptor 'fd' on network socket 'sock'
-int playfile(int sock,int fd,int blocksize){
-  struct status status;
-  memset(&status,0,sizeof(status));
-  status.samprate = Samprate; // Not sure this is useful
-  status.frequency = Default_frequency;
-  attrscanf(fd,"samplerate","%ld",&status.samprate);
-  attrscanf(fd,"frequency","%lf",&status.frequency);
-  if(attrscanf(fd,"source_timestamp","%lld",&status.timestamp) == -1){
-    double unixstarttime;
-    attrscanf(fd,"unixstarttime","%lf",&unixstarttime);
-    // Convert decimal seconds from UNIX epoch to integer nanoseconds from GPS epoch
-    status.timestamp = (unixstarttime  - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000000LL;
-  }
-  if(Verbose)
-    fprintf(stderr,": start time %s, %'d samp/s, RF LO %'.1lf Hz\n",lltime(status.timestamp),status.samprate,status.frequency);
-
-
-  struct rtp_header rtp_header;
-  memset(&rtp_header,0,sizeof(rtp_header));
-  rtp_header.version = RTP_VERS;
-  rtp_header.type = PCM_STEREO_PT;
-  
-  struct timeval start_time;
-  gettimeofday(&start_time,NULL);
-
-  rtp_header.ssrc = Rtp_state.ssrc;
-  
-  // microsec between packets. Double precision is used to avoid small errors that could
-  // accumulate over time
-  double dt = (1000000. * blocksize) / status.samprate;
-  // Microseconds since start for next scheduled transmission; will transmit first immediately
-  double sked_time = 0;
-  
-  while(1){
-    rtp_header.seq = Rtp_state.seq++;
-    rtp_header.timestamp = Rtp_state.timestamp;
-    Rtp_state.timestamp += blocksize;
-    
-    // Is it time yet?
-    while(1){
-      // Microseconds since start
-      struct timeval tv,diff;
-      gettimeofday(&tv,NULL);
-      timersub(&tv,&start_time,&diff);
-      double rt = 1000000. * diff.tv_sec + diff.tv_usec;
-      if(rt >= sked_time)
-	break;
-      if(sked_time > rt + 100){
-	// Use care here, s is unsigned
-	useconds_t s = (sked_time - rt) - 100; // sleep until 100 microseconds before
-	usleep(s);
-      }
-    }
-    unsigned char output_buffer[4*blocksize + 256]; // will this allow for largest possible RTP header??
-    unsigned char *dp = output_buffer;
-    dp = hton_rtp(dp,&rtp_header);
-
-
-    if(pipefill(fd,dp,4*blocksize) <= 0)
-      break;
-
-    signed short *sp = (signed short *)dp;
-    float p = 0;
-    for(int n=0; n < 2*blocksize; n ++){
-      p += (float)(*sp) * (float)(*sp);
-      *sp = htons(*sp);
-      sp++;
-    }
-    Power = p / (32767. * 32767. * blocksize);
-
-    dp = (unsigned char *)sp;
-
-    int length = dp - output_buffer;
-    if(send(sock,output_buffer,length,0) == -1)
-      perror("send");
-    
-    Rtp_state.packets++;
-    // Update time of next scheduled transmission
-    sked_time += dt;
-    // Update nanosecond timestamp
-    status.timestamp += blocksize * (long long)1e9 / status.samprate;
-  }
-  return 0;
-}
-
+int playfile(int,int,int);
+void *ncmd(void *);
 
 
 struct option const Options[] =
@@ -230,7 +142,7 @@ int main(int argc,char *argv[]){
     }
   }
   if(argc < optind){
-    fprintf(stderr,"Usage: %s [options] [filename]\n",argv[0]);
+    fprintf(stderr,"Usage: %s [options] [filename|-]\n",argv[0]);
     exit(1);
   }
 
@@ -242,13 +154,14 @@ int main(int argc,char *argv[]){
   signal(SIGPIPE,SIG_IGN);
 
   pthread_t status;
-  void *ncmd(void *);
+
   pthread_create(&status,NULL,ncmd,NULL);
 
   if(optind == argc){
     // No file arguments, read from stdin
     if(Verbose)
       fprintf(stderr,"Transmitting from stdin");
+    Description = "stdin";
     playfile(Rtp_sock,0,Blocksize);
   } else {
     for(int i=optind;i<argc;i++){
@@ -260,6 +173,7 @@ int main(int argc,char *argv[]){
       }
       if(Verbose)
 	fprintf(stderr,"Transmitting %s",argv[i]);
+      Description = argv[i];
       playfile(Rtp_sock,fd,Blocksize);
       close(fd);
       fd = -1;
@@ -269,6 +183,93 @@ int main(int argc,char *argv[]){
   Rtp_sock = -1;
   exit(0);
 }
+
+// Play I/Q file with descriptor 'fd' on network socket 'sock'
+int playfile(int sock,int fd,int blocksize){
+  struct status status;
+  memset(&status,0,sizeof(status));
+  status.samprate = Samprate; // Not sure this is useful
+  status.frequency = Default_frequency;
+  attrscanf(fd,"samplerate","%ld",&status.samprate);
+  attrscanf(fd,"frequency","%lf",&status.frequency);
+  if(attrscanf(fd,"source_timestamp","%lld",&status.timestamp) == -1){
+    double unixstarttime;
+    attrscanf(fd,"unixstarttime","%lf",&unixstarttime);
+    // Convert decimal seconds from UNIX epoch to integer nanoseconds from GPS epoch
+    status.timestamp = (unixstarttime  - UNIX_EPOCH + GPS_UTC_OFFSET) * 1000000000LL;
+  }
+  if(Verbose)
+    fprintf(stderr,": start time %s, %'d samp/s, RF LO %'.1lf Hz\n",lltime(status.timestamp),status.samprate,status.frequency);
+
+
+  struct rtp_header rtp_header;
+  memset(&rtp_header,0,sizeof(rtp_header));
+  rtp_header.version = RTP_VERS;
+  rtp_header.type = PCM_STEREO_PT;
+  
+  struct timeval start_time;
+  gettimeofday(&start_time,NULL);
+
+  rtp_header.ssrc = Rtp_state.ssrc;
+  
+  // microsec between packets. Double precision is used to avoid small errors that could
+  // accumulate over time
+  double dt = (1000000. * blocksize) / status.samprate;
+  // Microseconds since start for next scheduled transmission; will transmit first immediately
+  double sked_time = 0;
+
+  while(1){
+    rtp_header.seq = Rtp_state.seq++;
+    rtp_header.timestamp = Rtp_state.timestamp;
+    Rtp_state.timestamp += blocksize;
+    
+    // Is it time yet?
+    while(1){
+      // Microseconds since start
+      struct timeval tv,diff;
+      gettimeofday(&tv,NULL);
+      timersub(&tv,&start_time,&diff);
+      double rt = 1000000. * diff.tv_sec + diff.tv_usec;
+      if(rt >= sked_time)
+	break;
+      if(sked_time > rt + 100){
+	// Use care here, s is unsigned
+	useconds_t s = (sked_time - rt) - 100; // sleep until 100 microseconds before
+	usleep(s);
+      }
+    }
+    unsigned char output_buffer[4*blocksize + 256]; // will this allow for largest possible RTP header??
+    unsigned char *dp = output_buffer;
+    dp = hton_rtp(dp,&rtp_header);
+
+
+    if(pipefill(fd,dp,4*blocksize) <= 0)
+      break;
+
+    signed short *sp = (signed short *)dp;
+    float p = 0;
+    for(int n=0; n < 2*blocksize; n ++){
+      p += (float)(*sp) * (float)(*sp);
+      *sp = htons(*sp);
+      sp++;
+    }
+    Power = p / (32767. * 32767. * blocksize);
+
+    dp = (unsigned char *)sp;
+
+    int length = dp - output_buffer;
+    if(send(sock,output_buffer,length,0) == -1)
+      perror("send");
+    
+    Rtp_state.packets++;
+    // Update time of next scheduled transmission
+    sked_time += dt;
+    // Update nanosecond timestamp
+    status.timestamp += blocksize * (long long)1e9 / status.samprate;
+  }
+  return 0;
+}
+
 
 // Thread to send metadata and process commands
 void *ncmd(void *arg){
