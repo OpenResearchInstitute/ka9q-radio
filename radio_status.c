@@ -401,6 +401,8 @@ void decode_sdr_status(struct demod *demod,unsigned char *buffer,int length){
 	set_osc(&demod->second_LO,demod->tune.second_LO/nsamprate,0);
 	set_osc(&demod->doppler,demod->tune.doppler/nsamprate,demod->tune.doppler_rate/((double)nsamprate*nsamprate));
 	set_osc(&demod->shift,demod->tune.shift/nsamprate,0);
+	demod->sdr.min_IF = -nsamprate/2; // in case they're not set explicitly
+	demod->sdr.max_IF = +nsamprate/2;
 
 	demod->filter.decimate = demod->input.samprate / demod->output.samprate;
 	if(demod->filter.out){
