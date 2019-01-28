@@ -1,4 +1,4 @@
-// $Id: radio.c,v 1.124 2019/01/01 07:26:16 karn Exp karn $
+// $Id: radio.c,v 1.125 2019/01/24 13:25:14 karn Exp karn $
 // Core of 'radio' program - control LOs, set frequency/mode, etc
 // Copyright 2018, Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -145,13 +145,14 @@ void *proc_samples(void *arg){
 	}
       }
       break;
-    case PCM_STEREO_PT:      // Two 16-bit signed integers, BIG ENDIAN (network order)
+    case PCM_STEREO_PT:      // Two 16-bit signed integers, **BIG ENDIAN** (network order)
       {
 	signed short *sp = (signed short *)dp;
 	float gain = SCALE16 * demod->sdr.gain_factor;
 	for(int i=0; i<sampcount; i++){
-	  __real__ sampbuf[i] = gain * ntohs(*sp++);
-	  __imag__ sampbuf[i] = gain * ntohs(*sp++);
+	  // ntohs() returns UNSIGNED so the cast is necessary!
+	  __real__ sampbuf[i] = gain * (signed short)ntohs(*sp++);
+	  __imag__ sampbuf[i] = gain * (signed short)ntohs(*sp++);
 	}
       }
       break;
