@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.141 2019/01/20 02:00:03 karn Exp karn $
+# $Id: Makefile,v 1.142 2019/01/24 13:25:14 karn Exp karn $
 COPTS=-g -DNDEBUG=1 -O3 -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 #COPTS=-g -march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations
 CFLAGS=$(COPTS) $(INCLUDES)
@@ -91,7 +91,7 @@ aprsfeed.o: aprsfeed.c ax25.h multicast.h misc.h
 control.o: control.c control.h osc.h sdr.h  misc.h filter.h bandplan.h multicast.h dsp.h status.h
 funcube.o: funcube.c fcd.h fcdhidcmd.h hidapi.h sdr.h misc.h multicast.h status.h dsp.h
 hackrf.o: hackrf.c sdr.h misc.h multicast.h decimate.h status.h dsp.h
-iqplay.o: iqplay.c misc.h radio.h osc.h sdr.h multicast.h attr.h
+iqplay.o: iqplay.c misc.h radio.h osc.h sdr.h multicast.h attr.h modes.h status.h dsp.h
 iqrecord.o: iqrecord.c radio.h osc.h sdr.h multicast.h attr.h
 metadump.o: metadump.c multicast.h dsp.h status.h misc.h
 modulate.o: modulate.c misc.h filter.h radio.h osc.h sdr.h
