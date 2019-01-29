@@ -1,4 +1,4 @@
-// $Id: multicast.c,v 1.38 2018/12/28 10:17:18 karn Exp karn $
+// $Id: multicast.c,v 1.40 2019/01/01 03:32:33 karn Exp karn $
 // Multicast socket and RTP utility routines
 // Copyright 2018 Phil Karn, KA9Q
 
@@ -155,7 +155,7 @@ char *Default_mcast_iface;
 int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int offset){
   int fd = -1;
   char *iface = Default_mcast_iface;
-  char host[256]; // Maximum legal DNS name length
+  char host[256]; // Maximum legal DNS name length?
 
   struct sockaddr_storage sbuf;
   memset(&sbuf,0,sizeof(sbuf));
@@ -216,9 +216,10 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
   }
   if(sock == NULL)
     return -1; // Neither target or sock specified
-  if((fd = socket(sock->sa_family,SOCK_DGRAM,0)) == -1)
+  if((fd = socket(sock->sa_family,SOCK_DGRAM,0)) == -1){
+    perror("setup_mcast socket");
     return -1;
-      
+  }      
   soptions(fd,ttl);
   // Strictly speaking, it is not necessary to join a multicast group to which we only send.
   // But this creates a problem with "smart" switches that do IGMP snooping.
@@ -263,11 +264,13 @@ int setup_mcast(char const *target,struct sockaddr *sock,int output,int ttl,int 
       freeifaddrs(ifap);
     }
     if(connect(fd,sock,sizeof(struct sockaddr)) != 0){
+      perror("setup_mcast connect");
       close(fd);
       return -1;
     }
   } else { // input
     if((bind(fd,sock,sizeof(struct sockaddr)) != 0)){
+      perror("setup_mcast bind");
       close(fd);
       return -1;
     }
