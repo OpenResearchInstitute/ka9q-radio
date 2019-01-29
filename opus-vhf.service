@@ -1,10 +1,10 @@
-# $Id: opus-vhf.service,v 1.6 2018/12/17 00:46:09 karn Exp karn $
+# $Id: opus-vhf.service,v 1.7 2019/01/01 09:37:28 karn Exp karn $
 # Systemd startup module for PCM->Opus transcoder for VHF audio
 # Phil Karn, KA9Q Aug 2018
 
 [Unit]
 Description=VHF opus transcoder
-Requires=multi-user.target
+Requires=network-online.target
 
 [Service]
 Nice=-10
@@ -12,6 +12,7 @@ Type=simple
 ExecStart=/usr/local/bin/opus --iface eth0 --pcm-in pcm.vhf.mcast.local --opus-out opus.vhf.mcast.local
 DynamicUser=1
 Restart=always
+RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+#WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-# $Id: hackrf0.service,v 1.10 2018/12/17 00:46:09 karn Exp karn $
+# $Id: hackrf0.service,v 1.11 2018/12/22 02:29:21 karn Exp karn $
 # Systemd service file for KA9Q's HackRF One daemon
 # Note - this is a rather compute intensive program
 # Phil Karn, KA9Q, Aug 2018
@@ -7,8 +7,6 @@
 Description=HackRF 0 daemon
 After=network-online.target
 Requires=network-online.target
-After=multi-user.target
-Requires=multi-user.target
 
 [Service]
 Nice=-10
@@ -21,7 +19,7 @@ RuntimeDirectoryMode=0755
 ExecStart=/usr/local/bin/hackrf --device 0 --status-out sdr.hackrf.mcast.local,eth0 --pcm-out iq.hackrf.mcast.local,eth0 --samprate 384000 --decimate 16 '2m/70cm/23cm omni'
 PIDFile=/run/hackrf0/pid
 Restart=always
-RestartSec=1
+RestartSec=5
 
 [Install]
 #WantedBy=multi-user.target

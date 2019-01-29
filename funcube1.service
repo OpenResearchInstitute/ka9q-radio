@@ -1,4 +1,4 @@
-# $Id: funcube1.service,v 1.13 2018/12/17 00:46:09 karn Exp karn $
+# $Id: funcube1.service,v 1.14 2018/12/22 02:29:21 karn Exp karn $
 # Systemd unit to start up funcube daemon for funcube dongle 1
 # Phil Karn, KA9Q Aug 2018
 
@@ -8,8 +8,6 @@ After=sound.target
 Requires=sound.target
 After=network-online.target
 Requires=network-online.target
-After=multi-user.target
-Requires=multi-user.target
 
 [Service]
 Nice=-10
@@ -23,7 +21,7 @@ WorkingDirectory=/tmp
 ExecStart=/usr/local/bin/funcube --daemonize --device 1 --status-out sdr.vhf.mcast.local,eth0 --pcm-out iq.vhf.mcast.local,eth0
 PIDFile=/run/funcube1/pid
 Restart=always
-RestartSec=1
+RestartSec=5
 
 [Install]
 #WantedBy=multi-user.target
