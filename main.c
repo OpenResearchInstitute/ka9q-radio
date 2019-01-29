@@ -1,4 +1,4 @@
-// $Id: main.c,v 1.152 2019/01/24 13:25:14 karn Exp karn $
+// $Id: main.c,v 1.153 2019/01/28 10:50:50 karn Exp karn $
 // Read complex float samples from multicast stream (e.g., from funcube.c)
 // downconvert, filter, demodulate, optionally compress and multicast output
 // Copyright 2017, Phil Karn, KA9Q, karn@ka9q.net
@@ -438,5 +438,8 @@ void *rtcp_send(void *arg){
 }
 static void closedown(int a){
   fprintf(stderr,"Received signal %d, exiting\n",a);
-  exit(1);
+  if(a == SIGTERM)
+    exit(0); // Return success when terminated by systemd
+  else
+    exit(1);
 }
