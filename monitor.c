@@ -1,4 +1,4 @@
-// $Id: monitor.c,v 1.90 2019/01/01 09:31:03 karn Exp karn $
+// $Id: monitor.c,v 1.91 2019/01/09 01:45:52 karn Exp karn $
 // Listen to multicast group(s), send audio to local sound device via portaudio
 // Copyright 2018 Phil Karn, KA9Q
 #define _GNU_SOURCE 1
@@ -19,6 +19,7 @@
 #include <ncurses.h>
 #include <locale.h>
 #include <signal.h>
+#include <getopt.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -58,7 +59,7 @@ struct session {
   long long start_rptr;
   long long timestamp_upper; // Upper bits of virtual timestamp (if greater than 2^32)
   long long wptr;
-  int playout;
+  int playout;              // Initial playout delay, samples
 
   OpusDecoder *opus;        // Opus codec decoder handle, if needed
   int opus_bandwidth;       // Opus stream audio bandwidth
@@ -80,7 +81,6 @@ struct session {
 // Global config variables
 #define SAMPRATE 48000        // Too hard to handle other sample rates right now
 #define SAMPPCALLBACK (SAMPRATE/50)     // 20 ms @ 48 kHz
-#define PLAYOUT (SAMPRATE/50) // Nominal playout buffer delay - 20 ms
 #define MAX_MCAST 20          // Maximum number of multicast addresses
 
 #define BUFFERSIZE (1<<19)    // about 10.92 sec at 48 kHz stereo - must be power of 2!!
@@ -92,7 +92,7 @@ int Update_interval = 100;    // Default time in ms between display updates
 int List_audio;               // List audio output devices and exit
 int Verbose;                  // Verbosity flag (currently unused)
 int Quiet;                    // Disable curses
-int Mcast_ttl = 0;            // We don't transmit
+int Playout = SAMPRATE/10;    // 100 millisecond playout delay by default
 
 // Global variables
 char *Mcast_address_text[MAX_MCAST]; // Multicast address(es) we're listening to
@@ -109,6 +109,8 @@ struct session *Current;
 pthread_t Display_task;
 float Output_buffer[BUFFERSIZE][2]; // Decoded audio output, written by processing thread and read by PA callback
 volatile long long Rptr;                // Unwrapped read pointer (will overflow in 6 million years)
+PaTime Last_callback_time;
+
 
 void cleanup(void);
 void closedown(int);
@@ -120,6 +122,20 @@ static int pa_callback(const void *,void *,unsigned long,const PaStreamCallbackT
 void *decode_task(void *x);
 void *sockproc(void *arg);
 
+static char Optstring[] = "LR:vI:qu:p:";
+static struct  option Options[] = {
+   {"list-audio", no_argument, NULL, 'L'},
+   {"audio-dev", required_argument, NULL, 'R'},
+   {"verbose", no_argument, NULL, 'v'},
+   {"pcm_in", required_argument, NULL, 'I'},
+   {"opus_in", required_argument, NULL, 'I'},
+   {"quiet", no_argument, NULL, 'q'},
+   {"update", required_argument, NULL, 'u'},
+   {"playout", required_argument, NULL, 'p'},
+   {NULL, 0, NULL, 0},
+};
+
+
 int main(int argc,char * const argv[]){
   // Try to improve our priority, then drop root
   int prio = getpriority(PRIO_PROCESS,0);
@@ -130,7 +146,7 @@ int main(int argc,char * const argv[]){
   setlocale(LC_ALL,getenv("LANG"));
 
   int c;
-  while((c = getopt(argc,argv,"R:I:vLqu:")) != EOF){
+  while((c = getopt_long(argc,argv,Optstring,Options,NULL)) != -1){
     switch(c){
     case 'L':
       List_audio++;
@@ -152,6 +168,9 @@ int main(int argc,char * const argv[]){
       break;
     case 'u':
       Update_interval = strtol(optarg,NULL,0);
+      break;
+    case 'p':
+      Playout = strtol(optarg,NULL,0) * SAMPRATE/1000;
       break;
     default:
       fprintf(stderr,"Usage: %s [-v] [-q] [-L] [-R audio device] -I mcast_address [-I mcast_address]\n",argv[0]);
@@ -280,7 +299,7 @@ void *sockproc(void *arg){
   char *mcast_address_text = (char *)arg;
 
   // Set up multicast input
-  int input_fd = setup_mcast(mcast_address_text,NULL,0,Mcast_ttl,0);
+  int input_fd = setup_mcast(mcast_address_text,NULL,0,0,0); // We don't transmit, so no Mcast_ttl
   if(input_fd == -1){
     fprintf(stderr,"Can't set up input %s\n",mcast_address_text);
     pthread_exit(NULL);
@@ -334,6 +353,7 @@ void *sockproc(void *arg){
       sp->dest = mcast_address_text;
       sp->start_rptr = Rptr;
       sp->reset = 1;
+      sp->rtp_state.seq = pkt->rtp.seq;
       
       pthread_mutex_init(&sp->qmutex,NULL);
       pthread_cond_init(&sp->qcond,NULL);
@@ -372,6 +392,16 @@ static int pa_callback(const void *inputBuffer, void *outputBuffer,
   if(!outputBuffer)
     return paAbort; // can this happen??
   
+  if(Last_callback_time + 1.0 < timeInfo->currentTime){
+    // We've been asleep for >1 sec. Reset everybody
+    pthread_mutex_lock(&Sess_mutex);
+    for(struct session *sp = Session; sp; sp = sp->next)
+      sp->reset = 1;
+    pthread_mutex_unlock(&Sess_mutex);
+  }
+
+  Last_callback_time = timeInfo->currentTime;
+
   assert(framesPerBuffer < BUFFERSIZE/2); // Make sure ring buffer is big enough
   float *out = outputBuffer;
   // First chunk - lesser of total amount needed or remainder of read buffer before wraparound
@@ -437,6 +467,12 @@ void *decode_task(void *arg){
     sp->type = pkt->rtp.type;
     sp->packets++; // Count all packets, regardless of type
       
+    if(pkt->rtp.seq != sp->rtp_state.seq)
+      sp->rtp_state.drops++;
+
+    sp->rtp_state.seq = pkt->rtp.seq + 1;
+
+
     // Compute gains and delays for stereo imaging
     // -6dB for each channel in the center
     // when full to one side or the other, that channel is +6 dB and the other is -inf dB
@@ -463,7 +499,9 @@ void *decode_task(void *arg){
 
     sp->wptr = sp->start_rptr + sp->timestamp_upper + pkt->rtp.timestamp - sp->start_timestamp + sp->playout;
 
-    if(pkt->rtp.marker || sp->reset || sp->wptr > Rptr + BUFFERSIZE){
+    if(pkt->rtp.marker || sp->reset || sp->wptr > Rptr + BUFFERSIZE || sp->wptr < Rptr){
+      if(sp->wptr < Rptr)
+	sp->late++;
       // Reset at beginning of talk spurt or if system has been suspended
       if(sp->opus)
 	opus_decoder_ctl(sp->opus,OPUS_RESET_STATE); // Reset decoder
@@ -471,13 +509,8 @@ void *decode_task(void *arg){
       sp->start_rptr = Rptr;
       sp->start_timestamp = pkt->rtp.timestamp; // Resynch as if new stream
       sp->timestamp_upper = 0;
-      sp->playout = PLAYOUT;
+      sp->playout = Playout;
       sp->wptr = Rptr + sp->playout;
-    } else if(sp->wptr < Rptr){
-      // Increase playout when late - is this the right thing to do?
-      sp->late++;
-      sp->playout += Rptr - sp->wptr;
-      sp->wptr = Rptr;
     }
 
     unsigned int left = sp->wptr + left_delay;
