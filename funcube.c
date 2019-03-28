@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.75 2019/01/08 06:17:25 karn Exp karn $
+// $Id: funcube.c,v 1.76 2019/01/24 13:25:14 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -343,7 +343,7 @@ int main(int argc,char *argv[]){
     struct rtp_header rtp;
     memset(&rtp,0,sizeof(rtp));
     rtp.version = RTP_VERS;
-    rtp.type = IQ_PT;         // ordinarily dynamically allocated
+    rtp.type = PCM_STEREO_PT;
     rtp.ssrc = Rtp.ssrc;
     rtp.seq = Rtp.seq++;
     rtp.timestamp = Rtp.timestamp;
@@ -352,7 +352,6 @@ int main(int argc,char *argv[]){
     unsigned char *dp = buffer;
 
     dp = hton_rtp(dp,&rtp);
-    dp = hton_status(dp,&sdr->status); // This will soon be removed
     signed short *sampbuf = (signed short *)dp;
 
     // Read block of I/Q samples from A/D converter
@@ -368,7 +367,6 @@ int main(int argc,char *argv[]){
     
     for(int i=0; i<2*Blocksize; i += 2){
       complex float samp = CMPLXF(sampbuf[i],sampbuf[i+1]) * SCALE16;
-      //complex float samp = CMPLXF(sampbuf[i],sampbuf[i+1]);
 
       samp_sum += samp; // Accumulate average DC values
       samp -= sdr->DC;   // remove smoothed DC offset (which can be fractional)
@@ -388,10 +386,8 @@ int main(int argc,char *argv[]){
       // Correct phase
       __imag__ samp = secphi * cimagf(samp) - tanphi * crealf(samp);
       
-      sampbuf[i] = round(crealf(samp) * SHRT_MAX);
-      sampbuf[i+1] = round(cimagf(samp) * SHRT_MAX);
-      //sampbuf[i] = round(crealf(samp));
-      //sampbuf[i+1] = round(cimagf(samp));
+      sampbuf[i] = htons(round(crealf(samp) * SHRT_MAX));
+      sampbuf[i+1] = htons(round(cimagf(samp) * SHRT_MAX));
     }
 
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
