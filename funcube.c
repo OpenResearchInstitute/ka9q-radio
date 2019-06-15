@@ -1,4 +1,4 @@
-// $Id: funcube.c,v 1.76 2019/01/24 13:25:14 karn Exp karn $
+// $Id: funcube.c,v 1.77 2019/03/28 12:02:29 karn Exp karn $
 // Read from AMSAT UK Funcube Pro and Pro+ dongles
 // Multicast raw 16-bit I/Q samples
 // Accept control commands from UDP socket
@@ -386,8 +386,9 @@ int main(int argc,char *argv[]){
       // Correct phase
       __imag__ samp = secphi * cimagf(samp) - tanphi * crealf(samp);
       
-      sampbuf[i] = htons(round(crealf(samp) * SHRT_MAX));
-      sampbuf[i+1] = htons(round(cimagf(samp) * SHRT_MAX));
+      // Cast is necessary since htons() is a macro!
+      sampbuf[i] = htons((signed short)round(crealf(samp) * SHRT_MAX));
+      sampbuf[i+1] = htons((signed short)round(cimagf(samp) * SHRT_MAX));
     }
 
     if(send(Rtp_sock,buffer,dp - buffer,0) == -1){
