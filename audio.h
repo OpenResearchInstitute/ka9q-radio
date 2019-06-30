@@ -1,4 +1,4 @@
-// $Id: audio.h,v 1.32 2018/04/22 08:56:24 karn Exp karn $
+// $Id: audio.h,v 1.33 2018/07/04 01:50:00 karn Exp $
 // Variables and structures for KA9Q SDR receiver audio subsystem
 // Copyright 2017 Phil Karn, KA9Q
 

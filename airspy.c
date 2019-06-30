@@ -1,4 +1,4 @@
-// $Id: airspy.c,v 1.2 2019/01/20 11:32:28 karn Exp karn $
+// $Id: airspy.c,v 1.3 2019/01/24 13:25:14 karn Exp $
 // Read from Airspy SDR
 // Accept control commands from UDP socket
 #define _GNU_SOURCE 1
