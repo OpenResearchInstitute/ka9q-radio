@@ -11,7 +11,8 @@ On Raspbian, Debian or Ubuntu Linux (>= 16.04 LTS), run the following command (a
 
 ```
 apt install libfftw3-dev libbsd-dev libopus-dev libusb-1.0-0-dev libasound2-dev \ 
-       libncurses5-dev libncursesw5-dev libattr1-dev portaudio19-dev libhackrf-dev
+       libncurses5-dev libncursesw5-dev libattr1-dev portaudio19-dev libhackrf-dev \
+       libairspy-dev
 ```
 Please note that this will not work on Ubuntu 14.04 LTS, as its version of gcc is too old.
 
@@ -33,4 +34,3 @@ port install fftw-3 libopus portaudio hackrf-devel hackrf ncurses
 I haven't set up virgin systems to test the installs so I could easily have missed something. If so, please let me know.
 
 Phil Karn, KA9Q
-Updated 8 Sept 2018
